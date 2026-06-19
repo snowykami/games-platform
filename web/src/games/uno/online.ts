@@ -19,9 +19,22 @@ export interface UnoOnlinePlayer {
   handCount: number
 }
 
+export interface UnoPublicAction {
+  seq: number
+  type: 'play' | 'draw' | 'effect' | 'win'
+  actorId: string
+  actorName: string
+  targetId?: string
+  card?: UnoCard
+  count?: number
+  message: string
+}
+
 export interface UnoOnlineRoom {
   id: string
   hostUserId: string
+  variantKey: string
+  themeKey: string
   phase: UnoPhase
   players: UnoOnlinePlayer[]
   topCard?: UnoCard
@@ -29,8 +42,11 @@ export interface UnoOnlineRoom {
   currentPlayerId?: string
   direction: 1 | -1
   activeColor?: UnoColor
+  playableCardIds: string[]
   winnerId?: string
   log: Array<{ id: string, text: string }>
+  actionSeq: number
+  recentActions: UnoPublicAction[]
 }
 
 const cardSchema = z.object({
@@ -43,6 +59,8 @@ const cardSchema = z.object({
 const roomSchema: z.ZodType<UnoOnlineRoom> = z.object({
   id: z.string(),
   hostUserId: z.string(),
+  variantKey: z.string(),
+  themeKey: z.string(),
   phase: z.enum(['lobby', 'playing', 'finished']),
   players: z.array(z.object({
     id: z.string(),
@@ -64,14 +82,30 @@ const roomSchema: z.ZodType<UnoOnlineRoom> = z.object({
   currentPlayerId: z.string().optional(),
   direction: z.union([z.literal(1), z.literal(-1)]),
   activeColor: z.enum(['red', 'yellow', 'green', 'blue']).optional(),
+  playableCardIds: z.array(z.string()),
   winnerId: z.string().optional(),
   log: z.array(z.object({ id: z.string(), text: z.string() })),
+  actionSeq: z.number(),
+  recentActions: z.array(z.object({
+    seq: z.number(),
+    type: z.enum(['play', 'draw', 'effect', 'win']),
+    actorId: z.string(),
+    actorName: z.string(),
+    targetId: z.string().optional(),
+    card: cardSchema.optional(),
+    count: z.number().optional(),
+    message: z.string(),
+  })),
 })
 
 const roomResponseSchema = z.object({ room: roomSchema })
 
-export async function createUnoRoom() {
-  return requestRoom('/api/uno/rooms', { method: 'POST' })
+export async function createUnoRoom(options: { themeKey: string, variantKey: string }) {
+  return requestRoom('/api/uno/rooms', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options),
+  })
 }
 
 export async function joinUnoRoom(roomId: string) {

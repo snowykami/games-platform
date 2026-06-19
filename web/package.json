@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:embed": "tsc -b && vite build --outDir ../server/internal/web/dist --emptyOutDir",
+    "build:embed": "tsc -b && vite build --outDir ../server/internal/web/dist --emptyOutDir && touch ../server/internal/web/dist/.gitkeep",
     "lint": "eslint .",
     "test": "vitest run",
     "verify:ui": "node scripts/verify-ui.mjs",

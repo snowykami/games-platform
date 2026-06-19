@@ -20,7 +20,7 @@ export function LoginPage() {
   }, [])
 
   useEffect(() => {
-    if (user) {
+    if (user?.kind === 'oidc') {
       navigate(next, { replace: true })
     }
   }, [navigate, next, user])
@@ -48,7 +48,7 @@ export function LoginPage() {
             <ShieldCheck className="size-6" />
           </span>
           <div>
-            <p className="text-xs font-black text-[#fff8e8]/65">GAMES PLATFORM</p>
+            <p className="text-xs font-black text-[#fff8e8]/65">LITEYUKI GAMES</p>
             <h1 className="text-3xl font-black tracking-normal">登录后进入房间</h1>
           </div>
         </div>
@@ -58,12 +58,12 @@ export function LoginPage() {
         </p>
 
         <div className="mt-5 grid gap-3">
-          <Button className="min-h-12 justify-start rounded-lg text-base font-black" disabled={isSubmitting} onClick={handleGuestLogin}>
+          <Button className="min-h-12 justify-start text-base" disabled={isSubmitting} variant="secondary" onClick={handleGuestLogin}>
             <DoorOpen className="size-5" />
             游客登录
           </Button>
           {oidcProviders.map(provider => (
-            <Button key={provider.key} asChild className="min-h-12 justify-start rounded-lg text-base font-black" variant="outline">
+            <Button key={provider.key} asChild className="min-h-12 justify-start text-base text-[#191611]" variant="secondary">
               <a href={`/api/auth/oidc/${encodeURIComponent(provider.key)}/login?returnTo=${encodeURIComponent(next)}`}>
                 <Bot className="size-5" />
                 {provider.displayName}
@@ -71,7 +71,7 @@ export function LoginPage() {
             </Button>
           ))}
           {oidcProviders.length === 0 && (
-            <Button className="min-h-12 justify-start rounded-lg text-base font-black" disabled variant="outline">
+            <Button className="min-h-12 justify-start text-base" disabled variant="outline">
               <Bot className="size-5" />
               OIDC 未配置
             </Button>

@@ -24,6 +24,11 @@ type playRequest struct {
 	Color  Color  `json:"color"`
 }
 
+type createRoomRequest struct {
+	VariantKey string `json:"variantKey"`
+	ThemeKey   string `json:"themeKey"`
+}
+
 type wsMessage struct {
 	Type    string          `json:"type"`
 	Payload json.RawMessage `json:"payload,omitempty"`
@@ -71,7 +76,19 @@ func (h *Handler) WebSocket(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createRoom(w http.ResponseWriter, r *http.Request) {
 	user := mustUser(r)
-	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": h.manager.CreateRoom(toUserView(user))})
+	var request createRoomRequest
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := httpx.DecodeJSON(r, &request); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+	}
+
+	room := h.manager.CreateRoom(toUserView(user), RoomOptions{
+		VariantKey: request.VariantKey,
+		ThemeKey:   request.ThemeKey,
+	})
+	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
 }
 
 func (h *Handler) getRoom(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +109,7 @@ func (h *Handler) joinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.hub.Broadcast(room.ID)
+	h.hub.ScheduleAI(room.ID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
 }
 
@@ -133,6 +151,7 @@ func (h *Handler) mutateRoom(w http.ResponseWriter, r *http.Request, mutate func
 		return
 	}
 	h.hub.Broadcast(room.ID)
+	h.hub.ScheduleAI(room.ID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
 }
 
@@ -155,10 +174,15 @@ type Hub struct {
 	manager     *Manager
 	mu          sync.Mutex
 	subscribers map[*Subscriber]struct{}
+	aiRunning   map[string]struct{}
 }
 
 func NewHub(manager *Manager) *Hub {
-	return &Hub{manager: manager, subscribers: map[*Subscriber]struct{}{}}
+	return &Hub{
+		manager:     manager,
+		subscribers: map[*Subscriber]struct{}{},
+		aiRunning:   map[string]struct{}{},
+	}
 }
 
 func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, conn *websocket.Conn) {
@@ -195,6 +219,7 @@ func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, conn 
 			continue
 		}
 		h.Broadcast(roomID)
+		h.ScheduleAI(roomID)
 	}
 }
 
@@ -241,6 +266,38 @@ func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) err
 	default:
 		return errors.New("unknown message type")
 	}
+}
+
+func (h *Hub) ScheduleAI(roomID string) {
+	h.mu.Lock()
+	if _, ok := h.aiRunning[roomID]; ok {
+		h.mu.Unlock()
+		return
+	}
+	h.aiRunning[roomID] = struct{}{}
+	h.mu.Unlock()
+
+	go func() {
+		defer func() {
+			h.mu.Lock()
+			delete(h.aiRunning, roomID)
+			h.mu.Unlock()
+		}()
+
+		for {
+			time.Sleep(720 * time.Millisecond)
+			room, shouldContinue, err := h.manager.RunNextAI(roomID)
+			if err != nil {
+				return
+			}
+			if room.ID != "" {
+				h.Broadcast(room.ID)
+			}
+			if !shouldContinue {
+				return
+			}
+		}
+	}()
 }
 
 func writeWSError(ctx context.Context, conn *websocket.Conn, message string) {

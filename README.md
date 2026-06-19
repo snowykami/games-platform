@@ -19,7 +19,7 @@
   - 角色：平台管理员、普通玩家。
   - 管理员接口支持封禁/解封用户。
 - 部署：
-  - 前端可构建到 `server/internal/web/dist`。
+  - 后端构建时自动构建前端到 `server/internal/web/dist`。
   - Go 使用 `embed` 将前端静态资源打入后端二进制。
   - Docker 镜像只运行 Go 后端，默认端口 `8901`。
 
@@ -30,7 +30,7 @@
 - 数据库规划：PostgreSQL，连接串使用 `DB_URL=postgres://...`。
 - 缓存/会话规划：Redis，连接串使用 `REDIS_URL=redis://...`。
 
-当前用户、房间和 UNO 对局状态仍是内存实现；`DB_URL` 和 `REDIS_URL` 已进入配置层，后续持久化时接入。
+当前用户、房间和 UNO 对局状态仍是内存实现；`DB_URL` 和 `REDIS_URL` 已进入配置层，后续持久化时接入。AI 玩家当前仍是规则驱动，LLM provider 配置已预留 `LLM_API`、`LLM_MODEL` 和 `LLM_TOKEN`。
 
 ## 目录结构
 
@@ -63,9 +63,10 @@ cp .env.example .env
 
 ```bash
 PORT=8901
-DB_URL=postgres://games_platform:games_platform@localhost:5432/games_platform?sslmode=disable
-REDIS_URL=redis://localhost:6379/0
+DB_URL=postgres://games_platform:games_platform@localhost:5436/games_platform?sslmode=disable
+REDIS_URL=redis://localhost:6385/0
 LLM_API=
+LLM_MODEL=
 LLM_TOKEN=
 OIDC_PROVIDERS_JSON=
 ```
@@ -73,7 +74,7 @@ OIDC_PROVIDERS_JSON=
 `OIDC_PROVIDERS_JSON` 是 JSON 数组，例如：
 
 ```bash
-OIDC_PROVIDERS_JSON='[{"key":"google","displayName":"Google","issuerUrl":"https://accounts.google.com","clientId":"xxx","clientSecret":"xxx","redirectUrl":"http://localhost:8901/api/auth/oidc/google/callback"}]'
+OIDC_PROVIDERS_JSON='[{"key":"google","displayName":"Google","issuerUrl":"https://accounts.google.com","clientId":"xxx","clientSecret":"xxx","redirectUrl":"http://localhost:5173/api/auth/oidc/google/callback"}]'
 ```
 
 ## 本地开发
@@ -82,6 +83,12 @@ OIDC_PROVIDERS_JSON='[{"key":"google","displayName":"Google","issuerUrl":"https:
 
 ```bash
 pnpm install
+```
+
+启动本地 PostgreSQL 和 Redis：
+
+```bash
+pnpm dev:infra
 ```
 
 启动后端：
@@ -96,20 +103,20 @@ pnpm dev:server
 pnpm dev:web
 ```
 
-开发模式下前端 Vite 代理会把 `/api` 和 `/ws` 转发到 `http://localhost:8901`。
+开发模式下前端 Vite 代理会把 `/api` 和 `/ws` 转发到 `http://localhost:8901`。OIDC 开发回调建议配置为 `http://localhost:5173/api/auth/oidc/<provider>/callback`，由 Vite 统一反代到后端，避免浏览器跨域和回调域名不一致。
 
-## 单体运行
+## 单体构建
 
-将前端构建到 Go embed 目录：
+构建单体二进制：
 
 ```bash
-pnpm --dir web build:embed
+pnpm build:server
 ```
 
-启动 Go 服务：
+产物路径：
 
-```bash
-go run ./server/cmd/api
+```text
+dist/games-platform
 ```
 
 访问：
@@ -119,6 +126,8 @@ http://127.0.0.1:8901/
 ```
 
 ## Docker
+
+Docker 构建会在镜像内安装前端依赖、构建 Vite 产物，再构建嵌入静态资源的 Go 后端；不需要提前提交或上传前端构建产物。
 
 构建镜像：
 
@@ -175,4 +184,4 @@ BASE_URL=http://127.0.0.1:8901 pnpm --dir web verify:ui
 
 - PG 和 Redis 尚未接入真实读写，当前状态保存在进程内存中。
 - OIDC 已支持多 provider 配置和标准登录回调，但需要实际 provider 配置后验证。
-- AI 玩家当前是规则驱动；`LLM_API` / `LLM_TOKEN` 已预留为后续统一 AI provider。
+- AI 玩家当前是规则驱动；`LLM_API` / `LLM_MODEL` / `LLM_TOKEN` 已预留为后续统一 AI provider。

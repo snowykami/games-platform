@@ -7,12 +7,10 @@ web/node_modules/
 /.vite/
 web/dist/
 web/.vite/
+server/internal/web/dist/*
+!server/internal/web/dist/.gitkeep
 coverage/
 web/coverage/
-
-# Keep the frontend build that is embedded into the Go binary.
-!server/internal/web/dist/
-!server/internal/web/dist/**
 
 # Local environment and secrets
 .env
@@ -35,6 +33,7 @@ coverage.out
 
 # Docker/local runtime
 .docker/
+.devdata/
 
 # Editor and OS files
 .DS_Store

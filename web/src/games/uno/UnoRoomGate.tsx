@@ -12,6 +12,18 @@ interface UnoRoomGateProps {
   roomId?: string
 }
 
+const UNO_VARIANTS = [
+  { key: 'classic', name: '经典 UNO', description: '标准数字牌、禁、转向、+2、变色和 +4。' },
+  { key: 'party', name: '派对狂欢', description: '预留 +6、+10、叠加惩罚等疯狂规则。' },
+  { key: 'stacking', name: '叠加规则', description: '预留 +2/+4 连锁叠加与反制。' },
+]
+
+const UNO_THEMES = [
+  { key: 'classic', name: '经典牌面', description: '高识别度四色牌。' },
+  { key: 'neon', name: '霓虹牌面', description: '预留赛博高亮风格。' },
+  { key: 'anime-collab', name: '联动牌面', description: '预留 IP 联动和角色主题牌。' },
+]
+
 export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -19,6 +31,8 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   const [joinCode, setJoinCode] = useState(roomId ?? '')
   const [message, setMessage] = useState('朋友局，链接开桌。先进入房间，再开始游戏。')
   const [pendingAI, setPendingAI] = useState(false)
+  const [variantKey, setVariantKey] = useState('classic')
+  const [themeKey, setThemeKey] = useState('classic')
   const isHost = Boolean(user && room?.hostUserId === user.id)
 
   if (roomId && room && room.phase !== 'lobby') {
@@ -28,7 +42,7 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   async function createRoom() {
     setMessage('正在创建服务端房间...')
     try {
-      const nextRoom = await createUnoRoom()
+      const nextRoom = await createUnoRoom({ themeKey, variantKey })
 
       navigate(`/games/uno?room=${nextRoom.id}`)
       setJoinCode(nextRoom.id)
@@ -100,6 +114,8 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
               <Plus className="size-4" />
               创建并进入
             </button>
+            <OptionGroup label="玩法类型" options={UNO_VARIANTS} value={variantKey} onChange={setVariantKey} />
+            <OptionGroup label="牌面主题" options={UNO_THEMES} value={themeKey} onChange={setThemeKey} />
             <label className="grid gap-2 text-sm font-black" htmlFor="uno-room-code">
               房间号
               <input
@@ -133,6 +149,11 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                 {' '}
                 {roomId}
               </h2>
+              <p className="mt-1 text-xs font-bold text-[#fff8e8]/60">
+                {variantLabel(room?.variantKey)}
+                {' / '}
+                {themeLabel(room?.themeKey)}
+              </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button className="uno-button" type="button" onClick={copyLink}>
@@ -218,4 +239,46 @@ function UnoShell({ children }: { children: ReactNode }) {
 
 function RuleLine({ children }: { children: ReactNode }) {
   return <p className="rounded-lg bg-[#090807]/50 px-3 py-2 text-sm leading-6 text-[#fff8e8]/78">{children}</p>
+}
+
+function OptionGroup({
+  label,
+  onChange,
+  options,
+  value,
+}: {
+  label: string
+  onChange: (value: string) => void
+  options: Array<{ description: string, key: string, name: string }>
+  value: string
+}) {
+  return (
+    <fieldset className="grid gap-2">
+      <legend className="text-sm font-black">{label}</legend>
+      <div className="grid gap-2">
+        {options.map(option => (
+          <button
+            key={option.key}
+            className={cn(
+              'grid rounded-lg border border-white/20 bg-[#090807]/42 px-3 py-2 text-left transition hover:border-[#fff8e8]/70',
+              value === option.key && 'border-[#f3c33c] bg-[#f3c33c]/15 shadow-[0_0_0_2px_rgba(243,195,60,0.18)]',
+            )}
+            type="button"
+            onClick={() => onChange(option.key)}
+          >
+            <strong className="text-sm">{option.name}</strong>
+            <span className="mt-1 text-xs leading-5 text-[#fff8e8]/64">{option.description}</span>
+          </button>
+        ))}
+      </div>
+    </fieldset>
+  )
+}
+
+function variantLabel(key?: string) {
+  return UNO_VARIANTS.find(item => item.key === key)?.name ?? '经典 UNO'
+}
+
+function themeLabel(key?: string) {
+  return UNO_THEMES.find(item => item.key === key)?.name ?? '经典牌面'
 }

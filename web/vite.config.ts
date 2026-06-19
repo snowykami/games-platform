@@ -2,6 +2,8 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
+const backendTarget = 'http://localhost:8901'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -12,9 +14,11 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:8901',
+      '/api': {
+        target: backendTarget,
+      },
       '/ws': {
-        target: 'ws://localhost:8901',
+        target: backendTarget,
         ws: true,
       },
     },

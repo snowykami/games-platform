@@ -29,6 +29,7 @@ type RedisConfig struct {
 
 type AIConfig struct {
 	LLMAPI   string
+	LLMModel string
 	LLMToken string
 }
 
@@ -56,6 +57,7 @@ func Load() Config {
 		Redis:    RedisConfig{URL: os.Getenv("REDIS_URL")},
 		AI: AIConfig{
 			LLMAPI:   os.Getenv("LLM_API"),
+			LLMModel: os.Getenv("LLM_MODEL"),
 			LLMToken: os.Getenv("LLM_TOKEN"),
 		},
 		OIDC: loadOIDCProviders(),
@@ -63,7 +65,7 @@ func Load() Config {
 }
 
 func (c AIConfig) Enabled() bool {
-	return c.LLMAPI != "" && c.LLMToken != ""
+	return c.LLMAPI != "" && c.LLMModel != "" && c.LLMToken != ""
 }
 
 func (c DatabaseConfig) Enabled() bool {

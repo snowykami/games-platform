@@ -5,20 +5,20 @@ import { cva } from 'class-variance-authority'
 import { cn } from '@/shared/lib/utils'
 
 const buttonVariants = cva(
-  'inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+  'inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-black shadow-sm transition disabled:pointer-events-none disabled:bg-[#d9d2c5] disabled:text-[#62594d] disabled:shadow-none disabled:ring-[#191611]/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
-        ghost: 'hover:bg-accent hover:text-accent-foreground',
-        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
+        default: 'bg-[#191611] text-[#fff8e8] shadow-[0_12px_26px_rgba(25,22,17,0.18)] hover:-translate-y-0.5 hover:bg-[#2b241c]',
+        secondary: 'bg-[#fff8e8] text-[#191611] ring-1 ring-[#191611]/12 hover:-translate-y-0.5 hover:bg-white',
+        outline: 'bg-[#fff8e8] text-[#191611] ring-1 ring-[#191611]/16 hover:-translate-y-0.5 hover:bg-white',
+        ghost: 'bg-transparent text-current shadow-none hover:bg-[#191611]/8',
+        destructive: 'bg-[#c43d28] text-[#fff8e8] hover:-translate-y-0.5 hover:bg-[#a92f1e]',
       },
       size: {
         default: 'h-10 px-4 py-2',
-        sm: 'h-9 rounded-md px-3',
-        lg: 'h-11 rounded-md px-8',
+        sm: 'h-9 rounded-lg px-3',
+        lg: 'h-11 rounded-lg px-8',
         icon: 'size-10',
       },
     },

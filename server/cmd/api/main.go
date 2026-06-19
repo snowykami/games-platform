@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/snowykami/games-platform/server/internal/config"
 	"github.com/snowykami/games-platform/server/internal/games"
 	"github.com/snowykami/games-platform/server/internal/httpx"
+	"github.com/snowykami/games-platform/server/internal/runtimecheck"
 	"github.com/snowykami/games-platform/server/internal/uno"
 	frontend "github.com/snowykami/games-platform/server/internal/web"
 )
@@ -22,6 +24,7 @@ type gamesResponse struct {
 
 func main() {
 	cfg := config.Load()
+	runtimecheck.LogStartup(context.Background(), cfg)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,

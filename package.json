@@ -7,8 +7,9 @@
     "build:web": "pnpm --dir web build",
     "lint:web": "pnpm --dir web lint",
     "test:web": "pnpm --dir web test",
+    "dev:infra": "docker compose -f docker-compose-dev.yaml up -d",
     "dev:server": "go run ./server/cmd/api",
-    "build:server": "go build ./server/cmd/api",
+    "build:server": "mkdir -p dist && pnpm --dir web build:embed && go build -C server -trimpath -o ../dist/games-platform ./cmd/api",
     "test:server": "go test ./server/..."
   },
   "packageManager": "pnpm@10.20.0"

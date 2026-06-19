@@ -26,13 +26,15 @@ func NewManager() *Manager {
 	return &Manager{rooms: map[string]*Room{}}
 }
 
-func (m *Manager) CreateRoom(user UserView) PublicRoom {
+func (m *Manager) CreateRoom(user UserView, options RoomOptions) PublicRoom {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	room := &Room{
 		ID:         createRoomID(),
 		HostUserID: user.ID,
+		VariantKey: normalizeVariantKey(options.VariantKey),
+		ThemeKey:   normalizeThemeKey(options.ThemeKey),
 		Phase:      PhaseLobby,
 		Direction:  1,
 		CreatedAt:  time.Now().UTC(),
@@ -163,7 +165,6 @@ func (m *Manager) Start(roomID string, actorID string) (PublicRoom, error) {
 		room.DrawPile = append(room.DrawPile, card)
 	}
 
-	m.runAITurns(room)
 	room.UpdatedAt = time.Now().UTC()
 	return publicRoom(room, actorID), nil
 }
@@ -193,7 +194,6 @@ func (m *Manager) Play(roomID string, actorID string, cardID string, color Color
 	}
 
 	playCard(room, player, cardIndex, color)
-	m.runAITurns(room)
 	room.UpdatedAt = time.Now().UTC()
 	return publicRoom(room, actorID), nil
 }
@@ -211,10 +211,47 @@ func (m *Manager) Draw(roomID string, actorID string) (PublicRoom, error) {
 	player.Hand = append(player.Hand, drawn...)
 	player.HandCount = len(player.Hand)
 	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 摸了一张牌。", player.Name)))
+	recordDrawAction(room, player, player, len(drawn), fmt.Sprintf("%s 摸了一张牌。", player.Name))
 	advanceTurn(room)
-	m.runAITurns(room)
 	room.UpdatedAt = time.Now().UTC()
 	return publicRoom(room, actorID), nil
+}
+
+func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	room, err := m.room(roomID)
+	if err != nil {
+		return PublicRoom{}, false, err
+	}
+	if room.Phase != PhasePlaying || len(room.Players) == 0 {
+		return publicRoom(room, ""), false, nil
+	}
+
+	player := room.Players[room.CurrentPlayerIndex]
+	if !player.IsAI {
+		return publicRoom(room, ""), false, nil
+	}
+
+	cardIndex := slices.IndexFunc(player.Hand, func(card Card) bool {
+		return isPlayable(card, room)
+	})
+	if cardIndex < 0 {
+		drawn := drawCards(room, 1)
+		player.Hand = append(player.Hand, drawn...)
+		player.HandCount = len(player.Hand)
+		message := fmt.Sprintf("%s 摸了一张牌。", player.Name)
+		room.Log = append(room.Log, createLog(message))
+		recordDrawAction(room, player, player, len(drawn), message)
+		advanceTurn(room)
+	} else {
+		playCard(room, player, cardIndex, chooseBestColor(player.Hand))
+	}
+
+	room.UpdatedAt = time.Now().UTC()
+	shouldContinue := room.Phase == PhasePlaying && len(room.Players) > 0 && room.Players[room.CurrentPlayerIndex].IsAI
+	return publicRoom(room, ""), shouldContinue, nil
 }
 
 func (m *Manager) Public(roomID string, viewerID string) (PublicRoom, error) {
@@ -256,31 +293,6 @@ func (m *Manager) room(roomID string) (*Room, error) {
 	return room, nil
 }
 
-func (m *Manager) runAITurns(room *Room) {
-	guard := 0
-	for room.Phase == PhasePlaying && guard < 24 {
-		guard++
-		player := room.Players[room.CurrentPlayerIndex]
-		if !player.IsAI {
-			return
-		}
-
-		cardIndex := slices.IndexFunc(player.Hand, func(card Card) bool {
-			return isPlayable(card, room)
-		})
-		if cardIndex < 0 {
-			drawn := drawCards(room, 1)
-			player.Hand = append(player.Hand, drawn...)
-			player.HandCount = len(player.Hand)
-			room.Log = append(room.Log, createLog(fmt.Sprintf("%s 摸了一张牌。", player.Name)))
-			advanceTurn(room)
-			continue
-		}
-
-		playCard(room, player, cardIndex, chooseBestColor(player.Hand))
-	}
-}
-
 func createHumanPlayer(user UserView, role string) *Player {
 	return &Player{
 		ID:        "plr_" + randomToken(8),
@@ -311,8 +323,13 @@ func publicRoom(room *Room, viewerID string) PublicRoom {
 	}
 
 	currentPlayerID := ""
+	playableCardIDs := []string{}
 	if room.Phase == PhasePlaying && len(room.Players) > 0 {
-		currentPlayerID = room.Players[room.CurrentPlayerIndex].ID
+		currentPlayer := room.Players[room.CurrentPlayerIndex]
+		currentPlayerID = currentPlayer.ID
+		if currentPlayer.UserID == viewerID && !currentPlayer.IsAI {
+			playableCardIDs = playableCardsForPlayer(currentPlayer, room)
+		}
 	}
 
 	logs := room.Log
@@ -323,6 +340,8 @@ func publicRoom(room *Room, viewerID string) PublicRoom {
 	return PublicRoom{
 		ID:              room.ID,
 		HostUserID:      room.HostUserID,
+		VariantKey:      room.VariantKey,
+		ThemeKey:        room.ThemeKey,
 		Phase:           room.Phase,
 		Players:         players,
 		TopCard:         topCard,
@@ -330,8 +349,11 @@ func publicRoom(room *Room, viewerID string) PublicRoom {
 		CurrentPlayerID: currentPlayerID,
 		Direction:       room.Direction,
 		ActiveColor:     room.ActiveColor,
+		PlayableCardIDs: playableCardIDs,
 		WinnerID:        room.WinnerID,
-		Log:             append([]LogEntry(nil), logs...),
+		Log:             append([]LogEntry{}, logs...),
+		ActionSeq:       room.ActionSeq,
+		RecentActions:   append([]PublicAction{}, room.RecentActions...),
 	}
 }
 
@@ -345,12 +367,22 @@ func playCard(room *Room, player *Player, cardIndex int, color Color) {
 	} else {
 		room.ActiveColor = card.Color
 	}
-	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 打出了 %s。", player.Name, formatCard(card))))
+	message := fmt.Sprintf("%s 打出了 %s。", player.Name, formatCard(card))
+	room.Log = append(room.Log, createLog(message))
+	recordPlayAction(room, player, card, message)
 
 	if len(player.Hand) == 0 {
 		room.Phase = PhaseFinished
 		room.WinnerID = player.ID
-		room.Log = append(room.Log, createLog(fmt.Sprintf("%s 获胜。", player.Name)))
+		winMessage := fmt.Sprintf("%s 获胜。", player.Name)
+		room.Log = append(room.Log, createLog(winMessage))
+		recordAction(room, PublicAction{
+			Type:      ActionWin,
+			ActorID:   player.ID,
+			ActorName: player.Name,
+			TargetID:  player.ID,
+			Message:   winMessage,
+		})
 		return
 	}
 
@@ -360,10 +392,13 @@ func playCard(room *Room, player *Player, cardIndex int, color Color) {
 func applyEffect(room *Room, card Card) {
 	switch card.Kind {
 	case KindSkip:
+		target := room.Players[nextIndex(room)]
+		recordEffectAction(room, room.Players[room.CurrentPlayerIndex], target, fmt.Sprintf("%s 被跳过。", target.Name))
 		advanceTurn(room)
 		advanceTurn(room)
 	case KindReverse:
 		room.Direction *= -1
+		recordEffectAction(room, room.Players[room.CurrentPlayerIndex], room.Players[room.CurrentPlayerIndex], "回合方向反转。")
 		if len(room.Players) == 2 {
 			advanceTurn(room)
 			advanceTurn(room)
@@ -375,6 +410,7 @@ func applyEffect(room *Room, card Card) {
 		drawn := drawCards(room, 2)
 		room.Players[next].Hand = append(room.Players[next].Hand, drawn...)
 		room.Players[next].HandCount = len(room.Players[next].Hand)
+		recordDrawAction(room, room.Players[room.CurrentPlayerIndex], room.Players[next], len(drawn), fmt.Sprintf("%s 摸了 %d 张牌。", room.Players[next].Name, len(drawn)))
 		advanceTurn(room)
 		advanceTurn(room)
 	case KindWildDrawFour:
@@ -382,6 +418,7 @@ func applyEffect(room *Room, card Card) {
 		drawn := drawCards(room, 4)
 		room.Players[next].Hand = append(room.Players[next].Hand, drawn...)
 		room.Players[next].HandCount = len(room.Players[next].Hand)
+		recordDrawAction(room, room.Players[room.CurrentPlayerIndex], room.Players[next], len(drawn), fmt.Sprintf("%s 摸了 %d 张牌。", room.Players[next].Name, len(drawn)))
 		advanceTurn(room)
 		advanceTurn(room)
 	default:
@@ -394,7 +431,23 @@ func isPlayable(card Card, room *Room) bool {
 		return true
 	}
 	top := room.DiscardPile[len(room.DiscardPile)-1]
-	return card.Color == ColorWild || card.Color == room.ActiveColor || card.Kind == top.Kind || (card.Kind == KindNumber && top.Kind == KindNumber && card.Value != nil && top.Value != nil && *card.Value == *top.Value)
+	if card.Color == ColorWild || card.Color == room.ActiveColor {
+		return true
+	}
+	if card.Kind == KindNumber {
+		return top.Kind == KindNumber && card.Value != nil && top.Value != nil && *card.Value == *top.Value
+	}
+	return card.Kind == top.Kind
+}
+
+func playableCardsForPlayer(player *Player, room *Room) []string {
+	playableCardIDs := []string{}
+	for _, card := range player.Hand {
+		if isPlayable(card, room) {
+			playableCardIDs = append(playableCardIDs, card.ID)
+		}
+	}
+	return playableCardIDs
 }
 
 func drawCards(room *Room, count int) []Card {
@@ -525,6 +578,30 @@ func createRoomID() string {
 	return strings.ToUpper(randomToken(6))
 }
 
+func normalizeVariantKey(key string) string {
+	key = strings.TrimSpace(strings.ToLower(key))
+	switch key {
+	case "", "classic":
+		return "classic"
+	case "party", "stacking", "wild-plus":
+		return key
+	default:
+		return "classic"
+	}
+}
+
+func normalizeThemeKey(key string) string {
+	key = strings.TrimSpace(strings.ToLower(key))
+	switch key {
+	case "", "classic":
+		return "classic"
+	case "neon", "anime-collab":
+		return key
+	default:
+		return "classic"
+	}
+}
+
 func randomToken(length int) string {
 	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	token := make([]byte, length)
@@ -536,6 +613,51 @@ func randomToken(length int) string {
 
 func createLog(text string) LogEntry {
 	return LogEntry{ID: "log_" + randomToken(8), Text: text}
+}
+
+func recordPlayAction(room *Room, player *Player, card Card, message string) {
+	recordAction(room, PublicAction{
+		Type:      ActionPlay,
+		ActorID:   player.ID,
+		ActorName: player.Name,
+		TargetID:  player.ID,
+		Card:      &card,
+		Message:   message,
+	})
+}
+
+func recordDrawAction(room *Room, actor *Player, target *Player, count int, message string) {
+	if count <= 0 {
+		return
+	}
+
+	recordAction(room, PublicAction{
+		Type:      ActionDraw,
+		ActorID:   actor.ID,
+		ActorName: actor.Name,
+		TargetID:  target.ID,
+		Count:     count,
+		Message:   message,
+	})
+}
+
+func recordEffectAction(room *Room, actor *Player, target *Player, message string) {
+	recordAction(room, PublicAction{
+		Type:      ActionEffect,
+		ActorID:   actor.ID,
+		ActorName: actor.Name,
+		TargetID:  target.ID,
+		Message:   message,
+	})
+}
+
+func recordAction(room *Room, action PublicAction) {
+	room.ActionSeq++
+	action.Seq = room.ActionSeq
+	room.RecentActions = append(room.RecentActions, action)
+	if len(room.RecentActions) > 12 {
+		room.RecentActions = room.RecentActions[len(room.RecentActions)-12:]
+	}
 }
 
 func formatCard(card Card) string {

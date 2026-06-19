@@ -417,6 +417,7 @@ src/
 - `DB_URL`：PostgreSQL 连接串，使用 `postgres://...` URL 格式。
 - `REDIS_URL`：Redis 连接串，使用 `redis://...` URL 格式。
 - `LLM_API`：所有 AI 玩家调用的统一 LLM API 地址。
+- `LLM_MODEL`：所有 AI 玩家调用的统一 LLM 模型名称。
 - `LLM_TOKEN`：所有 AI 玩家调用的统一 LLM token。
 - 配置支持直接环境变量和本地 `.env`；真实环境变量优先，`.env` 只用于本地开发补齐未设置值。
 - AI、OIDC、数据库、Redis 密钥只允许来自环境变量、忽略的本地 `.env` 或部署密钥，不进入前端、不写入日志。
