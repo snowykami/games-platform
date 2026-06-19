@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+web/node_modules
+web/dist
+server/tmp
+dist
+.vite
+web/.vite
+*.log
+.DS_Store

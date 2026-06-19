@@ -1,0 +1,45 @@
+# Dependencies
+/node_modules/
+web/node_modules/
+
+# Build outputs
+/dist/
+/.vite/
+web/dist/
+web/.vite/
+coverage/
+web/coverage/
+
+# Keep the frontend build that is embedded into the Go binary.
+!server/internal/web/dist/
+!server/internal/web/dist/**
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Go/dev temp files
+server/tmp/
+*.test
+*.out
+coverage.out
+
+# Docker/local runtime
+.docker/
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.sw?
+*.swo

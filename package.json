@@ -1,0 +1,15 @@
+{
+  "name": "games-platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:web": "pnpm --dir web dev",
+    "build:web": "pnpm --dir web build",
+    "lint:web": "pnpm --dir web lint",
+    "test:web": "pnpm --dir web test",
+    "dev:server": "go run ./server/cmd/api",
+    "build:server": "go build ./server/cmd/api",
+    "test:server": "go test ./server/..."
+  },
+  "packageManager": "pnpm@10.20.0"
+}
