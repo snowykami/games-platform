@@ -1,13 +1,10 @@
 import type { FormEvent, ReactNode } from 'react'
 import type { SocialGameSlug, SocialPlayer, SocialRole, SocialRoom, WerewolfRoleCounts } from './online'
-import type { AILevel } from '@/games/ai'
 import { ArrowLeft, Bot, Copy, DoorOpen, Plus, Shield, Skull, Sparkles, UserMinus, Vote } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
-import { getAICapabilities, getAILevelLabel } from '@/games/ai'
-import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
-import { AILevelPicker } from '@/games/AILevelPicker'
+import { getAICapabilities } from '@/games/ai'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
@@ -68,7 +65,7 @@ const GAME_COPY = {
 } satisfies Record<SocialGameSlug, Record<string, string>>
 
 const ROLES_BY_GAME: Record<SocialGameSlug, SocialRole[]> = {
-  werewolf: ['villager', 'werewolf', 'seer', 'guard'],
+  werewolf: ['villager', 'werewolf', 'seer', 'witch', 'hunter', 'idiot', 'guard'],
   avalon: ['merlin', 'assassin', 'minion', 'loyal'],
   undercover: ['civilian', 'undercover', 'blank'],
 }
@@ -76,12 +73,15 @@ const ROLES_BY_GAME: Record<SocialGameSlug, SocialRole[]> = {
 const ROLE_ALIGNMENT: Record<SocialRole, 'good' | 'evil' | 'neutral'> = {
   assassin: 'evil',
   guard: 'good',
+  hunter: 'good',
+  idiot: 'good',
   loyal: 'good',
   merlin: 'good',
   minion: 'evil',
   seer: 'good',
   villager: 'good',
   werewolf: 'evil',
+  witch: 'good',
   civilian: 'good',
   undercover: 'evil',
   blank: 'neutral',
@@ -96,12 +96,11 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
   const config = GAME_COPY[game]
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { locale, t, ta } = useI18n()
+  const { t, ta } = useI18n()
   const { actions, error, isLoading, room } = useSocialRoom(game, roomId)
   const [joinCode, setJoinCode] = useState(roomId ?? '')
   const [message, setMessage] = useState(() => t('room.defaultMessage'))
   const [pendingAI, setPendingAI] = useState(false)
-  const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
   const [llmModel, setLLMModel] = useState('')
   const isHost = Boolean(user && room?.hostUserId === user.id)
@@ -110,11 +109,8 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
     void getAICapabilities().then((capabilities) => {
       setLLMEnabled(capabilities.llmEnabled)
       setLLMModel(capabilities.model ?? '')
-      if (!capabilities.llmEnabled && aiLevel === 'ai') {
-        setAILevel('normal')
-      }
     })
-  }, [aiLevel])
+  }, [])
 
   async function createRoom() {
     setMessage(t('room.defaultMessage'))
@@ -152,7 +148,7 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
     setPendingAI(true)
     setMessage(t('room.addingAI'))
     try {
-      await actions.addAI(aiLevel)
+      await actions.addAI('ai')
       setMessage(t('room.aiJoined'))
     }
     finally {
@@ -238,22 +234,24 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
                 <Copy className="size-4" />
                 {t('common.copyLink')}
               </button>
-              <div className="grid min-w-[250px] grid-cols-[minmax(120px,1fr)_auto] items-end gap-2">
-                <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} llmModel={llmModel} onChange={setAILevel} />
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex min-h-10 items-center rounded-lg border border-white/16 bg-white/10 px-3 text-xs font-black text-[#fff8e8]/86">
+                  {llmEnabled ? `AI: ${llmModel || t('common.ai')}` : t('social.llmRequired')}
+                </span>
                 <button
                   className={cn(socialButton(config), pendingAI && 'opacity-70')}
-                  disabled={pendingAI || !isHost || room.players.length >= room.maxPlayers}
+                  disabled={pendingAI || !isHost || !llmEnabled || room.players.length >= room.maxPlayers}
                   type="button"
                   onClick={addAIPlayer}
                 >
                   <Bot className="size-4" />
-                  {pendingAI ? t('room.addingAI') : `${t('room.addAI')} (${getAILevelLabel(aiLevel, locale)})`}
+                  {pendingAI ? t('room.addingAI') : t('room.addAI')}
                 </button>
               </div>
             </div>
           </div>
 
-          <PlayerGrid actions={actions} config={config} isHost={isHost} llmEnabled={llmEnabled} llmModel={llmModel} room={room} />
+          <PlayerGrid actions={actions} config={config} isHost={isHost} llmModel={llmModel} room={room} />
           {game === 'undercover' && <UndercoverLobbyConfig actions={actions} config={config} isHost={isHost} room={room} />}
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -302,11 +300,20 @@ function WerewolfRoleSetup({
   const { t } = useI18n()
   const [draft, setDraft] = useState<WerewolfRoleCounts>(room.werewolf.roleConfig.counts)
   const [message, setMessage] = useState('')
+  const rolePresets = room.werewolf.rolePresets ?? []
   const total = roleTotal(draft)
-  const canSave = isHost && total === room.players.length && draft.werewolf > 0 && draft.werewolf < room.players.length && draft.seer <= 1 && draft.guard <= 1
+  const canSave = isHost
+    && total === room.players.length
+    && draft.werewolf > 0
+    && draft.werewolf < room.players.length
+    && draft.seer <= 1
+    && draft.guard <= 1
+    && draft.witch <= 1
+    && draft.hunter <= 1
+    && draft.idiot <= 1
 
   async function selectPreset(presetId: string) {
-    const preset = room.werewolf.rolePresets.find(candidate => candidate.id === presetId)
+    const preset = rolePresets.find(candidate => candidate.id === presetId)
     if (!preset) {
       return
     }
@@ -349,12 +356,12 @@ function WerewolfRoleSetup({
         {t('werewolf.rolePreset')}
         <select
           className="min-h-10 rounded-lg border border-white/20 bg-black/30 px-3 text-sm font-black text-[#fff8e8] outline-none"
-          disabled={!isHost || room.werewolf.rolePresets.length === 0}
+          disabled={!isHost || rolePresets.length === 0}
           value={room.werewolf.roleConfig.mode === 'preset' ? room.werewolf.roleConfig.presetId ?? '' : 'custom'}
           onChange={event => event.target.value === 'custom' ? undefined : void selectPreset(event.target.value)}
         >
-          {room.werewolf.rolePresets.length === 0 && <option value="">{t('werewolf.needMorePlayers')}</option>}
-          {room.werewolf.rolePresets.map(preset => <option key={preset.id} className="text-[#171411]" value={preset.id}>{preset.name}</option>)}
+          {rolePresets.length === 0 && <option value="">{t('werewolf.needMorePlayers')}</option>}
+          {rolePresets.map(preset => <option key={preset.id} className="text-[#171411]" value={preset.id}>{preset.name}</option>)}
           <option className="text-[#171411]" value="custom">{t('werewolf.customRoles')}</option>
         </select>
       </label>
@@ -363,6 +370,9 @@ function WerewolfRoleSetup({
         <RoleCountLine count={draft.werewolf} disabled={!isHost} role="werewolf" onChange={count => setDraft({ ...draft, werewolf: count })} />
         <RoleCountLine count={draft.villager} disabled={!isHost} role="villager" onChange={count => setDraft({ ...draft, villager: count })} />
         <RoleCountLine count={draft.seer} disabled={!isHost} max={1} role="seer" onChange={count => setDraft({ ...draft, seer: count })} />
+        <RoleCountLine count={draft.witch} disabled={!isHost} max={1} role="witch" onChange={count => setDraft({ ...draft, witch: count })} />
+        <RoleCountLine count={draft.hunter} disabled={!isHost} max={1} role="hunter" onChange={count => setDraft({ ...draft, hunter: count })} />
+        <RoleCountLine count={draft.idiot} disabled={!isHost} max={1} role="idiot" onChange={count => setDraft({ ...draft, idiot: count })} />
         <RoleCountLine count={draft.guard} disabled={!isHost} max={1} role="guard" onChange={count => setDraft({ ...draft, guard: count })} />
       </div>
 
@@ -502,7 +512,7 @@ function SocialGamePage({
           <div className="grid min-h-0 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_260px]">
             <div className="grid min-h-0 content-start gap-3 overflow-auto pr-1">
               <SelfIntel config={config} game={game} room={room} you={you} />
-              <PlayerGrid actions={actions} config={config} isHost={false} llmEnabled={false} llmModel="" room={room} compact />
+              <PlayerGrid actions={actions} config={config} isHost={false} llmModel="" room={room} compact />
             </div>
 
             <ActionPanel
@@ -565,6 +575,7 @@ function ActionPanel({
   const isLeader = Boolean(you && room.avalon.leaderId === you.id)
   const isAssassin = you?.role === 'assassin'
   const isCurrentUndercoverSpeaker = Boolean(you && room.undercover.currentSpeakerId === you.id)
+  const hunterPending = room.players.find(player => player.id === room.werewolf.hunterPendingId)
 
   function toggleTeam(playerId: string) {
     setSelectedTeam(selectedTeam.includes(playerId)
@@ -588,17 +599,63 @@ function ActionPanel({
 
   if (game === 'werewolf') {
     if (room.phase === 'night') {
-      const canAct = ['werewolf', 'seer', 'guard'].includes(you.role ?? '')
+      const canAct = ['werewolf', 'seer', 'guard', 'witch'].includes(you.role ?? '')
+      const witchVictim = room.players.find(player => player.id === room.werewolf.witchVictimId)
       return (
         <Panel config={config}>
           <h2 className="text-xl font-black">{t('werewolf.nightAction')}</h2>
           <p className="text-sm leading-6 text-[#fff8e8]/76">{canAct ? t('werewolf.chooseNightTarget') : t('werewolf.noNightAction')}</p>
-          {canAct && livingTargets.map(player => (
-            <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.nightAction(player.id).then(() => setMessage(t('werewolf.actionSubmitted')))}>
+          {you.role === 'witch' && (
+            <>
+              <p className="rounded-lg bg-black/24 px-3 py-2 text-xs font-black text-[#fff8e8]/72">
+                {witchVictim ? t('werewolf.witchVictim', { name: witchVictim.name }) : t('werewolf.witchNoVictim')}
+              </p>
+              {witchVictim && !room.werewolf.witchAntidoteUsed && (
+                <button className={socialButton(config, true)} type="button" onClick={() => void actions.nightAction(`save:${witchVictim.id}`).then(() => setMessage(t('werewolf.actionSubmitted')))}>
+                  <Shield className="size-4" />
+                  {t('werewolf.useAntidote', { name: witchVictim.name })}
+                </button>
+              )}
+              {!room.werewolf.witchPoisonUsed && livingTargets.map(player => (
+                <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.nightAction(`poison:${player.id}`).then(() => setMessage(t('werewolf.actionSubmitted')))}>
+                  <Skull className="size-4" />
+                  {t('werewolf.usePoison', { name: player.name })}
+                </button>
+              ))}
+              <button className={socialButton(config)} type="button" onClick={() => void actions.nightAction('skip:witch').then(() => setMessage(t('werewolf.actionSubmitted')))}>
+                {t('werewolf.skipWitch')}
+              </button>
+            </>
+          )}
+          {canAct && you.role !== 'witch' && livingTargets.map(player => (
+            <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.nightAction(`target:${player.id}`).then(() => setMessage(t('werewolf.actionSubmitted')))}>
               <Shield className="size-4" />
               {player.name}
             </button>
           ))}
+        </Panel>
+      )
+    }
+
+    if (room.phase === 'hunter') {
+      const canShoot = you.id === room.werewolf.hunterPendingId
+      return (
+        <Panel config={config}>
+          <h2 className="text-xl font-black">{t('werewolf.hunterShot')}</h2>
+          <p className="text-sm leading-6 text-[#fff8e8]/76">
+            {canShoot ? t('werewolf.chooseHunterTarget') : t('werewolf.waitHunter', { name: hunterPending?.name ?? '-' })}
+          </p>
+          {canShoot && livingTargets.map(player => (
+            <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.hunterShot(player.id).then(() => setMessage(t('werewolf.hunterSubmitted')))}>
+              <Skull className="size-4" />
+              {player.name}
+            </button>
+          ))}
+          {canShoot && (
+            <button className={socialButton(config, true)} type="button" onClick={() => void actions.hunterShot('').then(() => setMessage(t('werewolf.hunterSubmitted')))}>
+              {t('werewolf.skipHunter')}
+            </button>
+          )}
         </Panel>
       )
     }
@@ -760,7 +817,6 @@ function PlayerGrid({
   compact = false,
   config,
   isHost,
-  llmEnabled,
   llmModel,
   room,
 }: {
@@ -768,7 +824,6 @@ function PlayerGrid({
   compact?: boolean
   config: typeof GAME_COPY[SocialGameSlug]
   isHost: boolean
-  llmEnabled: boolean
   llmModel: string
   room: SocialRoom
 }) {
@@ -786,13 +841,9 @@ function PlayerGrid({
               {player.id === room.youPlayerId && <SpeechButton onSend={actions.say} />}
               {player.ai
                 ? (
-                    <AILevelBadgeSelect
-                      disabled={!isHost || room.phase !== 'lobby'}
-                      level={player.ai.level}
-                      llmEnabled={llmEnabled}
-                      llmModel={llmModel}
-                      onChange={level => void actions.updateAI(player.id, level)}
-                    />
+                    <span className="shrink-0 rounded-full bg-[#fff8e8] px-2 py-0.5 text-xs font-black text-[#171411]">
+                      {`AI: ${llmModel || t('common.ai')}`}
+                    </span>
                   )
                 : (
                     <span className="rounded-full bg-[#fff8e8] px-2 py-0.5 text-xs font-black text-[#171411]">
@@ -930,7 +981,13 @@ function alignmentClass(alignment: 'good' | 'evil' | 'neutral') {
 }
 
 function roleTotal(counts: WerewolfRoleCounts) {
-  return counts.villager + counts.werewolf + counts.seer + counts.guard
+  return (counts.villager ?? 0)
+    + (counts.werewolf ?? 0)
+    + (counts.seer ?? 0)
+    + (counts.guard ?? 0)
+    + (counts.witch ?? 0)
+    + (counts.hunter ?? 0)
+    + (counts.idiot ?? 0)
 }
 
 function SocialShell({ children, config, game }: { children: ReactNode, config: typeof GAME_COPY[SocialGameSlug], game: SocialGameSlug }) {

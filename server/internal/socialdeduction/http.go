@@ -38,6 +38,7 @@ type werewolfRoleConfigRequest struct {
 
 type targetRequest struct {
 	TargetID string `json:"targetId"`
+	ActionID string `json:"actionId,omitempty"`
 }
 
 type teamRequest struct {
@@ -82,6 +83,7 @@ func (h *Handler) Routes() http.Handler {
 	router.Post("/rooms/{roomID}/start", h.start)
 	router.Post("/rooms/{roomID}/werewolf-roles", h.updateWerewolfRoles)
 	router.Post("/rooms/{roomID}/night-action", h.nightAction)
+	router.Post("/rooms/{roomID}/hunter-shot", h.hunterShot)
 	router.Post("/rooms/{roomID}/advance-day", h.advanceDay)
 	router.Post("/rooms/{roomID}/werewolf-vote", h.werewolfVote)
 	router.Post("/rooms/{roomID}/team", h.proposeTeam)
@@ -224,7 +226,22 @@ func (h *Handler) nightAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
-		return h.manager.NightAction(roomID, userID, request.TargetID)
+		actionID := request.ActionID
+		if actionID == "" {
+			actionID = request.TargetID
+		}
+		return h.manager.NightAction(roomID, userID, actionID)
+	})
+}
+
+func (h *Handler) hunterShot(w http.ResponseWriter, r *http.Request) {
+	var request targetRequest
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
+		return
+	}
+	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
+		return h.manager.HunterShot(roomID, userID, request.TargetID)
 	})
 }
 

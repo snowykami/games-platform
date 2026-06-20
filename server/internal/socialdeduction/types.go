@@ -17,6 +17,7 @@ const (
 	PhaseWerewolfNight      Phase = "night"
 	PhaseWerewolfDay        Phase = "day"
 	PhaseWerewolfVote       Phase = "vote"
+	PhaseWerewolfHunter     Phase = "hunter"
 	PhaseAvalonTeam         Phase = "team"
 	PhaseAvalonVote         Phase = "team_vote"
 	PhaseAvalonQuest        Phase = "quest"
@@ -41,6 +42,9 @@ const (
 	RoleWerewolf   Role = "werewolf"
 	RoleSeer       Role = "seer"
 	RoleGuard      Role = "guard"
+	RoleWitch      Role = "witch"
+	RoleHunter     Role = "hunter"
+	RoleIdiot      Role = "idiot"
 	RoleMerlin     Role = "merlin"
 	RoleAssassin   Role = "assassin"
 	RoleMinion     Role = "minion"
@@ -114,13 +118,20 @@ type PublicAction struct {
 }
 
 type WerewolfState struct {
-	Day          int                  `json:"day"`
-	RoleConfig   WerewolfRoleConfig   `json:"roleConfig"`
-	RolePresets  []WerewolfRolePreset `json:"rolePresets,omitempty"`
-	NightActions map[string]string    `json:"-"`
-	SeerChecks   map[string]Alignment `json:"-"`
-	Votes        map[string]string    `json:"votes"`
-	LastNight    string               `json:"lastNight,omitempty"`
+	Day               int                  `json:"day"`
+	RoleConfig        WerewolfRoleConfig   `json:"roleConfig"`
+	RolePresets       []WerewolfRolePreset `json:"rolePresets,omitempty"`
+	NightActions      map[string]string    `json:"-"`
+	SeerChecks        map[string]Alignment `json:"-"`
+	Votes             map[string]string    `json:"votes"`
+	LastNight         string               `json:"lastNight,omitempty"`
+	WitchAntidoteUsed bool                 `json:"-"`
+	WitchPoisonUsed   bool                 `json:"-"`
+	WitchSaveTargetID string               `json:"-"`
+	WitchPoisonID     string               `json:"-"`
+	RevealedIdiots    map[string]bool      `json:"-"`
+	HunterPendingID   string               `json:"-"`
+	HunterAfterPhase  Phase                `json:"-"`
 }
 
 type WerewolfRoleCounts struct {
@@ -128,6 +139,9 @@ type WerewolfRoleCounts struct {
 	Werewolf int `json:"werewolf"`
 	Seer     int `json:"seer"`
 	Guard    int `json:"guard"`
+	Witch    int `json:"witch"`
+	Hunter   int `json:"hunter"`
+	Idiot    int `json:"idiot"`
 }
 
 type WerewolfRoleConfig struct {
@@ -232,12 +246,17 @@ type PublicRoom struct {
 }
 
 type WerewolfView struct {
-	Day         int                  `json:"day"`
-	RoleConfig  WerewolfRoleConfig   `json:"roleConfig"`
-	RolePresets []WerewolfRolePreset `json:"rolePresets,omitempty"`
-	SeerChecks  map[string]Alignment `json:"seerChecks,omitempty"`
-	Votes       map[string]string    `json:"votes"`
-	LastNight   string               `json:"lastNight,omitempty"`
+	Day               int                  `json:"day"`
+	RoleConfig        WerewolfRoleConfig   `json:"roleConfig"`
+	RolePresets       []WerewolfRolePreset `json:"rolePresets,omitempty"`
+	SeerChecks        map[string]Alignment `json:"seerChecks,omitempty"`
+	Votes             map[string]string    `json:"votes"`
+	LastNight         string               `json:"lastNight,omitempty"`
+	WitchVictimID     string               `json:"witchVictimId,omitempty"`
+	WitchAntidoteUsed bool                 `json:"witchAntidoteUsed,omitempty"`
+	WitchPoisonUsed   bool                 `json:"witchPoisonUsed,omitempty"`
+	HunterPendingID   string               `json:"hunterPendingId,omitempty"`
+	RevealedIdiots    map[string]bool      `json:"revealedIdiots,omitempty"`
 }
 
 type AvalonView struct {

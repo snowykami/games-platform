@@ -7,6 +7,7 @@ import {
   assassinateAvalon,
   describeUndercover,
   joinSocialRoom,
+  parseSocialRoom,
   playAvalonQuest,
   proposeAvalonTeam,
   removeSocialPlayer,
@@ -17,6 +18,7 @@ import {
   updateWerewolfRoles,
   voteAvalonTeam,
   voteUndercover,
+  werewolfHunterShot,
   werewolfNightAction,
   werewolfVote,
 } from './online'
@@ -60,7 +62,7 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined) 
     function handleMessage(event: MessageEvent) {
       const data = JSON.parse(String(event.data))
       if (data.type === 'room.state') {
-        setRoom(data.room)
+        setRoom(parseSocialRoom(data.room))
         setError(undefined)
       }
       if (data.type === 'error') {
@@ -100,7 +102,8 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined) 
     addAI: (level: string) => roomId ? run(() => addSocialAI(game, roomId, level)) : Promise.resolve(),
     advanceDay: () => roomId ? run(() => advanceWerewolfDay(roomId)) : Promise.resolve(),
     assassinate: (targetId: string) => roomId ? run(() => assassinateAvalon(roomId, targetId)) : Promise.resolve(),
-    nightAction: (targetId: string) => roomId ? run(() => werewolfNightAction(roomId, targetId)) : Promise.resolve(),
+    hunterShot: (targetId: string) => roomId ? run(() => werewolfHunterShot(roomId, targetId)) : Promise.resolve(),
+    nightAction: (actionId: string) => roomId ? run(() => werewolfNightAction(roomId, actionId)) : Promise.resolve(),
     playQuest: (card: 'success' | 'fail') => roomId ? run(() => playAvalonQuest(roomId, card)) : Promise.resolve(),
     proposeTeam: (team: string[]) => roomId ? run(() => proposeAvalonTeam(roomId, team)) : Promise.resolve(),
     refresh,

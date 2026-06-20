@@ -2,15 +2,18 @@ import type { GameSpeechEntry } from '@/games/speech'
 import { z } from 'zod'
 
 export type SocialGameSlug = 'werewolf' | 'avalon' | 'undercover'
-export type SocialPhase = 'lobby' | 'night' | 'day' | 'vote' | 'team' | 'team_vote' | 'quest' | 'assassination' | 'describe' | 'undercover_vote' | 'finished'
+export type SocialPhase = 'lobby' | 'night' | 'day' | 'vote' | 'hunter' | 'team' | 'team_vote' | 'quest' | 'assassination' | 'describe' | 'undercover_vote' | 'finished'
 export type SocialAlignment = 'good' | 'evil' | 'neutral'
-export type SocialRole = 'villager' | 'werewolf' | 'seer' | 'guard' | 'merlin' | 'assassin' | 'minion' | 'loyal' | 'civilian' | 'undercover' | 'blank'
+export type SocialRole = 'villager' | 'werewolf' | 'seer' | 'guard' | 'witch' | 'hunter' | 'idiot' | 'merlin' | 'assassin' | 'minion' | 'loyal' | 'civilian' | 'undercover' | 'blank'
 
 export interface WerewolfRoleCounts {
   villager: number
   werewolf: number
   seer: number
   guard: number
+  witch: number
+  hunter: number
+  idiot: number
 }
 
 export interface WerewolfRoleConfig {
@@ -67,6 +70,11 @@ export interface SocialRoom {
     seerChecks?: Record<string, SocialAlignment>
     votes: Record<string, string>
     lastNight?: string
+    witchVictimId?: string
+    witchAntidoteUsed?: boolean
+    witchPoisonUsed?: boolean
+    hunterPendingId?: string
+    revealedIdiots?: Record<string, boolean>
   }
   avalon: {
     round: number
@@ -121,7 +129,7 @@ export interface SocialRoom {
   }>
 }
 
-const roleSchema = z.enum(['villager', 'werewolf', 'seer', 'guard', 'merlin', 'assassin', 'minion', 'loyal', 'civilian', 'undercover', 'blank'])
+const roleSchema = z.enum(['villager', 'werewolf', 'seer', 'guard', 'witch', 'hunter', 'idiot', 'merlin', 'assassin', 'minion', 'loyal', 'civilian', 'undercover', 'blank'])
 const alignmentSchema = z.enum(['good', 'evil', 'neutral'])
 const undercoverWordPairSchema = z.object({
   id: z.string(),
@@ -130,10 +138,13 @@ const undercoverWordPairSchema = z.object({
   category: z.string().optional(),
 })
 const werewolfRoleCountsSchema = z.object({
-  villager: z.number(),
-  werewolf: z.number(),
-  seer: z.number(),
-  guard: z.number(),
+  villager: z.number().default(0),
+  werewolf: z.number().default(0),
+  seer: z.number().default(0),
+  guard: z.number().default(0),
+  witch: z.number().default(0),
+  hunter: z.number().default(0),
+  idiot: z.number().default(0),
 })
 const werewolfRoleConfigSchema: z.ZodType<WerewolfRoleConfig> = z.object({
   mode: z.enum(['preset', 'custom']),
@@ -149,6 +160,14 @@ const werewolfRolePresetSchema: z.ZodType<WerewolfRolePreset> = z.object({
   players: z.number(),
   counts: werewolfRoleCountsSchema,
 })
+
+const defaultWerewolfRoleCounts: WerewolfRoleCounts = { guard: 0, hunter: 0, idiot: 0, seer: 0, villager: 0, werewolf: 0, witch: 0 }
+const defaultWerewolfRoleConfig: WerewolfRoleConfig = {
+  counts: defaultWerewolfRoleCounts,
+  description: '',
+  mode: 'custom',
+  name: '',
+}
 
 const playerSchema = z.object({
   id: z.string(),
@@ -184,34 +203,39 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
   id: z.string(),
   game: z.enum(['werewolf', 'avalon', 'undercover']),
   hostUserId: z.string(),
-  phase: z.enum(['lobby', 'night', 'day', 'vote', 'team', 'team_vote', 'quest', 'assassination', 'describe', 'undercover_vote', 'finished']),
+  phase: z.enum(['lobby', 'night', 'day', 'vote', 'hunter', 'team', 'team_vote', 'quest', 'assassination', 'describe', 'undercover_vote', 'finished']),
   players: z.array(playerSchema),
   youPlayerId: z.string().optional(),
   minPlayers: z.number(),
   maxPlayers: z.number(),
   werewolf: z.object({
-    day: z.number(),
-    roleConfig: werewolfRoleConfigSchema,
+    day: z.number().default(0),
+    roleConfig: werewolfRoleConfigSchema.catch(defaultWerewolfRoleConfig),
     rolePresets: z.array(werewolfRolePresetSchema).default([]),
     seerChecks: z.record(z.string(), alignmentSchema).optional(),
-    votes: z.record(z.string(), z.string()),
+    votes: z.record(z.string(), z.string()).default({}),
     lastNight: z.string().optional(),
-  }),
+    witchVictimId: z.string().optional(),
+    witchAntidoteUsed: z.boolean().optional(),
+    witchPoisonUsed: z.boolean().optional(),
+    hunterPendingId: z.string().optional(),
+    revealedIdiots: z.record(z.string(), z.boolean()).optional(),
+  }).default({ day: 0, roleConfig: defaultWerewolfRoleConfig, rolePresets: [], votes: {} }),
   avalon: z.object({
-    round: z.number(),
+    round: z.number().default(0),
     leaderId: z.string().optional(),
-    team: z.array(z.string()),
-    teamVotes: z.record(z.string(), z.boolean()),
-    questResults: z.array(z.object({ round: z.number(), teamSize: z.number(), failCards: z.number() })),
-    rejectedTeams: z.number(),
-    requiredTeam: z.number(),
-    requiredFails: z.number(),
-    successes: z.number(),
-    fails: z.number(),
-  }),
+    team: z.array(z.string()).default([]),
+    teamVotes: z.record(z.string(), z.boolean()).default({}),
+    questResults: z.array(z.object({ round: z.number(), teamSize: z.number(), failCards: z.number() })).default([]),
+    rejectedTeams: z.number().default(0),
+    requiredTeam: z.number().default(0),
+    requiredFails: z.number().default(0),
+    successes: z.number().default(0),
+    fails: z.number().default(0),
+  }).default({ fails: 0, questResults: [], rejectedTeams: 0, requiredFails: 0, requiredTeam: 0, round: 0, successes: 0, team: [], teamVotes: {} }),
   undercover: z.object({
-    round: z.number(),
-    presetId: z.string(),
+    round: z.number().default(0),
+    presetId: z.string().default(''),
     presets: z.array(z.object({
       id: z.string(),
       name: z.string(),
@@ -219,12 +243,12 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
       pairs: z.array(undercoverWordPairSchema).optional(),
     })).optional(),
     wordPair: undercoverWordPairSchema.optional(),
-    includeBlank: z.boolean(),
+    includeBlank: z.boolean().default(false),
     currentSpeakerId: z.string().optional(),
-    described: z.record(z.string(), z.boolean()),
-    votes: z.record(z.string(), z.string()),
+    described: z.record(z.string(), z.boolean()).default({}),
+    votes: z.record(z.string(), z.string()).default({}),
     lastEliminatedId: z.string().optional(),
-  }),
+  }).default({ described: {}, includeBlank: false, presetId: '', round: 0, votes: {} }),
   winner: alignmentSchema.optional(),
   winnerMessage: z.string().optional(),
   log: z.array(z.object({ id: z.string(), text: z.string() })),
@@ -241,6 +265,10 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
 })
 
 const roomResponseSchema = z.object({ room: roomSchema })
+
+export function parseSocialRoom(value: unknown): SocialRoom {
+  return roomSchema.parse(value)
+}
 
 export async function createSocialRoom(game: SocialGameSlug) {
   return requestRoom(game, '/rooms', { method: 'POST' })
@@ -298,8 +326,12 @@ export async function updateWerewolfRoles(roomId: string, config: WerewolfRoleCo
   return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/werewolf-roles`, jsonPost({ config }))
 }
 
-export async function werewolfNightAction(roomId: string, targetId: string) {
-  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/night-action`, jsonPost({ targetId }))
+export async function werewolfNightAction(roomId: string, actionId: string) {
+  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/night-action`, jsonPost({ actionId }))
+}
+
+export async function werewolfHunterShot(roomId: string, targetId: string) {
+  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/hunter-shot`, jsonPost({ targetId }))
 }
 
 export async function advanceWerewolfDay(roomId: string) {

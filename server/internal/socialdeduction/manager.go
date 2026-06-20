@@ -28,10 +28,11 @@ type Manager struct {
 	game       GameKind
 	mu         sync.Mutex
 	rooms      map[string]*Room
+	aiSessions map[string]*socialAISession
 }
 
 func NewManager(game GameKind, aiProvider aiplayer.Provider) *Manager {
-	return &Manager{aiProvider: aiProvider, game: game, rooms: map[string]*Room{}}
+	return &Manager{aiProvider: aiProvider, aiSessions: map[string]*socialAISession{}, game: game, rooms: map[string]*Room{}}
 }
 
 func (m *Manager) CreateRoom(user UserView) PublicRoom {
@@ -122,13 +123,12 @@ func (m *Manager) AddAI(roomID string, actorID string, options AIOptions) (Publi
 	if len(room.Players) >= m.maxPlayers() {
 		return PublicRoom{}, errors.New("room_full")
 	}
-	if strings.TrimSpace(options.Level) == string(aiplayer.LevelLLM) && (m.aiProvider == nil || !m.aiProvider.Enabled()) {
+	if m.aiProvider == nil || !m.aiProvider.Enabled() {
 		return PublicRoom{}, errors.New("llm_not_configured")
 	}
 
-	level := aiplayer.NormalizeLevel(options.Level, m.aiProvider != nil && m.aiProvider.Enabled())
-	profile := nextAIProfile(room, level)
-	room.Players = append(room.Players, &Player{
+	profile := nextAIProfile(room, aiplayer.LevelLLM)
+	player := &Player{
 		ID:        "ai_" + randomToken(8),
 		UserID:    "ai_" + randomToken(8),
 		Name:      profile.Name,
@@ -140,7 +140,9 @@ func (m *Manager) AddAI(roomID string, actorID string, options AIOptions) (Publi
 		Alive:     true,
 		AI:        &profile,
 		JoinedAt:  time.Now().UTC(),
-	})
+	}
+	room.Players = append(room.Players, player)
+	m.ensureAISession(room, player)
 	reconcileLobbyConfig(room)
 	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 加入了房间。", profile.Name)))
 	room.UpdatedAt = time.Now().UTC()
@@ -165,8 +167,8 @@ func (m *Manager) UpdateAI(roomID string, actorID string, playerID string, optio
 	if player == nil || !player.IsAI || player.AI == nil {
 		return PublicRoom{}, errors.New("ai_player_not_found")
 	}
-	level := aiplayer.NormalizeLevel(options.Level, m.aiProvider != nil && m.aiProvider.Enabled())
-	player.AI.Level = string(level)
+	player.AI.Level = string(aiplayer.LevelLLM)
+	m.ensureAISession(room, player)
 	room.UpdatedAt = time.Now().UTC()
 	return m.publicRoom(room, actorID), nil
 }
@@ -349,7 +351,7 @@ func (m *Manager) UndercoverVote(roomID string, actorID string, targetID string)
 	return m.publicRoom(room, actorID), nil
 }
 
-func (m *Manager) NightAction(roomID string, actorID string, targetID string) (PublicRoom, error) {
+func (m *Manager) NightAction(roomID string, actorID string, actionID string) (PublicRoom, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -357,19 +359,48 @@ func (m *Manager) NightAction(roomID string, actorID string, targetID string) (P
 	if err != nil {
 		return PublicRoom{}, err
 	}
-	target := findPlayerByID(room, targetID)
-	if target == nil || !target.Alive {
-		return PublicRoom{}, errors.New("invalid_target")
-	}
 	if !canActAtNight(player) {
 		return PublicRoom{}, errors.New("role_has_no_night_action")
 	}
-	room.Werewolf.NightActions[player.ID] = target.ID
-	if player.Role == RoleSeer {
-		room.Werewolf.SeerChecks[target.ID] = target.Alignment
+	if actionID == "" {
+		return PublicRoom{}, errors.New("invalid_target")
 	}
-	recordAction(room, PublicAction{Type: "night_action", ActorID: player.ID, ActorName: player.Name, TargetID: target.ID, Message: fmt.Sprintf("%s 完成了夜晚行动。", player.Name)})
+	if !strings.Contains(actionID, ":") {
+		actionID = "target:" + actionID
+	}
+	target, err := applyWerewolfNightAction(room, player, actionID)
+	if err != nil {
+		return PublicRoom{}, err
+	}
+	targetID := ""
+	if target != nil {
+		targetID = target.ID
+	}
+	recordAction(room, PublicAction{Type: "night_action", ActorID: player.ID, ActorName: player.Name, TargetID: targetID, Message: fmt.Sprintf("%s 完成了夜晚行动。", player.Name)})
 	m.advanceWerewolfNight(room)
+	room.UpdatedAt = time.Now().UTC()
+	return m.publicRoom(room, actorID), nil
+}
+
+func (m *Manager) HunterShot(roomID string, actorID string, targetID string) (PublicRoom, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	room, err := m.room(roomID)
+	if err != nil {
+		return PublicRoom{}, err
+	}
+	if room.Game != GameWerewolf || room.Phase != PhaseWerewolfHunter {
+		return PublicRoom{}, errors.New("invalid_phase")
+	}
+	hunter := findPlayerByID(room, room.Werewolf.HunterPendingID)
+	player := findPlayerByUserID(room, actorID)
+	if hunter == nil || player == nil || hunter.ID != player.ID || player.IsAI {
+		return PublicRoom{}, errors.New("not_active_human_player")
+	}
+	if err := resolveHunterShot(room, targetID); err != nil {
+		return PublicRoom{}, err
+	}
 	room.UpdatedAt = time.Now().UTC()
 	return m.publicRoom(room, actorID), nil
 }
@@ -403,6 +434,9 @@ func (m *Manager) WerewolfVote(roomID string, actorID string, targetID string) (
 	room, player, err := m.requireWerewolfActor(roomID, actorID, PhaseWerewolfVote)
 	if err != nil {
 		return PublicRoom{}, err
+	}
+	if room.Werewolf.RevealedIdiots[player.ID] {
+		return PublicRoom{}, errors.New("idiot_cannot_vote_after_reveal")
 	}
 	target := findPlayerByID(room, targetID)
 	if target == nil || !target.Alive {
@@ -640,7 +674,7 @@ func resetRoom(room *Room) {
 	room.Winner = ""
 	room.WinnerMessage = ""
 	room.RecentActions = nil
-	room.Werewolf = WerewolfState{RoleConfig: roleConfig, RolePresets: werewolfRolePresets(len(room.Players)), NightActions: map[string]string{}, SeerChecks: map[string]Alignment{}, Votes: map[string]string{}, Day: 1}
+	room.Werewolf = WerewolfState{RoleConfig: roleConfig, RolePresets: werewolfRolePresets(len(room.Players)), NightActions: map[string]string{}, SeerChecks: map[string]Alignment{}, Votes: map[string]string{}, RevealedIdiots: map[string]bool{}, Day: 1}
 	room.Avalon = AvalonState{TeamVotes: map[string]bool{}, QuestCards: map[string]string{}, Round: 1}
 	room.Undercover = UndercoverState{PresetID: undercoverConfig.PresetID, IncludeBlank: undercoverConfig.IncludeBlank, Presets: undercoverPresets(), Described: map[string]bool{}, Votes: map[string]string{}, Round: 1}
 	for index, player := range room.Players {
@@ -666,6 +700,7 @@ func startWerewolf(room *Room) {
 	room.Werewolf.NightActions = map[string]string{}
 	room.Werewolf.SeerChecks = map[string]Alignment{}
 	room.Werewolf.Votes = map[string]string{}
+	room.Werewolf.RevealedIdiots = map[string]bool{}
 	room.Werewolf.LastNight = ""
 	room.Log = append(room.Log, createLog(fmt.Sprintf("狼人杀开始，角色组：%s。天黑请闭眼。", room.Werewolf.RoleConfig.Name)))
 	recordAction(room, PublicAction{Type: "start", Message: "狼人杀开始，进入第一个夜晚。"})
@@ -892,39 +927,39 @@ func normalizeWerewolfConfig(config WerewolfRoleConfig, players int) (WerewolfRo
 func werewolfRolePresets(players int) []WerewolfRolePreset {
 	presets := map[int][]WerewolfRolePreset{
 		6: {
-			werewolfPreset("wwf-6-classic", "6人标准", "2 狼、1 预言家、3 村民。节奏直接，适合快速局。", 6, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Villager: 3}),
-			werewolfPreset("wwf-6-guarded", "6人守卫局", "1 狼、1 预言家、1 守卫、3 村民。信息更安全。", 6, WerewolfRoleCounts{Werewolf: 1, Seer: 1, Guard: 1, Villager: 3}),
-			werewolfPreset("wwf-6-pressure", "6人压迫局", "2 狼、1 守卫、3 村民。缺少查验，发言压力更高。", 6, WerewolfRoleCounts{Werewolf: 2, Guard: 1, Villager: 3}),
+			werewolfPreset("wwf-6-classic", "6人标准", "2 狼、1 预言家、1 女巫、2 村民。节奏直接，适合快速局。", 6, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Witch: 1, Villager: 2}),
+			werewolfPreset("wwf-6-guarded", "6人守卫局", "1 狼、1 预言家、1 女巫、1 守卫、2 村民。信息更安全。", 6, WerewolfRoleCounts{Werewolf: 1, Seer: 1, Witch: 1, Guard: 1, Villager: 2}),
+			werewolfPreset("wwf-6-hunter", "6人猎人局", "2 狼、1 预言家、1 猎人、2 村民。死亡反击更刺激。", 6, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Hunter: 1, Villager: 2}),
 		},
 		7: {
-			werewolfPreset("wwf-7-classic", "7人标准", "2 狼、1 预言家、1 守卫、3 村民。攻防均衡。", 7, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Guard: 1, Villager: 3}),
-			werewolfPreset("wwf-7-simple", "7人纯查验", "2 狼、1 预言家、4 村民。规则更轻。", 7, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Villager: 4}),
-			werewolfPreset("wwf-7-safe", "7人稳健", "1 狼、1 预言家、1 守卫、4 村民。适合新手。", 7, WerewolfRoleCounts{Werewolf: 1, Seer: 1, Guard: 1, Villager: 4}),
+			werewolfPreset("wwf-7-classic", "7人标准", "2 狼、1 预言家、1 女巫、1 猎人、2 村民。攻防均衡。", 7, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Witch: 1, Hunter: 1, Villager: 2}),
+			werewolfPreset("wwf-7-guarded", "7人守卫", "2 狼、1 预言家、1 女巫、1 守卫、2 村民。夜晚博弈更多。", 7, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Witch: 1, Guard: 1, Villager: 2}),
+			werewolfPreset("wwf-7-idiot", "7人白痴局", "2 狼、1 预言家、1 女巫、1 白痴、2 村民。放逐风险更高。", 7, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Witch: 1, Idiot: 1, Villager: 2}),
 		},
 		8: {
-			werewolfPreset("wwf-8-classic", "8人标准", "2 狼、1 预言家、1 守卫、4 村民。推荐配置。", 8, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Guard: 1, Villager: 4}),
-			werewolfPreset("wwf-8-wolfish", "8人狼压", "3 狼、1 预言家、4 村民。邪恶更强。", 8, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Villager: 4}),
-			werewolfPreset("wwf-8-guarded", "8人守卫", "2 狼、1 守卫、5 村民。夜晚更保守。", 8, WerewolfRoleCounts{Werewolf: 2, Guard: 1, Villager: 5}),
+			werewolfPreset("wwf-8-classic", "8人标准", "2 狼、预言家、女巫、猎人、白痴、2 村民。经典小板子。", 8, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Witch: 1, Hunter: 1, Idiot: 1, Villager: 2}),
+			werewolfPreset("wwf-8-guarded", "8人守卫", "2 狼、预言家、女巫、猎人、守卫、2 村民。夜晚更保守。", 8, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Witch: 1, Hunter: 1, Guard: 1, Villager: 2}),
+			werewolfPreset("wwf-8-wolfish", "8人狼压", "3 狼、预言家、女巫、猎人、2 村民。邪恶更强。", 8, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Witch: 1, Hunter: 1, Villager: 2}),
 		},
 		9: {
-			werewolfPreset("wwf-9-classic", "9人标准", "3 狼、1 预言家、1 守卫、4 村民。发言强度高。", 9, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Guard: 1, Villager: 4}),
-			werewolfPreset("wwf-9-balanced", "9人均衡", "2 狼、1 预言家、1 守卫、5 村民。好人容错更高。", 9, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Guard: 1, Villager: 5}),
-			werewolfPreset("wwf-9-open", "9人开放", "3 狼、1 预言家、5 村民。查验主导局势。", 9, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Villager: 5}),
+			werewolfPreset("wwf-9-classic", "9人预女猎白", "3 狼、预言家、女巫、猎人、白痴、2 村民。发言强度高。", 9, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Witch: 1, Hunter: 1, Idiot: 1, Villager: 2}),
+			werewolfPreset("wwf-9-guarded", "9人守卫", "3 狼、预言家、女巫、猎人、守卫、2 村民。攻防均衡。", 9, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Witch: 1, Hunter: 1, Guard: 1, Villager: 2}),
+			werewolfPreset("wwf-9-balanced", "9人均衡", "2 狼、预言家、女巫、猎人、白痴、3 村民。好人容错更高。", 9, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Witch: 1, Hunter: 1, Idiot: 1, Villager: 3}),
 		},
 		10: {
-			werewolfPreset("wwf-10-classic", "10人标准", "3 狼、1 预言家、1 守卫、5 村民。推荐配置。", 10, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Guard: 1, Villager: 5}),
-			werewolfPreset("wwf-10-simple", "10人纯查验", "3 狼、1 预言家、6 村民。规则更快。", 10, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Villager: 6}),
-			werewolfPreset("wwf-10-safe", "10人稳健", "2 狼、1 预言家、1 守卫、6 村民。适合轻松局。", 10, WerewolfRoleCounts{Werewolf: 2, Seer: 1, Guard: 1, Villager: 6}),
+			werewolfPreset("wwf-10-classic", "10人预女猎白", "3 狼、预言家、女巫、猎人、白痴、3 村民。推荐配置。", 10, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Witch: 1, Hunter: 1, Idiot: 1, Villager: 3}),
+			werewolfPreset("wwf-10-guarded", "10人守卫", "3 狼、预言家、女巫、猎人、守卫、3 村民。防守变量更多。", 10, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Witch: 1, Hunter: 1, Guard: 1, Villager: 3}),
+			werewolfPreset("wwf-10-fullgod", "10人五神", "3 狼、预言家、女巫、猎人、白痴、守卫、2 村民。神职密度高。", 10, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Witch: 1, Hunter: 1, Idiot: 1, Guard: 1, Villager: 2}),
 		},
 		11: {
-			werewolfPreset("wwf-11-classic", "11人标准", "3 狼、1 预言家、1 守卫、6 村民。信息与狼刀平衡。", 11, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Guard: 1, Villager: 6}),
-			werewolfPreset("wwf-11-wolfish", "11人狼压", "4 狼、1 预言家、1 守卫、5 村民。高压对抗。", 11, WerewolfRoleCounts{Werewolf: 4, Seer: 1, Guard: 1, Villager: 5}),
-			werewolfPreset("wwf-11-open", "11人开放", "3 狼、1 预言家、7 村民。降低夜晚保护变量。", 11, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Villager: 7}),
+			werewolfPreset("wwf-11-classic", "11人经典", "3 狼、预言家、女巫、猎人、白痴、守卫、3 村民。信息与狼刀平衡。", 11, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Witch: 1, Hunter: 1, Idiot: 1, Guard: 1, Villager: 3}),
+			werewolfPreset("wwf-11-wolfish", "11人狼压", "4 狼、预言家、女巫、猎人、白痴、3 村民。高压对抗。", 11, WerewolfRoleCounts{Werewolf: 4, Seer: 1, Witch: 1, Hunter: 1, Idiot: 1, Villager: 3}),
+			werewolfPreset("wwf-11-safe", "11人稳健", "3 狼、预言家、女巫、猎人、守卫、4 村民。适合轻松局。", 11, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Witch: 1, Hunter: 1, Guard: 1, Villager: 4}),
 		},
 		12: {
-			werewolfPreset("wwf-12-classic", "12人标准", "4 狼、1 预言家、1 守卫、6 村民。满桌推荐。", 12, WerewolfRoleCounts{Werewolf: 4, Seer: 1, Guard: 1, Villager: 6}),
-			werewolfPreset("wwf-12-balanced", "12人均衡", "3 狼、1 预言家、1 守卫、7 村民。讨论时间更宽。", 12, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Guard: 1, Villager: 7}),
-			werewolfPreset("wwf-12-open", "12人开放", "4 狼、1 预言家、7 村民。狼队进攻更直接。", 12, WerewolfRoleCounts{Werewolf: 4, Seer: 1, Villager: 7}),
+			werewolfPreset("wwf-12-classic", "12人经典", "4 狼、预言家、女巫、猎人、白痴、守卫、3 村民。满桌推荐。", 12, WerewolfRoleCounts{Werewolf: 4, Seer: 1, Witch: 1, Hunter: 1, Idiot: 1, Guard: 1, Villager: 3}),
+			werewolfPreset("wwf-12-balanced", "12人均衡", "3 狼、预言家、女巫、猎人、白痴、守卫、4 村民。讨论时间更宽。", 12, WerewolfRoleCounts{Werewolf: 3, Seer: 1, Witch: 1, Hunter: 1, Idiot: 1, Guard: 1, Villager: 4}),
+			werewolfPreset("wwf-12-wolfish", "12人狼压", "4 狼、预言家、女巫、猎人、白痴、4 村民。狼队进攻更直接。", 12, WerewolfRoleCounts{Werewolf: 4, Seer: 1, Witch: 1, Hunter: 1, Idiot: 1, Villager: 4}),
 		},
 	}
 	return append([]WerewolfRolePreset{}, presets[players]...)
@@ -951,6 +986,10 @@ func fallbackWerewolfCounts(players int) WerewolfRoleCounts {
 		counts.Guard = 1
 		counts.Villager--
 	}
+	if players >= 6 {
+		counts.Witch = 1
+		counts.Villager--
+	}
 	return counts
 }
 
@@ -965,6 +1004,15 @@ func expandWerewolfRoles(counts WerewolfRoleCounts) []Role {
 	for range counts.Guard {
 		roles = append(roles, RoleGuard)
 	}
+	for range counts.Witch {
+		roles = append(roles, RoleWitch)
+	}
+	for range counts.Hunter {
+		roles = append(roles, RoleHunter)
+	}
+	for range counts.Idiot {
+		roles = append(roles, RoleIdiot)
+	}
 	for range counts.Villager {
 		roles = append(roles, RoleVillager)
 	}
@@ -972,7 +1020,7 @@ func expandWerewolfRoles(counts WerewolfRoleCounts) []Role {
 }
 
 func validateWerewolfCounts(counts WerewolfRoleCounts, players int) error {
-	if counts.Villager < 0 || counts.Werewolf < 0 || counts.Seer < 0 || counts.Guard < 0 {
+	if counts.Villager < 0 || counts.Werewolf < 0 || counts.Seer < 0 || counts.Guard < 0 || counts.Witch < 0 || counts.Hunter < 0 || counts.Idiot < 0 {
 		return errors.New("invalid_role_count")
 	}
 	if counts.total() != players {
@@ -984,14 +1032,14 @@ func validateWerewolfCounts(counts WerewolfRoleCounts, players int) error {
 	if counts.Werewolf >= players {
 		return errors.New("too_many_werewolves")
 	}
-	if counts.Seer > 1 || counts.Guard > 1 {
+	if counts.Seer > 1 || counts.Guard > 1 || counts.Witch > 1 || counts.Hunter > 1 || counts.Idiot > 1 {
 		return errors.New("too_many_unique_roles")
 	}
 	return nil
 }
 
 func (counts WerewolfRoleCounts) total() int {
-	return counts.Villager + counts.Werewolf + counts.Seer + counts.Guard
+	return counts.Villager + counts.Werewolf + counts.Seer + counts.Guard + counts.Witch + counts.Hunter + counts.Idiot
 }
 
 func avalonRoles(count int) []Role {
@@ -1029,16 +1077,43 @@ func (m *Manager) advanceWerewolfNight(room *Room) {
 			protectedID = targetID
 		}
 	}
+	if room.Werewolf.WitchSaveTargetID != "" && room.Werewolf.WitchSaveTargetID == killID {
+		protectedID = killID
+	}
 
+	deaths := []*Player{}
 	if killID != "" && killID != protectedID {
-		if target := findPlayerByID(room, killID); target != nil {
-			target.Alive = false
-			room.Werewolf.LastNight = fmt.Sprintf("%s 在夜晚出局。", target.Name)
-			room.Log = append(room.Log, createLog(room.Werewolf.LastNight))
+		if target := findPlayerByID(room, killID); target != nil && target.Alive {
+			deaths = append(deaths, target)
 		}
-	} else {
+	}
+	if room.Werewolf.WitchPoisonID != "" {
+		if target := findPlayerByID(room, room.Werewolf.WitchPoisonID); target != nil && target.Alive && !slices.Contains(deaths, target) {
+			deaths = append(deaths, target)
+		}
+	}
+
+	if len(deaths) == 0 {
 		room.Werewolf.LastNight = "昨夜无人出局。"
 		room.Log = append(room.Log, createLog(room.Werewolf.LastNight))
+	} else {
+		names := []string{}
+		for _, target := range deaths {
+			target.Alive = false
+			names = append(names, target.Name)
+		}
+		room.Werewolf.LastNight = fmt.Sprintf("%s 在夜晚出局。", strings.Join(names, "、"))
+		room.Log = append(room.Log, createLog(room.Werewolf.LastNight))
+	}
+	room.Werewolf.WitchSaveTargetID = ""
+	room.Werewolf.WitchPoisonID = ""
+
+	if hunter := firstDeadHunter(deaths); hunter != nil {
+		room.Phase = PhaseWerewolfHunter
+		room.Werewolf.HunterPendingID = hunter.ID
+		room.Werewolf.HunterAfterPhase = PhaseWerewolfDay
+		recordAction(room, PublicAction{Type: "hunter_pending", ActorID: hunter.ID, ActorName: hunter.Name, Message: fmt.Sprintf("%s 可以发动猎人技能。", hunter.Name)})
+		return
 	}
 
 	if checkWerewolfWin(room) {
@@ -1067,29 +1142,157 @@ func allRequiredNightActions(room *Room) bool {
 			if _, ok := room.Werewolf.NightActions[player.ID]; !ok {
 				return false
 			}
+		case RoleWitch:
+			if witchCanAct(room) {
+				if _, ok := room.Werewolf.NightActions[player.ID]; !ok {
+					return false
+				}
+			}
 		}
 	}
 	return !werewolfAlive || werewolfActed
 }
 
 func canActAtNight(player *Player) bool {
-	return player.Role == RoleWerewolf || player.Role == RoleSeer || player.Role == RoleGuard
+	return player.Role == RoleWerewolf || player.Role == RoleSeer || player.Role == RoleGuard || player.Role == RoleWitch
+}
+
+func witchCanAct(room *Room) bool {
+	return !room.Werewolf.WitchAntidoteUsed || !room.Werewolf.WitchPoisonUsed
+}
+
+func applyWerewolfNightAction(room *Room, player *Player, actionID string) (*Player, error) {
+	actions := werewolfNightActions(room, player)
+	if !aiplayer.ValidateAction(actionID, actions) {
+		return nil, errors.New("invalid_target")
+	}
+	switch {
+	case strings.HasPrefix(actionID, "skip:"):
+		room.Werewolf.NightActions[player.ID] = actionID
+		return nil, nil
+	case strings.HasPrefix(actionID, "save:"):
+		target := playerFromAction(room, actionID, "save:")
+		if target == nil || !target.Alive || room.Werewolf.WitchAntidoteUsed {
+			return nil, errors.New("invalid_target")
+		}
+		room.Werewolf.WitchAntidoteUsed = true
+		room.Werewolf.WitchSaveTargetID = target.ID
+		room.Werewolf.NightActions[player.ID] = actionID
+		return target, nil
+	case strings.HasPrefix(actionID, "poison:"):
+		target := playerFromAction(room, actionID, "poison:")
+		if target == nil || !target.Alive || room.Werewolf.WitchPoisonUsed {
+			return nil, errors.New("invalid_target")
+		}
+		room.Werewolf.WitchPoisonUsed = true
+		room.Werewolf.WitchPoisonID = target.ID
+		room.Werewolf.NightActions[player.ID] = actionID
+		return target, nil
+	default:
+		target := playerFromAction(room, actionID, "target:")
+		if target == nil || !target.Alive {
+			return nil, errors.New("invalid_target")
+		}
+		room.Werewolf.NightActions[player.ID] = target.ID
+		if player.Role == RoleSeer {
+			room.Werewolf.SeerChecks[target.ID] = target.Alignment
+		}
+		return target, nil
+	}
+}
+
+func resolveHunterShot(room *Room, targetID string) error {
+	hunter := findPlayerByID(room, room.Werewolf.HunterPendingID)
+	if hunter == nil || hunter.Role != RoleHunter {
+		return errors.New("hunter_not_found")
+	}
+	targetID = strings.TrimSpace(targetID)
+	if targetID != "" {
+		target := findPlayerByID(room, targetID)
+		if target == nil || !target.Alive || target.ID == hunter.ID {
+			return errors.New("invalid_target")
+		}
+		target.Alive = false
+		message := fmt.Sprintf("%s 发动猎人技能带走了 %s。", hunter.Name, target.Name)
+		room.Log = append(room.Log, createLog(message))
+		recordAction(room, PublicAction{Type: "hunter_shot", ActorID: hunter.ID, ActorName: hunter.Name, TargetID: target.ID, Message: message})
+	} else {
+		message := fmt.Sprintf("%s 放弃发动猎人技能。", hunter.Name)
+		room.Log = append(room.Log, createLog(message))
+		recordAction(room, PublicAction{Type: "hunter_skip", ActorID: hunter.ID, ActorName: hunter.Name, Message: message})
+	}
+	afterPhase := room.Werewolf.HunterAfterPhase
+	room.Werewolf.HunterPendingID = ""
+	room.Werewolf.HunterAfterPhase = ""
+	if checkWerewolfWin(room) {
+		return nil
+	}
+	if afterPhase == PhaseWerewolfDay {
+		room.Phase = PhaseWerewolfDay
+		room.Werewolf.NightActions = map[string]string{}
+		room.Werewolf.Votes = map[string]string{}
+		recordAction(room, PublicAction{Type: "day_started", Message: room.Werewolf.LastNight})
+		return nil
+	}
+	startNextWerewolfNight(room)
+	return nil
+}
+
+func firstDeadHunter(players []*Player) *Player {
+	for _, player := range players {
+		if player.Role == RoleHunter {
+			return player
+		}
+	}
+	return nil
+}
+
+func werewolfVoterCount(room *Room) int {
+	count := 0
+	for _, player := range room.Players {
+		if player.Alive && !room.Werewolf.RevealedIdiots[player.ID] {
+			count++
+		}
+	}
+	return count
 }
 
 func (m *Manager) resolveWerewolfVote(room *Room) {
-	if len(room.Werewolf.Votes) < livingCount(room) {
+	if len(room.Werewolf.Votes) < werewolfVoterCount(room) {
 		return
 	}
 	targetID := mostVotedTarget(room.Werewolf.Votes, func(string) bool { return true })
 	if target := findPlayerByID(room, targetID); target != nil {
+		if target.Role == RoleIdiot && !room.Werewolf.RevealedIdiots[target.ID] {
+			if room.Werewolf.RevealedIdiots == nil {
+				room.Werewolf.RevealedIdiots = map[string]bool{}
+			}
+			room.Werewolf.RevealedIdiots[target.ID] = true
+			message := fmt.Sprintf("%s 是白痴，翻牌免疫本次放逐。", target.Name)
+			room.Log = append(room.Log, createLog(message))
+			recordAction(room, PublicAction{Type: "idiot_revealed", TargetID: target.ID, Message: message})
+			startNextWerewolfNight(room)
+			return
+		}
 		target.Alive = false
 		message := fmt.Sprintf("%s 被放逐出局。", target.Name)
 		room.Log = append(room.Log, createLog(message))
 		recordAction(room, PublicAction{Type: "exile", TargetID: target.ID, Message: message})
+		if target.Role == RoleHunter {
+			room.Phase = PhaseWerewolfHunter
+			room.Werewolf.HunterPendingID = target.ID
+			room.Werewolf.HunterAfterPhase = PhaseWerewolfNight
+			recordAction(room, PublicAction{Type: "hunter_pending", ActorID: target.ID, ActorName: target.Name, Message: fmt.Sprintf("%s 可以发动猎人技能。", target.Name)})
+			return
+		}
 	}
 	if checkWerewolfWin(room) {
 		return
 	}
+	startNextWerewolfNight(room)
+}
+
+func startNextWerewolfNight(room *Room) {
 	room.Werewolf.Day++
 	room.Werewolf.Votes = map[string]string{}
 	room.Werewolf.NightActions = map[string]string{}
@@ -1204,44 +1407,82 @@ func (m *Manager) runAIAction(room *Room, player *Player) bool {
 		if _, ok := room.Werewolf.NightActions[player.ID]; ok {
 			return false
 		}
-		target := chooseWerewolfNightTarget(room, player)
-		if target == nil {
+		actionID, speech := m.chooseWerewolfNightAction(room, player)
+		if actionID == "" {
 			return false
 		}
-		room.Werewolf.NightActions[player.ID] = target.ID
-		if player.Role == RoleSeer {
-			room.Werewolf.SeerChecks[target.ID] = target.Alignment
+		if _, err := applyWerewolfNightAction(room, player, actionID); err != nil {
+			return false
 		}
-		recordSpeech(room, player, "今晚先看这一位。")
+		if speech == "" {
+			speech = "今晚先看这一位。"
+		}
+		recordSpeech(room, player, speech)
 		m.advanceWerewolfNight(room)
 		return true
 	case PhaseWerewolfVote:
 		if _, ok := room.Werewolf.Votes[player.ID]; ok {
 			return false
 		}
-		target := randomLivingOther(room, player)
+		if room.Werewolf.RevealedIdiots[player.ID] {
+			return false
+		}
+		target, speech := m.chooseWerewolfVote(room, player)
 		if target == nil {
 			return false
 		}
 		room.Werewolf.Votes[player.ID] = target.ID
-		recordSpeech(room, player, "我投这里。")
+		if speech == "" {
+			speech = "我投这里。"
+		}
+		recordSpeech(room, player, speech)
 		m.resolveWerewolfVote(room)
 		return true
+	case PhaseWerewolfHunter:
+		if room.Werewolf.HunterPendingID != player.ID {
+			return false
+		}
+		target, speech, ok := m.chooseHunterShot(room, player)
+		if !ok {
+			return false
+		}
+		if speech != "" {
+			recordSpeech(room, player, speech)
+		}
+		targetID := ""
+		if target != nil {
+			targetID = target.ID
+		}
+		return resolveHunterShot(room, targetID) == nil
 	case PhaseAvalonTeam:
 		if room.Avalon.LeaderID != player.ID {
 			return false
 		}
-		room.Avalon.Team = chooseAvalonTeam(room, player)
+		team, speech := m.chooseAvalonTeam(room, player)
+		if len(team) != room.Avalon.RequiredTeam {
+			return false
+		}
+		room.Avalon.Team = team
 		room.Avalon.TeamVotes = map[string]bool{}
 		room.Phase = PhaseAvalonVote
-		recordSpeech(room, player, "这队先试一下。")
+		if speech == "" {
+			speech = "这队先试一下。"
+		}
+		recordSpeech(room, player, speech)
 		return true
 	case PhaseAvalonVote:
 		if _, ok := room.Avalon.TeamVotes[player.ID]; ok {
 			return false
 		}
-		room.Avalon.TeamVotes[player.ID] = rand.IntN(100) > 25
-		recordSpeech(room, player, "我给过。")
+		approve, speech, ok := m.chooseAvalonTeamVote(room, player)
+		if !ok {
+			return false
+		}
+		room.Avalon.TeamVotes[player.ID] = approve
+		if speech == "" {
+			speech = "我给过。"
+		}
+		recordSpeech(room, player, speech)
 		m.resolveAvalonTeamVote(room)
 		return true
 	case PhaseAvalonQuest:
@@ -1251,10 +1492,13 @@ func (m *Manager) runAIAction(room *Room, player *Player) bool {
 		if _, ok := room.Avalon.QuestCards[player.ID]; ok {
 			return false
 		}
-		if player.Alignment == AlignmentEvil {
-			room.Avalon.QuestCards[player.ID] = "fail"
-		} else {
-			room.Avalon.QuestCards[player.ID] = "success"
+		card, speech := m.chooseAvalonQuestCard(room, player)
+		if card == "" {
+			return false
+		}
+		room.Avalon.QuestCards[player.ID] = card
+		if speech != "" {
+			recordSpeech(room, player, speech)
 		}
 		m.resolveAvalonQuest(room)
 		return true
@@ -1262,11 +1506,13 @@ func (m *Manager) runAIAction(room *Room, player *Player) bool {
 		if player.Role != RoleAssassin {
 			return false
 		}
-		targets := goodPlayers(room)
-		if len(targets) == 0 {
+		target, speech := m.chooseAvalonAssassination(room, player)
+		if target == nil {
 			return false
 		}
-		target := targets[rand.IntN(len(targets))]
+		if speech != "" {
+			recordSpeech(room, player, speech)
+		}
 		if target.Role == RoleMerlin {
 			finish(room, AlignmentEvil, fmt.Sprintf("%s 刺中了梅林，邪恶阵营逆转获胜。", player.Name))
 		} else {
@@ -1278,6 +1524,9 @@ func (m *Manager) runAIAction(room *Room, player *Player) bool {
 			return false
 		}
 		text := m.chooseUndercoverDescription(room, player)
+		if text == "" {
+			return false
+		}
 		recordSpeech(room, player, text)
 		room.Undercover.Described[player.ID] = true
 		recordAction(room, PublicAction{Type: "undercover_describe", ActorID: player.ID, ActorName: player.Name, Message: fmt.Sprintf("%s 完成了描述。", player.Name)})
@@ -1353,7 +1602,7 @@ func (m *Manager) publicRoom(room *Room, viewerUserID string) PublicRoom {
 		YouPlayerID:   youPlayerID,
 		MinPlayers:    m.minPlayers(),
 		MaxPlayers:    m.maxPlayers(),
-		Werewolf:      WerewolfView{Day: room.Werewolf.Day, RoleConfig: room.Werewolf.RoleConfig, RolePresets: werewolfRolePresets(len(room.Players)), SeerChecks: seerChecksForViewer(room, viewer), Votes: cloneStringMap(room.Werewolf.Votes), LastNight: room.Werewolf.LastNight},
+		Werewolf:      werewolfViewForViewer(room, viewer),
 		Avalon:        AvalonView{Round: room.Avalon.Round, LeaderID: room.Avalon.LeaderID, Team: append([]string{}, room.Avalon.Team...), TeamVotes: cloneBoolMap(room.Avalon.TeamVotes), QuestResults: append([]AvalonQuestResult{}, room.Avalon.QuestResults...), RejectedTeams: room.Avalon.RejectedTeams, RequiredTeam: room.Avalon.RequiredTeam, RequiredFails: room.Avalon.RequiredFails, Successes: room.Avalon.Successes, Fails: room.Avalon.Fails},
 		Undercover:    undercoverViewForViewer(room, viewer),
 		Winner:        room.Winner,
@@ -1390,6 +1639,25 @@ func roleVisible(room *Room, viewer *Player, target *Player) bool {
 	return false
 }
 
+func werewolfViewForViewer(room *Room, viewer *Player) WerewolfView {
+	view := WerewolfView{
+		Day:             room.Werewolf.Day,
+		RoleConfig:      room.Werewolf.RoleConfig,
+		RolePresets:     werewolfRolePresets(len(room.Players)),
+		SeerChecks:      seerChecksForViewer(room, viewer),
+		Votes:           cloneStringMap(room.Werewolf.Votes),
+		LastNight:       room.Werewolf.LastNight,
+		HunterPendingID: room.Werewolf.HunterPendingID,
+		RevealedIdiots:  cloneBoolMap(room.Werewolf.RevealedIdiots),
+	}
+	if viewer != nil && viewer.Role == RoleWitch {
+		view.WitchVictimID = currentWerewolfKillTarget(room)
+		view.WitchAntidoteUsed = room.Werewolf.WitchAntidoteUsed
+		view.WitchPoisonUsed = room.Werewolf.WitchPoisonUsed
+	}
+	return view
+}
+
 func avalonTeamSize(players int, round int) int {
 	table := map[int][]int{
 		5:  {2, 3, 2, 3, 3},
@@ -1420,27 +1688,472 @@ func advanceAvalonLeader(room *Room) {
 	room.Avalon.LeaderID = room.Players[(index+1)%len(room.Players)].ID
 }
 
-func chooseWerewolfNightTarget(room *Room, actor *Player) *Player {
-	if actor.Role == RoleWerewolf {
-		return randomLivingByAlignment(room, AlignmentGood)
+func (m *Manager) chooseWerewolfNightAction(room *Room, actor *Player) (string, string) {
+	actions := werewolfNightActions(room, actor)
+	if len(actions) == 0 {
+		return "", ""
 	}
-	if actor.Role == RoleSeer {
-		return randomLivingOther(room, actor)
+	if m.canUseLLM(actor) {
+		decision, err := m.socialDecision(room, actor, werewolfAIState(room, actor), actions)
+		if err == nil && aiplayer.ValidateAction(decision.ActionID, actions) {
+			return decision.ActionID, strings.TrimSpace(decision.Speech)
+		}
+		if err != nil {
+			slog.Warn("werewolf llm night action failed", "room", room.ID, "player", actor.ID, "playerName", actor.Name, "error", err)
+		} else {
+			slog.Warn("werewolf llm night action invalid", "room", room.ID, "player", actor.ID, "playerName", actor.Name, "actionID", decision.ActionID)
+		}
 	}
-	return randomLivingByAlignment(room, AlignmentGood)
+	return "", ""
 }
 
-func chooseAvalonTeam(room *Room, leader *Player) []string {
-	team := []string{leader.ID}
-	candidates := append([]*Player{}, room.Players...)
-	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
-	for _, player := range candidates {
-		if len(team) >= room.Avalon.RequiredTeam {
-			break
+func (m *Manager) chooseWerewolfVote(room *Room, actor *Player) (*Player, string) {
+	actions := werewolfVoteActions(room, actor)
+	if len(actions) == 0 {
+		return nil, ""
+	}
+	if m.canUseLLM(actor) {
+		decision, err := m.socialDecision(room, actor, werewolfAIState(room, actor), actions)
+		if err == nil && aiplayer.ValidateAction(decision.ActionID, actions) {
+			if target := playerFromAction(room, decision.ActionID, "vote:"); target != nil && target.Alive {
+				return target, strings.TrimSpace(decision.Speech)
+			}
 		}
-		if !slices.Contains(team, player.ID) {
-			team = append(team, player.ID)
+		if err != nil {
+			slog.Warn("werewolf llm vote failed", "room", room.ID, "player", actor.ID, "playerName", actor.Name, "error", err)
+		} else {
+			slog.Warn("werewolf llm vote invalid", "room", room.ID, "player", actor.ID, "playerName", actor.Name, "actionID", decision.ActionID)
 		}
+	}
+	return nil, ""
+}
+
+func (m *Manager) chooseHunterShot(room *Room, actor *Player) (*Player, string, bool) {
+	actions := hunterShotActions(room, actor)
+	if len(actions) == 0 {
+		return nil, "", false
+	}
+	if m.canUseLLM(actor) {
+		decision, err := m.socialDecision(room, actor, werewolfAIState(room, actor), actions)
+		if err == nil && aiplayer.ValidateAction(decision.ActionID, actions) {
+			if decision.ActionID == "shoot:skip" {
+				return nil, strings.TrimSpace(decision.Speech), true
+			}
+			target := playerFromAction(room, decision.ActionID, "shoot:")
+			if target != nil && target.Alive {
+				return target, strings.TrimSpace(decision.Speech), true
+			}
+		}
+		if err != nil {
+			slog.Warn("werewolf llm hunter shot failed", "room", room.ID, "player", actor.ID, "playerName", actor.Name, "error", err)
+		}
+	}
+	return nil, "", false
+}
+
+func (m *Manager) canUseLLM(player *Player) bool {
+	return player.AI != nil && player.AI.Level == string(aiplayer.LevelLLM) && m.aiProvider != nil && m.aiProvider.Enabled()
+}
+
+type socialAISession struct {
+	Game        GameKind
+	RoomID      string
+	PlayerID    string
+	PrivateRole Role
+	PrivateWord string
+	Memory      []string
+}
+
+func (m *Manager) ensureAISession(room *Room, player *Player) *socialAISession {
+	key := socialAISessionKey(room.ID, player.ID)
+	session := m.aiSessions[key]
+	if session == nil {
+		session = &socialAISession{Game: room.Game, RoomID: room.ID, PlayerID: player.ID}
+		m.aiSessions[key] = session
+	}
+	session.PrivateRole = player.Role
+	session.PrivateWord = undercoverWordForPlayer(room, player)
+	return session
+}
+
+func (m *Manager) socialDecision(room *Room, player *Player, state map[string]any, actions []aiplayer.LegalAction) (aiplayer.Decision, error) {
+	if !m.canUseLLM(player) {
+		return aiplayer.Decision{}, errors.New("llm_not_configured")
+	}
+	session := m.ensureAISession(room, player)
+	state["aiSession"] = map[string]any{
+		"sessionId": sessionID(room, player),
+		"memory":    append([]string{}, session.Memory...),
+	}
+	decision, err := m.aiProvider.Decide(context.Background(), aiplayer.DecisionInput{
+		Game:        string(room.Game),
+		Level:       aiplayer.LevelLLM,
+		SessionID:   sessionID(room, player),
+		PlayerName:  player.Name,
+		Personality: player.AI.Personality,
+		SpeechStyle: player.AI.SpeechStyle,
+		State:       state,
+		Actions:     actions,
+	})
+	if err != nil {
+		return decision, err
+	}
+	m.rememberAI(room, player, fmt.Sprintf("phase=%s action=%s reason=%s speech=%s", room.Phase, decision.ActionID, strings.TrimSpace(decision.Reason), strings.TrimSpace(decision.Speech)))
+	return decision, nil
+}
+
+func (m *Manager) rememberAI(room *Room, player *Player, event string) {
+	session := m.ensureAISession(room, player)
+	event = strings.TrimSpace(event)
+	if event == "" {
+		return
+	}
+	session.Memory = append(session.Memory, event)
+	if len(session.Memory) > 24 {
+		session.Memory = session.Memory[len(session.Memory)-24:]
+	}
+}
+
+func sessionID(room *Room, player *Player) string {
+	return fmt.Sprintf("social:%s:%s:%s", room.Game, room.ID, player.ID)
+}
+
+func socialAISessionKey(roomID string, playerID string) string {
+	return roomID + ":" + playerID
+}
+
+func werewolfNightActions(room *Room, actor *Player) []aiplayer.LegalAction {
+	if !canActAtNight(actor) {
+		return nil
+	}
+	if actor.Role == RoleWitch {
+		return witchNightActions(room, actor)
+	}
+	labelPrefix := "选择"
+	switch actor.Role {
+	case RoleWerewolf:
+		labelPrefix = "击杀"
+	case RoleSeer:
+		labelPrefix = "查验"
+	case RoleGuard:
+		labelPrefix = "守护"
+	}
+	actions := []aiplayer.LegalAction{}
+	for _, target := range room.Players {
+		if !target.Alive {
+			continue
+		}
+		if actor.Role == RoleWerewolf && target.Role == RoleWerewolf {
+			continue
+		}
+		if actor.Role == RoleSeer && target.ID == actor.ID {
+			continue
+		}
+		actions = append(actions, aiplayer.LegalAction{
+			ID:          "target:" + target.ID,
+			Label:       fmt.Sprintf("%s %s", labelPrefix, target.Name),
+			Description: fmt.Sprintf("座位 %d 的存活玩家", target.Seat+1),
+		})
+	}
+	return actions
+}
+
+func witchNightActions(room *Room, actor *Player) []aiplayer.LegalAction {
+	actions := []aiplayer.LegalAction{}
+	killID := currentWerewolfKillTarget(room)
+	if killID != "" && !room.Werewolf.WitchAntidoteUsed {
+		if target := findPlayerByID(room, killID); target != nil && target.Alive {
+			actions = append(actions, aiplayer.LegalAction{
+				ID:          "save:" + target.ID,
+				Label:       fmt.Sprintf("使用解药救 %s", target.Name),
+				Description: "消耗一次解药，阻止今晚狼刀出局。",
+			})
+		}
+	}
+	if !room.Werewolf.WitchPoisonUsed {
+		for _, target := range room.Players {
+			if !target.Alive || target.ID == actor.ID {
+				continue
+			}
+			actions = append(actions, aiplayer.LegalAction{
+				ID:          "poison:" + target.ID,
+				Label:       fmt.Sprintf("使用毒药毒 %s", target.Name),
+				Description: fmt.Sprintf("消耗一次毒药，令座位 %d 出局。", target.Seat+1),
+			})
+		}
+	}
+	actions = append(actions, aiplayer.LegalAction{ID: "skip:witch", Label: "今晚不用药"})
+	return actions
+}
+
+func hunterShotActions(room *Room, actor *Player) []aiplayer.LegalAction {
+	actions := []aiplayer.LegalAction{{ID: "shoot:skip", Label: "不开枪"}}
+	for _, target := range room.Players {
+		if !target.Alive || target.ID == actor.ID {
+			continue
+		}
+		actions = append(actions, aiplayer.LegalAction{
+			ID:          "shoot:" + target.ID,
+			Label:       fmt.Sprintf("开枪带走 %s", target.Name),
+			Description: fmt.Sprintf("座位 %d 的存活玩家", target.Seat+1),
+		})
+	}
+	return actions
+}
+
+func currentWerewolfKillTarget(room *Room) string {
+	return mostVotedTarget(room.Werewolf.NightActions, func(playerID string) bool {
+		player := findPlayerByID(room, playerID)
+		return player != nil && player.Role == RoleWerewolf
+	})
+}
+
+func werewolfVoteActions(room *Room, actor *Player) []aiplayer.LegalAction {
+	actions := []aiplayer.LegalAction{}
+	for _, target := range room.Players {
+		if !target.Alive || target.ID == actor.ID {
+			continue
+		}
+		actions = append(actions, aiplayer.LegalAction{
+			ID:          "vote:" + target.ID,
+			Label:       fmt.Sprintf("投票给 %s", target.Name),
+			Description: fmt.Sprintf("座位 %d 的存活玩家", target.Seat+1),
+		})
+	}
+	return actions
+}
+
+func werewolfAIState(room *Room, actor *Player) map[string]any {
+	players := make([]map[string]any, 0, len(room.Players))
+	visibleAllies := []string{}
+	for _, player := range room.Players {
+		entry := map[string]any{
+			"id":    player.ID,
+			"name":  player.Name,
+			"seat":  player.Seat,
+			"alive": player.Alive,
+		}
+		if roleVisible(room, actor, player) {
+			entry["role"] = player.Role
+			entry["alignment"] = player.Alignment
+			if player.ID != actor.ID && player.Alignment == actor.Alignment {
+				visibleAllies = append(visibleAllies, player.ID)
+			}
+		}
+		players = append(players, entry)
+	}
+	state := map[string]any{
+		"phase":           room.Phase,
+		"day":             room.Werewolf.Day,
+		"yourRole":        actor.Role,
+		"yourAlignment":   actor.Alignment,
+		"players":         players,
+		"visibleAllies":   visibleAllies,
+		"lastNight":       room.Werewolf.LastNight,
+		"votes":           cloneStringMap(room.Werewolf.Votes),
+		"recentSpeech":    room.Speeches,
+		"revealedIdiots":  cloneBoolMap(room.Werewolf.RevealedIdiots),
+		"hunterPendingId": room.Werewolf.HunterPendingID,
+	}
+	if actor.Role == RoleSeer {
+		state["seerChecks"] = cloneAlignmentMap(room.Werewolf.SeerChecks)
+	}
+	if actor.Role == RoleWitch {
+		state["witch"] = map[string]any{
+			"victimId":     currentWerewolfKillTarget(room),
+			"antidoteUsed": room.Werewolf.WitchAntidoteUsed,
+			"poisonUsed":   room.Werewolf.WitchPoisonUsed,
+		}
+	}
+	return state
+}
+
+func avalonAIState(room *Room, actor *Player, phase string) map[string]any {
+	players := make([]map[string]any, 0, len(room.Players))
+	for _, player := range room.Players {
+		entry := map[string]any{
+			"id":    player.ID,
+			"name":  player.Name,
+			"seat":  player.Seat,
+			"alive": player.Alive,
+		}
+		if roleVisible(room, actor, player) {
+			entry["role"] = player.Role
+			entry["alignment"] = player.Alignment
+		}
+		players = append(players, entry)
+	}
+	return map[string]any{
+		"phase":         phase,
+		"round":         room.Avalon.Round,
+		"yourRole":      actor.Role,
+		"yourAlignment": actor.Alignment,
+		"players":       players,
+		"leaderId":      room.Avalon.LeaderID,
+		"team":          append([]string{}, room.Avalon.Team...),
+		"teamVotes":     cloneBoolMap(room.Avalon.TeamVotes),
+		"questResults":  append([]AvalonQuestResult{}, room.Avalon.QuestResults...),
+		"successes":     room.Avalon.Successes,
+		"fails":         room.Avalon.Fails,
+		"recentSpeech":  room.Speeches,
+	}
+}
+
+func undercoverAIState(room *Room, player *Player, phase string) map[string]any {
+	return map[string]any{
+		"phase":        phase,
+		"round":        room.Undercover.Round,
+		"yourRole":     player.Role,
+		"yourWord":     undercoverWordForPlayer(room, player),
+		"players":      publicPlayersForAI(room, player),
+		"described":    cloneBoolMap(room.Undercover.Described),
+		"votes":        cloneStringMap(room.Undercover.Votes),
+		"recentSpeech": room.Speeches,
+	}
+}
+
+func publicPlayersForAI(room *Room, actor *Player) []map[string]any {
+	players := make([]map[string]any, 0, len(room.Players))
+	for _, player := range room.Players {
+		entry := map[string]any{
+			"id":    player.ID,
+			"name":  player.Name,
+			"seat":  player.Seat,
+			"alive": player.Alive,
+		}
+		if player.ID == actor.ID {
+			entry["role"] = player.Role
+			entry["alignment"] = player.Alignment
+		}
+		players = append(players, entry)
+	}
+	return players
+}
+
+func playerFromAction(room *Room, actionID string, prefix string) *Player {
+	if !strings.HasPrefix(actionID, prefix) {
+		return nil
+	}
+	return findPlayerByID(room, strings.TrimPrefix(actionID, prefix))
+}
+
+func (m *Manager) chooseAvalonTeam(room *Room, leader *Player) ([]string, string) {
+	actions := avalonTeamActions(room, leader)
+	if m.canUseLLM(leader) && len(actions) > 0 {
+		decision, err := m.socialDecision(room, leader, avalonAIState(room, leader, "team"), actions)
+		if err == nil && strings.HasPrefix(decision.ActionID, "team:") {
+			team := strings.Split(strings.TrimPrefix(decision.ActionID, "team:"), ",")
+			if len(team) == room.Avalon.RequiredTeam {
+				return team, strings.TrimSpace(decision.Speech)
+			}
+		}
+		if err != nil {
+			slog.Warn("avalon llm team failed", "room", room.ID, "player", leader.ID, "playerName", leader.Name, "error", err)
+		}
+	}
+	return nil, ""
+}
+
+func (m *Manager) chooseAvalonTeamVote(room *Room, player *Player) (bool, string, bool) {
+	actions := []aiplayer.LegalAction{
+		{ID: "vote:approve", Label: "同意这支队伍"},
+		{ID: "vote:reject", Label: "反对这支队伍"},
+	}
+	if m.canUseLLM(player) {
+		decision, err := m.socialDecision(room, player, avalonAIState(room, player, "team_vote"), actions)
+		if err == nil {
+			return decision.ActionID == "vote:approve", strings.TrimSpace(decision.Speech), true
+		}
+		slog.Warn("avalon llm team vote failed", "room", room.ID, "player", player.ID, "playerName", player.Name, "error", err)
+	}
+	return false, "", false
+}
+
+func (m *Manager) chooseAvalonQuestCard(room *Room, player *Player) (string, string) {
+	actions := []aiplayer.LegalAction{{ID: "quest:success", Label: "提交成功牌"}}
+	if player.Alignment == AlignmentEvil {
+		actions = append(actions, aiplayer.LegalAction{ID: "quest:fail", Label: "提交失败牌"})
+	}
+	if m.canUseLLM(player) {
+		decision, err := m.socialDecision(room, player, avalonAIState(room, player, "quest"), actions)
+		if err == nil && decision.ActionID == "quest:fail" && player.Alignment == AlignmentEvil {
+			return "fail", strings.TrimSpace(decision.Speech)
+		}
+		if err == nil {
+			return "success", strings.TrimSpace(decision.Speech)
+		}
+		slog.Warn("avalon llm quest failed", "room", room.ID, "player", player.ID, "playerName", player.Name, "error", err)
+	}
+	return "", ""
+}
+
+func (m *Manager) chooseAvalonAssassination(room *Room, player *Player) (*Player, string) {
+	actions := []aiplayer.LegalAction{}
+	for _, target := range goodPlayers(room) {
+		actions = append(actions, aiplayer.LegalAction{ID: "assassinate:" + target.ID, Label: fmt.Sprintf("刺杀 %s", target.Name)})
+	}
+	if m.canUseLLM(player) && len(actions) > 0 {
+		decision, err := m.socialDecision(room, player, avalonAIState(room, player, "assassination"), actions)
+		if err == nil {
+			if target := playerFromAction(room, decision.ActionID, "assassinate:"); target != nil {
+				return target, strings.TrimSpace(decision.Speech)
+			}
+		}
+		if err != nil {
+			slog.Warn("avalon llm assassination failed", "room", room.ID, "player", player.ID, "playerName", player.Name, "error", err)
+		}
+	}
+	return nil, ""
+}
+
+func avalonTeamActions(room *Room, leader *Player) []aiplayer.LegalAction {
+	actions := []aiplayer.LegalAction{}
+	players := append([]*Player{}, room.Players...)
+	for _, first := range players {
+		for _, second := range players {
+			if room.Avalon.RequiredTeam == 2 {
+				team := uniqueTeam([]string{first.ID, second.ID})
+				if len(team) == 2 && slices.Contains(team, leader.ID) {
+					actions = append(actions, avalonTeamAction(room, team))
+				}
+				continue
+			}
+			for _, third := range players {
+				team := uniqueTeam([]string{leader.ID, first.ID, second.ID, third.ID})
+				if len(team) == room.Avalon.RequiredTeam {
+					actions = append(actions, avalonTeamAction(room, team))
+				}
+				if len(actions) >= 24 {
+					return actions
+				}
+			}
+		}
+	}
+	if len(actions) == 0 {
+		actions = append(actions, avalonTeamAction(room, []string{leader.ID}))
+	}
+	return actions
+}
+
+func avalonTeamAction(room *Room, team []string) aiplayer.LegalAction {
+	names := []string{}
+	for _, id := range team {
+		if player := findPlayerByID(room, id); player != nil {
+			names = append(names, player.Name)
+		}
+	}
+	return aiplayer.LegalAction{ID: "team:" + strings.Join(team, ","), Label: "提名 " + strings.Join(names, "、")}
+}
+
+func uniqueTeam(ids []string) []string {
+	seen := map[string]bool{}
+	team := []string{}
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		team = append(team, id)
 	}
 	return team
 }
@@ -1448,40 +2161,19 @@ func chooseAvalonTeam(room *Room, leader *Player) []string {
 func (m *Manager) chooseUndercoverDescription(room *Room, player *Player) string {
 	actions := undercoverDescriptionActions(room, player)
 	if len(actions) == 0 {
-		return "我这个词挺常见。"
+		return ""
 	}
 	if player.AI != nil && player.AI.Level == string(aiplayer.LevelLLM) && m.aiProvider != nil && m.aiProvider.Enabled() {
-		decision, err := m.aiProvider.Decide(context.Background(), aiplayer.DecisionInput{
-			Game:        "undercover",
-			Level:       aiplayer.LevelLLM,
-			SessionID:   player.ID,
-			PlayerName:  player.Name,
-			Personality: player.AI.Personality,
-			SpeechStyle: player.AI.SpeechStyle,
-			State: map[string]any{
-				"phase":        "describe",
-				"round":        room.Undercover.Round,
-				"yourRole":     player.Role,
-				"yourWord":     undercoverWordForPlayer(room, player),
-				"recentSpeech": room.Speeches,
-			},
-			Actions: actions,
-		})
+		decision, err := m.socialDecision(room, player, undercoverAIState(room, player, "describe"), actions)
 		if err == nil {
 			if text := actionLabel(decision.ActionID, actions); text != "" {
 				return text
 			}
 		} else {
-			slog.Warn("undercover llm describe failed, falling back", "room", room.ID, "player", player.ID, "playerName", player.Name, "error", err)
+			slog.Warn("undercover llm describe failed", "room", room.ID, "player", player.ID, "playerName", player.Name, "error", err)
 		}
 	}
-	if player.Role == RoleBlank {
-		return "这个词我先保守一点说，偏日常。"
-	}
-	if player.Role == RoleUndercover {
-		return "它一般会出现在生活场景里。"
-	}
-	return actions[0].Label
+	return ""
 }
 
 func (m *Manager) chooseUndercoverVote(room *Room, player *Player) *Player {
@@ -1490,62 +2182,15 @@ func (m *Manager) chooseUndercoverVote(room *Room, player *Player) *Player {
 		return nil
 	}
 	if player.AI != nil && player.AI.Level == string(aiplayer.LevelLLM) && m.aiProvider != nil && m.aiProvider.Enabled() {
-		decision, err := m.aiProvider.Decide(context.Background(), aiplayer.DecisionInput{
-			Game:        "undercover",
-			Level:       aiplayer.LevelLLM,
-			SessionID:   player.ID,
-			PlayerName:  player.Name,
-			Personality: player.AI.Personality,
-			SpeechStyle: player.AI.SpeechStyle,
-			State: map[string]any{
-				"phase":        "vote",
-				"round":        room.Undercover.Round,
-				"yourRole":     player.Role,
-				"yourWord":     undercoverWordForPlayer(room, player),
-				"recentSpeech": room.Speeches,
-				"votes":        room.Undercover.Votes,
-			},
-			Actions: actions,
-		})
+		decision, err := m.socialDecision(room, player, undercoverAIState(room, player, "vote"), actions)
 		if err == nil && strings.HasPrefix(decision.ActionID, "vote:") {
 			return findPlayerByID(room, strings.TrimPrefix(decision.ActionID, "vote:"))
 		}
 		if err != nil {
-			slog.Warn("undercover llm vote failed, falling back", "room", room.ID, "player", player.ID, "playerName", player.Name, "error", err)
+			slog.Warn("undercover llm vote failed", "room", room.ID, "player", player.ID, "playerName", player.Name, "error", err)
 		}
 	}
-	if player.Role == RoleCivilian {
-		if target := firstLivingRole(room, RoleUndercover, player.ID); target != nil {
-			return target
-		}
-	}
-	return randomLivingOther(room, player)
-}
-
-func randomLivingByAlignment(room *Room, alignment Alignment) *Player {
-	candidates := []*Player{}
-	for _, player := range room.Players {
-		if player.Alive && player.Alignment == alignment {
-			candidates = append(candidates, player)
-		}
-	}
-	if len(candidates) == 0 {
-		return nil
-	}
-	return candidates[rand.IntN(len(candidates))]
-}
-
-func randomLivingOther(room *Room, actor *Player) *Player {
-	candidates := []*Player{}
-	for _, player := range room.Players {
-		if player.Alive && player.ID != actor.ID {
-			candidates = append(candidates, player)
-		}
-	}
-	if len(candidates) == 0 {
-		return nil
-	}
-	return candidates[rand.IntN(len(candidates))]
+	return nil
 }
 
 func goodPlayers(room *Room) []*Player {
@@ -1874,15 +2519,6 @@ func undercoverVoteActions(room *Room, player *Player) []aiplayer.LegalAction {
 	return actions
 }
 
-func firstLivingRole(room *Room, role Role, exceptID string) *Player {
-	for _, player := range room.Players {
-		if player.Alive && player.Role == role && player.ID != exceptID {
-			return player
-		}
-	}
-	return nil
-}
-
 func createLog(text string) LogEntry {
 	return LogEntry{ID: "log_" + randomToken(8), Text: text}
 }
@@ -1928,6 +2564,14 @@ func cloneStringMap(source map[string]string) map[string]string {
 
 func cloneBoolMap(source map[string]bool) map[string]bool {
 	next := map[string]bool{}
+	for key, value := range source {
+		next[key] = value
+	}
+	return next
+}
+
+func cloneAlignmentMap(source map[string]Alignment) map[string]Alignment {
+	next := map[string]Alignment{}
 	for key, value := range source {
 		next[key] = value
 	}
