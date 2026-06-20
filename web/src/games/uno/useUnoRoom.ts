@@ -2,7 +2,7 @@ import type { UnoOnlineRoom } from './online'
 import type { UnoColor } from './types'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/context'
-import { addUnoAI, callUno, catchUno, drawUnoCard, joinUnoRoom, playUnoCard, removeUnoPlayer, sayUno, startUnoRoom, updateUnoAI } from './online'
+import { addUnoAI, callUno, catchUno, drawUnoCard, joinUnoRoom, playUnoCard, removeUnoPlayer, renameUnoPlayer, sayUno, startUnoRoom, updateUnoAI } from './online'
 
 export function useUnoRoom(roomId: string | undefined) {
   const { t } = useI18n()
@@ -87,6 +87,7 @@ export function useUnoRoom(roomId: string | undefined) {
     play: (cardId: string, color: UnoColor) => roomId ? run(() => playUnoCard(roomId, cardId, color)) : Promise.resolve(),
     refresh,
     removePlayer: (playerId: string) => roomId ? run(() => removeUnoPlayer(roomId, playerId)) : Promise.resolve(),
+    renamePlayer: (name: string) => roomId ? run(() => renameUnoPlayer(roomId, name)) : Promise.resolve(),
     say: (text: string) => roomId ? run(() => sayUno(roomId, text)) : Promise.resolve(),
     start: () => roomId ? run(() => startUnoRoom(roomId)) : Promise.resolve(),
     updateAI: (playerId: string, level: string) => roomId ? run(() => updateUnoAI(roomId, playerId, level)) : Promise.resolve(),

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/snowykami/games-platform/server/internal/aiplayer"
+	"github.com/snowykami/games-platform/server/internal/roommeta"
 )
 
 const (
@@ -212,6 +213,27 @@ func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, e
 	if !recordSpeech(room, player, text) {
 		return PublicRoom{}, errors.New("invalid_speech")
 	}
+	room.UpdatedAt = time.Now().UTC()
+	return publicRoom(room, actorID), nil
+}
+
+func (m *Manager) RenamePlayer(roomID string, actorID string, displayName string) (PublicRoom, error) {
+	room, err := m.lockRoom(roomID)
+	if err != nil {
+		return PublicRoom{}, err
+	}
+	defer room.mu.Unlock()
+	player := findPlayerByUserID(room, actorID)
+	if player == nil || player.IsAI {
+		return PublicRoom{}, errors.New("not_in_room")
+	}
+	nextName, err := roommeta.NormalizeDisplayName(displayName)
+	if err != nil {
+		return PublicRoom{}, err
+	}
+	oldName := player.Name
+	player.Name = nextName
+	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 改名为 %s。", oldName, nextName)))
 	room.UpdatedAt = time.Now().UTC()
 	return publicRoom(room, actorID), nil
 }

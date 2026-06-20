@@ -38,6 +38,10 @@ type speechRequest struct {
 	Text string `json:"text"`
 }
 
+type nameRequest struct {
+	Name string `json:"name"`
+}
+
 type wsMessage struct {
 	Type    string          `json:"type"`
 	Payload json.RawMessage `json:"payload,omitempty"`
@@ -56,6 +60,7 @@ func (h *Handler) Routes() http.Handler {
 	router.Patch("/rooms/{roomID}/ai/{playerID}", h.updateAI)
 	router.Delete("/rooms/{roomID}/players/{playerID}", h.removePlayer)
 	router.Post("/rooms/{roomID}/speech", h.speech)
+	router.Patch("/rooms/{roomID}/name", h.renamePlayer)
 	router.Post("/rooms/{roomID}/start", h.start)
 	router.Post("/rooms/{roomID}/move", h.move)
 	return router
@@ -165,6 +170,17 @@ func (h *Handler) speech(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
 		return h.manager.Say(roomID, userID, request.Text)
+	})
+}
+
+func (h *Handler) renamePlayer(w http.ResponseWriter, r *http.Request) {
+	var request nameRequest
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
+		return
+	}
+	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
+		return h.manager.RenamePlayer(roomID, userID, request.Name)
 	})
 }
 

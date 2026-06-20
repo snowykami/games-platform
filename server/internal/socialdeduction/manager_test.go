@@ -131,6 +131,58 @@ func TestWerewolfRejectsMismatchedRoleConfig(t *testing.T) {
 	}
 }
 
+func TestRenamePlayerKeepsStableIDs(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := manager.CreateRoom(UserView{ID: "u1", DisplayName: "Host", Kind: "guest"})
+	playerID := room.Players[0].ID
+	userID := room.Players[0].UserID
+
+	public, err := manager.RenamePlayer(room.ID, "u1", "  Night   Reader  ")
+	if err != nil {
+		t.Fatalf("rename player: %v", err)
+	}
+	if public.Players[0].Name != "Night Reader" {
+		t.Fatalf("expected normalized display name, got %q", public.Players[0].Name)
+	}
+	if public.Players[0].ID != playerID || public.Players[0].UserID != userID {
+		t.Fatalf("expected ids to stay stable, got player=%q user=%q", public.Players[0].ID, public.Players[0].UserID)
+	}
+}
+
+func TestPlayerNotesArePrivatePerViewer(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := manager.CreateRoom(UserView{ID: "u1", DisplayName: "Host", Kind: "guest"})
+	if _, err := manager.JoinRoom(room.ID, UserView{ID: "u2", DisplayName: "Guest", Kind: "guest"}); err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	internalRoom, err := manager.room(room.ID)
+	if err != nil {
+		t.Fatalf("load room: %v", err)
+	}
+	targetID := internalRoom.Players[1].ID
+
+	hostView, err := manager.UpdatePlayerNote(room.ID, "u1", targetID, "  2号   可疑  ")
+	if err != nil {
+		t.Fatalf("update note: %v", err)
+	}
+	if hostView.Players[1].Note != "2号 可疑" {
+		t.Fatalf("expected host note to be visible to host, got %q", hostView.Players[1].Note)
+	}
+
+	guestView := manager.publicRoom(internalRoom, "u2")
+	if guestView.Players[1].Note != "" || guestView.Players[0].Note != "" {
+		t.Fatalf("expected notes to be hidden from other viewer, got %+v", guestView.Players)
+	}
+
+	clearedView, err := manager.UpdatePlayerNote(room.ID, "u1", targetID, "")
+	if err != nil {
+		t.Fatalf("clear note: %v", err)
+	}
+	if clearedView.Players[1].Note != "" {
+		t.Fatalf("expected note to be cleared, got %q", clearedView.Players[1].Note)
+	}
+}
+
 func TestWerewolfNightUsesLLMDecision(t *testing.T) {
 	provider := &fakeDecisionProvider{
 		enabled: true,
@@ -184,8 +236,12 @@ func TestWerewolfVoteUsesLLMDecision(t *testing.T) {
 		enabled: true,
 		decision: aiplayer.Decision{
 			ActionID: "vote:p2",
-			Speech:   "二号像狼。",
-			Source:   "llm",
+			Notes: map[string]string{
+				"p2":      "发言像狼",
+				"missing": "不会保存",
+			},
+			Speech: "二号像狼。",
+			Source: "llm",
 		},
 	}
 	manager := NewManager(GameWerewolf, provider)
@@ -218,6 +274,12 @@ func TestWerewolfVoteUsesLLMDecision(t *testing.T) {
 	}
 	if room.Werewolf.Votes["p1"] != "p2" {
 		t.Fatalf("expected vote p2, got %q", room.Werewolf.Votes["p1"])
+	}
+	if room.PlayerNotes["p1"]["p2"] != "发言像狼" {
+		t.Fatalf("expected AI note to be stored, got %+v", room.PlayerNotes)
+	}
+	if _, ok := room.PlayerNotes["p1"]["missing"]; ok {
+		t.Fatalf("expected AI note for unknown player to be ignored")
 	}
 	if len(room.Speeches) != 1 || room.Speeches[0].Text != "二号像狼。" {
 		t.Fatalf("expected LLM speech to be recorded, got %+v", room.Speeches)

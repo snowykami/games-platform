@@ -32,6 +32,14 @@ type speechRequest struct {
 	Text string `json:"text"`
 }
 
+type nameRequest struct {
+	Name string `json:"name"`
+}
+
+type noteRequest struct {
+	Note string `json:"note"`
+}
+
 type werewolfRoleConfigRequest struct {
 	Config WerewolfRoleConfig `json:"config"`
 }
@@ -80,6 +88,8 @@ func (h *Handler) Routes() http.Handler {
 	router.Patch("/rooms/{roomID}/ai/{playerID}", h.updateAI)
 	router.Delete("/rooms/{roomID}/players/{playerID}", h.removePlayer)
 	router.Post("/rooms/{roomID}/speech", h.speech)
+	router.Patch("/rooms/{roomID}/name", h.renamePlayer)
+	router.Patch("/rooms/{roomID}/notes/{playerID}", h.updatePlayerNote)
 	router.Post("/rooms/{roomID}/start", h.start)
 	router.Post("/rooms/{roomID}/werewolf-roles", h.updateWerewolfRoles)
 	router.Post("/rooms/{roomID}/night-action", h.nightAction)
@@ -199,6 +209,28 @@ func (h *Handler) speech(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
 		return h.manager.Say(roomID, userID, request.Text)
+	})
+}
+
+func (h *Handler) renamePlayer(w http.ResponseWriter, r *http.Request) {
+	var request nameRequest
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
+		return
+	}
+	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
+		return h.manager.RenamePlayer(roomID, userID, request.Name)
+	})
+}
+
+func (h *Handler) updatePlayerNote(w http.ResponseWriter, r *http.Request) {
+	var request noteRequest
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
+		return
+	}
+	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
+		return h.manager.UpdatePlayerNote(roomID, userID, chi.URLParam(r, "playerID"), request.Note)
 	})
 }
 

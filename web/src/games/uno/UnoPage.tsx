@@ -1,11 +1,13 @@
 import type { CSSProperties, ReactNode } from 'react'
 import type { UnoOnlinePlayer, UnoPublicAction } from './online'
 import type { UnoCard, UnoColor } from './types'
+import type { GameSpeechEntry } from '@/games/speech'
 import { ArrowLeft, Ban, Copy, Palette, Plus, RefreshCw, RotateCcw, RotateCw, SkipForward } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useI18n } from '@/i18n/context'
@@ -256,9 +258,10 @@ export function UnoPage({ roomId }: { roomId: string }) {
                     currentPlayerId={room.currentPlayerId}
                     index={index}
                     isSelf={player.userId === user?.id}
+                    onRename={actions.renamePlayer}
                     onSpeak={actions.say}
                     player={player}
-                    speech={latestSpeechForPlayer(room.speeches, player.id)?.text}
+                    speech={latestSpeechForPlayer(room.speeches, player.id)}
                     total={seatedPlayers.length}
                   />
                 ))}
@@ -386,6 +389,7 @@ function PlayerSeat({
   currentPlayerId,
   index,
   isSelf,
+  onRename,
   onSpeak,
   player,
   speech,
@@ -395,9 +399,10 @@ function PlayerSeat({
   currentPlayerId?: string
   index: number
   isSelf: boolean
+  onRename: (name: string) => Promise<void>
   onSpeak: (text: string) => Promise<void>
   player: UnoOnlinePlayer
-  speech?: string
+  speech?: GameSpeechEntry
   total: number
 }) {
   const shouldPulseSeat = activeAction && activeAction.type !== 'play'
@@ -421,9 +426,10 @@ function PlayerSeat({
         </div>
         {player.role === 'host' && <HostBadge />}
         {player.isAI && <span className="shrink-0 rounded-full bg-[#fff8e8] px-1.5 text-[10px] leading-5 text-[#171411]">AI</span>}
+        {isSelf && <PlayerNameEditor buttonClassName="text-[#fff8e8]" className="min-w-[96px]" name={player.name} onSave={onRename} />}
         {isSelf && <SpeechButton className="ml-1" onSend={onSpeak} />}
       </div>
-      <SpeechBubble className="max-w-[130px] sm:max-w-[170px]" text={speech} />
+      <SpeechBubble className="max-w-[130px] sm:max-w-[170px]" speech={speech} />
       {!isSelf && <MiniBackHand count={player.handCount} />}
     </article>
   )

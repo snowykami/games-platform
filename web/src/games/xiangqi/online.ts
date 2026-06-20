@@ -1,5 +1,6 @@
 import type { GameSpeechEntry } from '@/games/speech'
 import { z } from 'zod'
+import { fetchWithAuthRedirect } from '@/auth/fetch'
 
 export type XiangqiPhase = 'lobby' | 'playing' | 'finished'
 export type XiangqiSide = 'red' | 'black'
@@ -177,6 +178,14 @@ export async function sayXiangqi(roomId: string, text: string) {
   })
 }
 
+export async function renameXiangqiPlayer(roomId: string, name: string) {
+  return requestRoom(`/api/xiangqi/rooms/${encodeURIComponent(roomId)}/name`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+}
+
 export async function startXiangqiRoom(roomId: string) {
   return requestRoom(`/api/xiangqi/rooms/${encodeURIComponent(roomId)}/start`, { method: 'POST' })
 }
@@ -190,7 +199,7 @@ export async function moveXiangqiPiece(roomId: string, pieceId: string, x: numbe
 }
 
 async function requestRoom(input: RequestInfo | URL, init?: RequestInit) {
-  const response = await fetch(input, init)
+  const response = await fetchWithAuthRedirect(input, init)
   if (!response.ok) {
     const error = await response.json().catch(() => undefined)
     throw new Error(error?.error ?? `Request failed: ${response.status}`)

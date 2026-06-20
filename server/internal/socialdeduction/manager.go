@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/snowykami/games-platform/server/internal/aiplayer"
+	"github.com/snowykami/games-platform/server/internal/roommeta"
 )
 
 const (
@@ -221,6 +222,49 @@ func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, e
 	if !recordSpeech(room, player, text) {
 		return PublicRoom{}, errors.New("invalid_speech")
 	}
+	room.UpdatedAt = time.Now().UTC()
+	return m.publicRoom(room, actorID), nil
+}
+
+func (m *Manager) RenamePlayer(roomID string, actorID string, displayName string) (PublicRoom, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	room, err := m.room(roomID)
+	if err != nil {
+		return PublicRoom{}, err
+	}
+	player := findPlayerByUserID(room, actorID)
+	if player == nil || player.IsAI {
+		return PublicRoom{}, errors.New("not_in_room")
+	}
+	nextName, err := roommeta.NormalizeDisplayName(displayName)
+	if err != nil {
+		return PublicRoom{}, err
+	}
+	oldName := player.Name
+	player.Name = nextName
+	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 改名为 %s。", oldName, nextName)))
+	room.UpdatedAt = time.Now().UTC()
+	return m.publicRoom(room, actorID), nil
+}
+
+func (m *Manager) UpdatePlayerNote(roomID string, actorID string, targetID string, note string) (PublicRoom, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	room, err := m.room(roomID)
+	if err != nil {
+		return PublicRoom{}, err
+	}
+	viewer := findPlayerByUserID(room, actorID)
+	if viewer == nil || viewer.IsAI {
+		return PublicRoom{}, errors.New("not_in_room")
+	}
+	if findPlayerByID(room, targetID) == nil {
+		return PublicRoom{}, errors.New("player_not_found")
+	}
+	setPlayerNote(room, viewer.ID, targetID, note)
 	room.UpdatedAt = time.Now().UTC()
 	return m.publicRoom(room, actorID), nil
 }
@@ -1576,6 +1620,7 @@ func (m *Manager) publicRoom(room *Room, viewerUserID string) PublicRoom {
 			AI:             player.AI,
 			Alive:          player.Alive,
 			VisibleToYou:   visible,
+			Note:           playerNote(room, viewer, player.ID),
 		}
 		if visible {
 			publicPlayer.Role = player.Role
@@ -1785,6 +1830,7 @@ func (m *Manager) socialDecision(room *Room, player *Player, state map[string]an
 		"sessionId": sessionID(room, player),
 		"memory":    append([]string{}, session.Memory...),
 	}
+	state["privateNotes"] = cloneStringMap(room.PlayerNotes[player.ID])
 	decision, err := m.aiProvider.Decide(context.Background(), aiplayer.DecisionInput{
 		Game:        string(room.Game),
 		Level:       aiplayer.LevelLLM,
@@ -1798,8 +1844,18 @@ func (m *Manager) socialDecision(room *Room, player *Player, state map[string]an
 	if err != nil {
 		return decision, err
 	}
+	m.applyAINotes(room, player, decision.Notes)
 	m.rememberAI(room, player, fmt.Sprintf("phase=%s action=%s reason=%s speech=%s", room.Phase, decision.ActionID, strings.TrimSpace(decision.Reason), strings.TrimSpace(decision.Speech)))
 	return decision, nil
+}
+
+func (m *Manager) applyAINotes(room *Room, player *Player, notes map[string]string) {
+	for targetID, note := range notes {
+		if findPlayerByID(room, targetID) == nil {
+			continue
+		}
+		setPlayerNote(room, player.ID, targetID, note)
+	}
 }
 
 func (m *Manager) rememberAI(room *Room, player *Player, event string) {
@@ -2310,6 +2366,28 @@ func recordSpeech(room *Room, player *Player, text string) bool {
 		room.Speeches = room.Speeches[len(room.Speeches)-18:]
 	}
 	return true
+}
+
+func playerNote(room *Room, viewer *Player, targetID string) string {
+	if viewer == nil || room.PlayerNotes == nil {
+		return ""
+	}
+	return room.PlayerNotes[viewer.ID][targetID]
+}
+
+func setPlayerNote(room *Room, viewerID string, targetID string, note string) {
+	note = roommeta.NormalizeNote(note)
+	if room.PlayerNotes == nil {
+		room.PlayerNotes = map[string]map[string]string{}
+	}
+	if room.PlayerNotes[viewerID] == nil {
+		room.PlayerNotes[viewerID] = map[string]string{}
+	}
+	if note == "" {
+		delete(room.PlayerNotes[viewerID], targetID)
+		return
+	}
+	room.PlayerNotes[viewerID][targetID] = note
 }
 
 func reconcileLobbyConfig(room *Room) {

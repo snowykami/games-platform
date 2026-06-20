@@ -1,5 +1,6 @@
 import type { GameSpeechEntry } from '@/games/speech'
 import { z } from 'zod'
+import { fetchWithAuthRedirect } from '@/auth/fetch'
 
 export type GomokuPhase = 'lobby' | 'playing' | 'finished'
 export type GomokuStone = 'black' | 'white'
@@ -172,6 +173,14 @@ export async function sayGomoku(roomId: string, text: string) {
   })
 }
 
+export async function renameGomokuPlayer(roomId: string, name: string) {
+  return requestRoom(`/api/gomoku/rooms/${encodeURIComponent(roomId)}/name`, {
+    body: JSON.stringify({ name }),
+    headers: { 'Content-Type': 'application/json' },
+    method: 'PATCH',
+  })
+}
+
 export async function startGomokuRoom(roomId: string) {
   return requestRoom(`/api/gomoku/rooms/${encodeURIComponent(roomId)}/start`, { method: 'POST' })
 }
@@ -185,7 +194,7 @@ export async function placeGomokuStone(roomId: string, x: number, y: number) {
 }
 
 async function requestRoom(input: RequestInfo | URL, init?: RequestInit) {
-  const response = await fetch(input, init)
+  const response = await fetchWithAuthRedirect(input, init)
   if (!response.ok) {
     const error = await response.json().catch(() => undefined)
     throw new Error(error?.error ?? `Request failed: ${response.status}`)

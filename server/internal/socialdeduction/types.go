@@ -93,6 +93,7 @@ type PublicPlayer struct {
 	Role           Role       `json:"role,omitempty"`
 	Alignment      Alignment  `json:"alignment,omitempty"`
 	VisibleToYou   bool       `json:"visibleToYou"`
+	Note           string     `json:"note,omitempty"`
 }
 
 type LogEntry struct {
@@ -219,6 +220,7 @@ type Room struct {
 	WinnerMessage string
 	Log           []LogEntry
 	Speeches      []SpeechEntry
+	PlayerNotes   map[string]map[string]string
 	ActionSeq     int
 	RecentActions []PublicAction
 	CreatedAt     time.Time

@@ -8,6 +8,7 @@ import { getAICapabilities, getAILevelLabel } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { AILevelPicker } from '@/games/AILevelPicker'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useI18n } from '@/i18n/context'
@@ -188,6 +189,7 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
                   <div className="flex min-w-0 items-center gap-2">
                     <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
                     <strong className="truncate text-lg">{player.name}</strong>
+                    {player.userId === user?.id && <PlayerNameEditor buttonClassName="text-[#fff8e8]" name={player.name} onSave={actions.renamePlayer} />}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {player.userId === user?.id && <SpeechButton palette="xiangqi" onSend={actions.say} />}
@@ -220,7 +222,7 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
                     )}
                   </div>
                 </div>
-                <SpeechBubble text={latestSpeechForPlayer(room.speeches, player.id)?.text} />
+                <SpeechBubble speech={latestSpeechForPlayer(room.speeches, player.id)} />
                 <p className="mt-2 min-h-10 text-sm leading-6 text-[#fff8e8]/72">
                   {player.ai?.personality ?? (player.kind === 'guest' ? t('xiangqi.guestReady') : t('xiangqi.oidcReady'))}
                 </p>
@@ -251,8 +253,8 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
 function XiangqiShell({ children }: { children: ReactNode }) {
   const { t } = useI18n()
   return (
-    <main className="min-h-svh overflow-y-auto bg-[#202018] text-[#fff8e8] lg:overflow-hidden">
-      <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3 lg:h-svh lg:min-h-0">
+    <main className="min-h-svh overflow-y-auto bg-[#202018] text-[#fff8e8]">
+      <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="mb-1 text-xs font-black tracking-normal text-[#f2d59a]/80">ONLINE XIANGQI ROOM</p>

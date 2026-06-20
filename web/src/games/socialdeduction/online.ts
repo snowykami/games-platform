@@ -1,5 +1,6 @@
 import type { GameSpeechEntry } from '@/games/speech'
 import { z } from 'zod'
+import { fetchWithAuthRedirect } from '@/auth/fetch'
 
 export type SocialGameSlug = 'werewolf' | 'avalon' | 'undercover'
 export type SocialPhase = 'lobby' | 'night' | 'day' | 'vote' | 'hunter' | 'team' | 'team_vote' | 'quest' | 'assassination' | 'describe' | 'undercover_vote' | 'finished'
@@ -51,6 +52,7 @@ export interface SocialPlayer {
   alive: boolean
   role?: SocialRole
   alignment?: SocialAlignment
+  note?: string
   visibleToYou: boolean
 }
 
@@ -188,6 +190,7 @@ const playerSchema = z.object({
   alive: z.boolean(),
   role: roleSchema.optional(),
   alignment: alignmentSchema.optional(),
+  note: z.string().optional(),
   visibleToYou: z.boolean(),
 })
 
@@ -306,6 +309,14 @@ export async function saySocial(game: SocialGameSlug, roomId: string, text: stri
   })
 }
 
+export async function renameSocialPlayer(game: SocialGameSlug, roomId: string, name: string) {
+  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/name`, jsonPatch({ name }))
+}
+
+export async function updateSocialPlayerNote(game: SocialGameSlug, roomId: string, playerId: string, note: string) {
+  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/notes/${encodeURIComponent(playerId)}`, jsonPatch({ note }))
+}
+
 export async function startSocialRoom(game: SocialGameSlug, roomId: string) {
   return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/start`, { method: 'POST' })
 }
@@ -375,7 +386,7 @@ function jsonPatch(body: unknown): RequestInit {
 }
 
 async function requestRoom(game: SocialGameSlug, path: string, init?: RequestInit) {
-  const response = await fetch(`/api/${game}${path}`, init)
+  const response = await fetchWithAuthRedirect(`/api/${game}${path}`, init)
   if (!response.ok) {
     const error = await response.json().catch(() => undefined)
     throw new Error(error?.error ?? `Request failed: ${response.status}`)

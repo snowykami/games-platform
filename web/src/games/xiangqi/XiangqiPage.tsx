@@ -1,11 +1,13 @@
 import type { CSSProperties } from 'react'
 import type { XiangqiOnlineMove, XiangqiOnlinePiece, XiangqiOnlinePlayer } from './online'
 import type { XiangqiMove, XiangqiPiece, XiangqiPosition, XiangqiSide } from './types'
+import type { GameSpeechEntry } from '@/games/speech'
 import { ArrowLeft, Copy, Flag, RefreshCw, RotateCw } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useI18n } from '@/i18n/context'
@@ -191,7 +193,8 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
                     active={player.id === room.currentPlayerId}
                     player={player}
                     self={player.userId === user?.id}
-                    speech={latestSpeechForPlayer(room.speeches, player.id)?.text}
+                    speech={latestSpeechForPlayer(room.speeches, player.id)}
+                    onRename={actions.renamePlayer}
                     onSpeak={actions.say}
                   />
                 ))}
@@ -412,7 +415,7 @@ function CapturedPieceBurst({
   )
 }
 
-function PlayerLine({ active, onSpeak, player, self, speech }: { active: boolean, onSpeak: (text: string) => Promise<void>, player: XiangqiOnlinePlayer, self: boolean, speech?: string }) {
+function PlayerLine({ active, onRename, onSpeak, player, self, speech }: { active: boolean, onRename: (name: string) => Promise<void>, onSpeak: (text: string) => Promise<void>, player: XiangqiOnlinePlayer, self: boolean, speech?: GameSpeechEntry }) {
   const { t } = useI18n()
   return (
     <div className={cn('relative grid gap-2 rounded-lg border px-3 py-2', active ? 'border-[#f2d59a] bg-[#f2d59a]/16' : 'border-[#fff8e8]/14 bg-[#10100d]/50')}>
@@ -421,6 +424,7 @@ function PlayerLine({ active, onSpeak, player, self, speech }: { active: boolean
           <div className="flex min-w-0 items-center gap-2">
             <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
             <strong className="block truncate text-sm">{player.name}</strong>
+            {self && <PlayerNameEditor buttonClassName="text-[#fff8e8]" className="min-w-[110px]" name={player.name} onSave={onRename} />}
           </div>
           <span className="text-xs font-bold text-[#fff8e8]/60">
             {self ? t('gomoku.you') : player.isAI ? t('common.ai') : player.connected ? t('common.online') : t('common.offline')}
@@ -433,7 +437,7 @@ function PlayerLine({ active, onSpeak, player, self, speech }: { active: boolean
           </span>
         </div>
       </div>
-      <SpeechBubble text={speech} />
+      <SpeechBubble speech={speech} />
     </div>
   )
 }

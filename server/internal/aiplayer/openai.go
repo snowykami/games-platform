@@ -187,7 +187,7 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 		"duration", time.Since(startedAt),
 	)
 
-	return Decision{ActionID: choice.ActionID, Reason: choice.Reason, Speech: choice.Speech, Source: "llm"}, nil
+	return Decision{ActionID: choice.ActionID, Reason: choice.Reason, Speech: choice.Speech, Notes: choice.Notes, Source: "llm"}, nil
 }
 
 func mustJSON(value any) string {
@@ -218,6 +218,11 @@ func chooseActionTool() toolSpec {
 					"speech": map[string]any{
 						"type":        "string",
 						"description": "Optional natural table talk in Chinese, no more than 24 Chinese characters. Leave empty if silence is better.",
+					},
+					"notes": map[string]any{
+						"type":                 "object",
+						"description":          "Optional private notes for future social deduction turns, keyed by player id. Keep each note short in Chinese.",
+						"additionalProperties": map[string]any{"type": "string"},
 					},
 				},
 				"required":             []string{"actionId"},
@@ -272,7 +277,8 @@ type chatResponse struct {
 }
 
 type chooseActionArguments struct {
-	ActionID string `json:"actionId"`
-	Reason   string `json:"reason"`
-	Speech   string `json:"speech"`
+	ActionID string            `json:"actionId"`
+	Reason   string            `json:"reason"`
+	Speech   string            `json:"speech"`
+	Notes    map[string]string `json:"notes"`
 }

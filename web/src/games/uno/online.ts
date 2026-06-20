@@ -1,6 +1,7 @@
 import type { UnoCard, UnoColor } from './types'
 import type { GameSpeechEntry } from '@/games/speech'
 import { z } from 'zod'
+import { fetchWithAuthRedirect } from '@/auth/fetch'
 
 export type UnoPhase = 'lobby' | 'playing' | 'finished'
 
@@ -189,6 +190,14 @@ export async function sayUno(roomId: string, text: string) {
   })
 }
 
+export async function renameUnoPlayer(roomId: string, name: string) {
+  return requestRoom(`/api/uno/rooms/${encodeURIComponent(roomId)}/name`, {
+    body: JSON.stringify({ name }),
+    headers: { 'Content-Type': 'application/json' },
+    method: 'PATCH',
+  })
+}
+
 export async function startUnoRoom(roomId: string) {
   return requestRoom(`/api/uno/rooms/${encodeURIComponent(roomId)}/start`, { method: 'POST' })
 }
@@ -218,7 +227,7 @@ export async function catchUno(roomId: string, targetId: string) {
 }
 
 async function requestRoom(input: RequestInfo | URL, init?: RequestInit) {
-  const response = await fetch(input, init)
+  const response = await fetchWithAuthRedirect(input, init)
   if (!response.ok) {
     const error = await response.json().catch(() => undefined)
     throw new Error(error?.error ?? `Request failed: ${response.status}`)

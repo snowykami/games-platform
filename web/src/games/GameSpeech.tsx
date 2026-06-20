@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import { MessageCircle, Send, X } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -6,7 +7,13 @@ import { cn } from '@/shared/lib/utils'
 
 interface SpeechBubbleProps {
   className?: string
+  speech?: {
+    text: string
+    spokenAt?: string
+  }
+  spokenAt?: string
   text?: string
+  ttlMs?: number
 }
 
 interface SpeechButtonProps {
@@ -16,15 +23,73 @@ interface SpeechButtonProps {
   palette?: 'dark' | 'gomoku' | 'mahjong' | 'xiangqi'
 }
 
-export function SpeechBubble({ className, text }: SpeechBubbleProps) {
-  if (!text) {
+export function SpeechBubble({ className, speech, spokenAt, text, ttlMs = 5000 }: SpeechBubbleProps) {
+  const anchorRef = useRef<HTMLSpanElement>(null)
+  const [position, setPosition] = useState<{ above: boolean, left: number, top: number }>()
+  const [renderedAt] = useState(() => Date.now())
+  const bubbleText = speech?.text ?? text
+  const bubbleSpokenAt = speech?.spokenAt ?? spokenAt
+  const elapsed = bubbleSpokenAt ? renderedAt - Date.parse(bubbleSpokenAt) : 0
+  const remainingMs = Math.max(0, ttlMs - Math.max(0, elapsed))
+
+  useLayoutEffect(() => {
+    if (!bubbleText) {
+      return undefined
+    }
+
+    const positionBubble = () => {
+      const rect = anchorRef.current?.getBoundingClientRect()
+      if (!rect) {
+        return
+      }
+      const bubbleWidth = Math.min(224, window.innerWidth - 24)
+      const left = Math.min(Math.max(12, rect.left), window.innerWidth - bubbleWidth - 12)
+      const above = rect.top > 88
+      setPosition({ above, left, top: above ? rect.top - 8 : rect.bottom + 8 })
+    }
+
+    const frame = window.requestAnimationFrame(positionBubble)
+    window.addEventListener('resize', positionBubble)
+    window.addEventListener('scroll', positionBubble, true)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', positionBubble)
+      window.removeEventListener('scroll', positionBubble, true)
+    }
+  }, [bubbleText, bubbleSpokenAt])
+
+  if (!bubbleText || remainingMs <= 0) {
     return null
   }
 
   return (
-    <p className={cn('pointer-events-none absolute left-3 top-0 z-50 max-w-56 -translate-y-[calc(100%+8px)] rounded-2xl border border-black/10 bg-[#fff8e8] px-3 py-2 text-xs font-black leading-5 text-[#171411] shadow-[0_16px_34px_rgba(0,0,0,0.3)] after:absolute after:left-5 after:top-full after:size-3 after:-translate-y-1/2 after:rotate-45 after:border-b after:border-r after:border-black/10 after:bg-[#fff8e8]', className)}>
-      {text}
-    </p>
+    <>
+      <span ref={anchorRef} aria-hidden className="pointer-events-none absolute left-3 top-0 size-0" />
+      {position && createPortal(
+        <p
+          key={`${bubbleSpokenAt ?? ''}:${bubbleText}`}
+          className={cn(
+            'pointer-events-none fixed z-[10000] max-w-[min(14rem,calc(100vw-24px))] rounded-2xl border border-black/10 bg-[#fff8e8] px-3 py-2 text-xs font-black leading-5 text-[#171411] shadow-[0_16px_34px_rgba(0,0,0,0.3)] after:absolute after:left-5 after:size-3 after:rotate-45 after:border-black/10 after:bg-[#fff8e8]',
+            position.above
+              ? '-translate-y-full after:top-full after:-translate-y-1/2 after:border-b after:border-r'
+              : 'after:bottom-full after:translate-y-1/2 after:border-l after:border-t',
+            className,
+          )}
+          style={{
+            '--speech-bubble-transform': position.above ? 'translateY(-100%)' : 'translateY(0)',
+            'animationDuration': `${remainingMs}ms`,
+            'animationFillMode': 'forwards',
+            'animationName': 'speech-bubble-hide',
+            'animationTimingFunction': 'ease',
+            'left': position.left,
+            'top': position.top,
+          } as CSSProperties}
+        >
+          {bubbleText}
+        </p>,
+        document.body,
+      )}
+    </>
   )
 }
 

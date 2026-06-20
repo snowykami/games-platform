@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react'
 import type { GomokuMove, GomokuPlayer, GomokuStone } from './online'
+import type { GameSpeechEntry } from '@/games/speech'
 import { ArrowLeft, Copy, RotateCcw } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useI18n } from '@/i18n/context'
@@ -149,7 +151,8 @@ export function GomokuPage({ roomId }: { roomId: string }) {
                     active={player.id === room.currentPlayerId}
                     player={player}
                     self={player.userId === user?.id}
-                    speech={latestSpeechForPlayer(room.speeches, player.id)?.text}
+                    speech={latestSpeechForPlayer(room.speeches, player.id)}
+                    onRename={actions.renamePlayer}
                     onSpeak={actions.say}
                   />
                 ))}
@@ -197,7 +200,7 @@ function StoneView({ isLast, isWinning, stone }: { isLast: boolean, isWinning: b
   )
 }
 
-function PlayerLine({ active, onSpeak, player, self, speech }: { active: boolean, onSpeak: (text: string) => Promise<void>, player: GomokuPlayer, self: boolean, speech?: string }) {
+function PlayerLine({ active, onRename, onSpeak, player, self, speech }: { active: boolean, onRename: (name: string) => Promise<void>, onSpeak: (text: string) => Promise<void>, player: GomokuPlayer, self: boolean, speech?: GameSpeechEntry }) {
   const { t } = useI18n()
   return (
     <div className={cn('relative grid gap-2 rounded-lg border px-3 py-2', active ? 'border-[#1f8f7b] bg-[#1f8f7b]/18' : 'border-white/14 bg-[#0b1110]/50')}>
@@ -208,6 +211,7 @@ function PlayerLine({ active, onSpeak, player, self, speech }: { active: boolean
             <div className="flex min-w-0 items-center gap-2">
               <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
               <strong className="block truncate text-sm">{player.name}</strong>
+              {self && <PlayerNameEditor buttonClassName="text-[#f4f0e4]" className="min-w-[110px]" name={player.name} onSave={onRename} />}
             </div>
             <span className="text-xs font-bold text-[#f4f0e4]/60">
               {self ? t('gomoku.you') : player.isAI ? t('common.ai') : player.connected ? t('common.online') : t('common.offline')}
@@ -221,7 +225,7 @@ function PlayerLine({ active, onSpeak, player, self, speech }: { active: boolean
           </span>
         </div>
       </div>
-      <SpeechBubble text={speech} />
+      <SpeechBubble speech={speech} />
     </div>
   )
 }

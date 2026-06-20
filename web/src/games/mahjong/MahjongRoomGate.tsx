@@ -9,6 +9,7 @@ import { getAICapabilities, getAILevelLabel } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { AILevelPicker } from '@/games/AILevelPicker'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { cn } from '@/shared/lib/utils'
 import { createMahjongRoom } from './online'
@@ -165,6 +166,7 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
                   <div className="flex min-w-0 items-center gap-2">
                     <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
                     <strong className="truncate text-lg">{player.name}</strong>
+                    {player.userId === user?.id && <PlayerNameEditor buttonClassName="text-[#fff8e8]" name={player.name} onSave={actions.renamePlayer} />}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {player.userId === user?.id && <SpeechButton palette="mahjong" onSend={actions.say} />}
@@ -197,7 +199,7 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
                     )}
                   </div>
                 </div>
-                <SpeechBubble text={latestSpeechForPlayer(room.speeches, player.id)?.text} />
+                <SpeechBubble speech={latestSpeechForPlayer(room.speeches, player.id)} />
                 <p className="mt-2 min-h-10 text-sm leading-6 text-[#fff8e8]/72">
                   {player.ai?.personality ?? '准备入座。'}
                 </p>
@@ -299,8 +301,8 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
         </section>
 
         <section className="grid min-h-[560px] gap-3 overflow-hidden rounded-lg border border-[#d8b66a]/45 bg-[radial-gradient(circle_at_center,rgba(255,248,232,0.12),transparent_42%),linear-gradient(135deg,#173b31,#10251f)] p-3 shadow-[inset_0_0_80px_rgba(0,0,0,0.28),0_24px_70px_rgba(0,0,0,0.25)] lg:grid-cols-[240px_minmax(0,1fr)_240px] lg:grid-rows-[150px_minmax(0,1fr)_180px]">
-          <PlayerPanel className="lg:col-start-2 lg:row-start-1" currentPlayerId={currentPlayer.id} player={room.players[2]} speech={latestSpeechForPlayer(room.speeches, room.players[2]?.id)?.text} />
-          <PlayerPanel className="lg:col-start-1 lg:row-start-2" currentPlayerId={currentPlayer.id} player={room.players[3]} speech={latestSpeechForPlayer(room.speeches, room.players[3]?.id)?.text} />
+          <PlayerPanel className="lg:col-start-2 lg:row-start-1" currentPlayerId={currentPlayer.id} player={room.players[2]} speech={latestSpeechForPlayer(room.speeches, room.players[2]?.id)} />
+          <PlayerPanel className="lg:col-start-1 lg:row-start-2" currentPlayerId={currentPlayer.id} player={room.players[3]} speech={latestSpeechForPlayer(room.speeches, room.players[3]?.id)} />
 
           <div className="relative grid min-h-[270px] place-items-center rounded-lg border border-[#d8b66a]/30 bg-[#0f211c]/70 p-3 lg:col-start-2 lg:row-start-2">
             <div className="absolute inset-4 rounded-lg border border-[#d8b66a]/25" />
@@ -316,16 +318,19 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
             </div>
           </div>
 
-          <PlayerPanel className="lg:col-start-3 lg:row-start-2" currentPlayerId={currentPlayer.id} player={room.players[1]} speech={latestSpeechForPlayer(room.speeches, room.players[1]?.id)?.text} />
+          <PlayerPanel className="lg:col-start-3 lg:row-start-2" currentPlayerId={currentPlayer.id} player={room.players[1]} speech={latestSpeechForPlayer(room.speeches, room.players[1]?.id)} />
 
           <section className="relative grid min-h-0 gap-3 rounded-lg border border-[#d8b66a]/35 bg-[#081914]/82 p-3 lg:col-span-3 lg:row-start-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <strong className="text-lg">你的手牌</strong>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <strong className="text-lg">你的手牌</strong>
+                  <PlayerNameEditor buttonClassName="text-[#fff8e8]" className="min-w-[120px]" name={human.name} onSave={actions.renamePlayer} />
+                </div>
                 <p className="text-sm font-bold text-[#fff8e8]/70">
                   {room.phase === 'claiming' ? '可以声明吃、碰或胡。' : canHumanDiscard ? '选择一张牌打出。' : canHumanDraw ? '轮到你摸牌。' : `等待 ${currentPlayer.name}。`}
                 </p>
-                <SpeechBubble text={latestSpeechForPlayer(room.speeches, human.id)?.text} />
+                <SpeechBubble speech={latestSpeechForPlayer(room.speeches, human.id)} />
               </div>
               <div className="flex flex-wrap gap-2">
                 <SpeechButton palette="mahjong" onSend={actions.say} />
@@ -376,8 +381,8 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
 
 function MahjongShell({ children }: { children: ReactNode }) {
   return (
-    <main className="min-h-svh overflow-y-auto bg-[#1b342b] text-[#fff8e8] lg:overflow-hidden">
-      <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3 lg:h-svh lg:min-h-0">
+    <main className="min-h-svh overflow-y-auto bg-[#1b342b] text-[#fff8e8]">
+      <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3">
         <header className="flex items-end justify-between gap-4">
           <div>
             <p className="mb-1 text-xs font-black tracking-normal text-[#ffd166]">ONLINE MAHJONG TABLE</p>
@@ -394,7 +399,7 @@ function MahjongShell({ children }: { children: ReactNode }) {
   )
 }
 
-function PlayerPanel({ className, currentPlayerId, player, speech }: { className?: string, currentPlayerId: string, player?: MahjongOnlinePlayer, speech?: string }) {
+function PlayerPanel({ className, currentPlayerId, player, speech }: { className?: string, currentPlayerId: string, player?: MahjongOnlinePlayer, speech?: MahjongSpeechEntry }) {
   if (!player) {
     return <article className={cn('rounded-lg border border-[#d8b66a]/35 bg-[#081914]/40 p-3', className)} />
   }
@@ -422,7 +427,7 @@ function PlayerPanel({ className, currentPlayerId, player, speech }: { className
         </div>
         {player.hand.length > 0 ? <span className="text-xs font-black text-[#ffd166]">SELF</span> : <OpponentTiles count={player.handCount} />}
       </div>
-      <SpeechBubble text={speech} />
+      <SpeechBubble speech={speech} />
       <div className="mt-2 flex min-h-10 flex-wrap content-end gap-1">
         {player.melds.map(meld => (
           <span key={meld.id} className="rounded-md bg-[#fff8e8]/12 px-2 py-1 text-xs font-black text-[#fff8e8]">

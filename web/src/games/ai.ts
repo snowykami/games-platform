@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { fetchWithAuthRedirect } from '@/auth/fetch'
 import { messages } from '@/i18n/messages'
 
 export type AILevel = 'beginner' | 'normal' | 'master' | 'ai'
@@ -72,7 +73,7 @@ export async function decideWithAI(input: {
   sessionId: string
   state: unknown
 }) {
-  const response = await fetch('/api/ai/decide', {
+  const response = await fetchWithAuthRedirect('/api/ai/decide', {
     body: JSON.stringify(input),
     headers: { 'Content-Type': 'application/json' },
     method: 'POST',

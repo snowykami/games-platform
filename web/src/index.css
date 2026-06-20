@@ -65,6 +65,19 @@ body {
   margin: 0;
 }
 
+@keyframes speech-bubble-hide {
+  0%,
+  78% {
+    opacity: 1;
+    transform: var(--speech-bubble-transform, translateY(0));
+  }
+
+  100% {
+    opacity: 0;
+    transform: var(--speech-bubble-transform, translateY(0)) translateY(-4px);
+  }
+}
+
 button,
 input,
 select,

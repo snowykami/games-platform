@@ -1,6 +1,6 @@
 import type { MahjongOnlineRoom } from './online'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { addMahjongAI, claimMahjong, discardMahjongTile, drawMahjongTile, joinMahjongRoom, removeMahjongPlayer, sayMahjong, selfDrawMahjong, skipMahjongClaims, startMahjongRoom, updateMahjongAI } from './online'
+import { addMahjongAI, claimMahjong, discardMahjongTile, drawMahjongTile, joinMahjongRoom, removeMahjongPlayer, renameMahjongPlayer, sayMahjong, selfDrawMahjong, skipMahjongClaims, startMahjongRoom, updateMahjongAI } from './online'
 
 export function useMahjongRoom(roomId: string | undefined) {
   const [room, setRoom] = useState<MahjongOnlineRoom>()
@@ -83,6 +83,7 @@ export function useMahjongRoom(roomId: string | undefined) {
     draw: () => roomId ? run(() => drawMahjongTile(roomId)) : Promise.resolve(),
     refresh,
     removePlayer: (playerId: string) => roomId ? run(() => removeMahjongPlayer(roomId, playerId)) : Promise.resolve(),
+    renamePlayer: (name: string) => roomId ? run(() => renameMahjongPlayer(roomId, name)) : Promise.resolve(),
     say: (text: string) => roomId ? run(() => sayMahjong(roomId, text)) : Promise.resolve(),
     selfDraw: () => roomId ? run(() => selfDrawMahjong(roomId)) : Promise.resolve(),
     skipClaims: () => roomId ? run(() => skipMahjongClaims(roomId)) : Promise.resolve(),

@@ -1,7 +1,7 @@
 import type { GomokuOnlineRoom } from './online'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/context'
-import { addGomokuAI, joinGomokuRoom, placeGomokuStone, removeGomokuPlayer, sayGomoku, startGomokuRoom, updateGomokuAI } from './online'
+import { addGomokuAI, joinGomokuRoom, placeGomokuStone, removeGomokuPlayer, renameGomokuPlayer, sayGomoku, startGomokuRoom, updateGomokuAI } from './online'
 
 export function useGomokuRoom(roomId: string | undefined) {
   const { t } = useI18n()
@@ -83,6 +83,7 @@ export function useGomokuRoom(roomId: string | undefined) {
     place: (x: number, y: number) => roomId ? run(() => placeGomokuStone(roomId, x, y)) : Promise.resolve(),
     refresh,
     removePlayer: (playerId: string) => roomId ? run(() => removeGomokuPlayer(roomId, playerId)) : Promise.resolve(),
+    renamePlayer: (name: string) => roomId ? run(() => renameGomokuPlayer(roomId, name)) : Promise.resolve(),
     say: (text: string) => roomId ? run(() => sayGomoku(roomId, text)) : Promise.resolve(),
     start: () => roomId ? run(() => startGomokuRoom(roomId)) : Promise.resolve(),
     updateAI: (playerId: string, level: string) => roomId ? run(() => updateGomokuAI(roomId, playerId, level)) : Promise.resolve(),

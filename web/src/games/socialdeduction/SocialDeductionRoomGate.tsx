@@ -6,6 +6,8 @@ import { Link, useNavigate } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
 import { getAICapabilities } from '@/games/ai'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerNameEditor } from '@/games/PlayerNameEditor'
+import { PlayerNoteEditor } from '@/games/PlayerNoteEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useI18n } from '@/i18n/context'
@@ -836,6 +838,7 @@ function PlayerGrid({
             <div className="flex min-w-0 items-center gap-2">
               <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
               <strong className="truncate text-base">{player.name}</strong>
+              {player.id === room.youPlayerId && <PlayerNameEditor buttonClassName="text-[#fff8e8]" className="min-w-[120px]" name={player.name} onSave={actions.renamePlayer} />}
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {player.id === room.youPlayerId && <SpeechButton onSend={actions.say} />}
@@ -863,7 +866,7 @@ function PlayerGrid({
               )}
             </div>
           </div>
-          <SpeechBubble text={latestSpeechForPlayer(room.speeches, player.id)?.text} />
+          <SpeechBubble speech={latestSpeechForPlayer(room.speeches, player.id)} />
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className={cn('rounded-full px-2 py-0.5 text-xs font-black', player.alive ? 'bg-emerald-200 text-emerald-950' : 'bg-zinc-300 text-zinc-950')}>
               {player.alive ? t('social.alive') : t('social.out')}
@@ -875,6 +878,9 @@ function PlayerGrid({
           <p className="mt-2 min-h-8 text-sm leading-6 text-[#fff8e8]/70">
             {player.ai?.personality ?? (player.kind === 'guest' ? t('xiangqi.guestReady') : t('xiangqi.oidcReady'))}
           </p>
+          {room.youPlayerId && player.id !== room.youPlayerId && (
+            <PlayerNoteEditor className="mt-2" note={player.note} onSave={note => actions.updatePlayerNote(player.id, note)} />
+          )}
         </article>
       ))}
     </div>
@@ -993,9 +999,9 @@ function roleTotal(counts: WerewolfRoleCounts) {
 function SocialShell({ children, config, game }: { children: ReactNode, config: typeof GAME_COPY[SocialGameSlug], game: SocialGameSlug }) {
   const { t } = useI18n()
   return (
-    <main className={cn('relative min-h-svh overflow-y-auto text-[#fff8e8] lg:overflow-hidden', config.bg)}>
+    <main className={cn('relative min-h-svh overflow-y-auto text-[#fff8e8]', config.bg)}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(255,209,102,0.12),transparent_28%),radial-gradient(circle_at_88%_12%,rgba(115,171,191,0.16),transparent_26%)]" />
-      <div className="relative mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3 lg:h-svh lg:min-h-0">
+      <div className="relative mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3">
         <header className="flex items-end justify-between gap-4">
           <div>
             <p className="mb-1 text-xs font-black tracking-normal text-[#fff8e8]/72">{t(GAME_COPY[game].subtitleKey)}</p>

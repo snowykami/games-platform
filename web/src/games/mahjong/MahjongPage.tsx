@@ -194,8 +194,8 @@ export function MahjongPage() {
         </section>
 
         <section className="grid min-h-[560px] gap-3 overflow-hidden rounded-lg border border-[#d8b66a]/45 bg-[radial-gradient(circle_at_center,rgba(255,248,232,0.12),transparent_42%),linear-gradient(135deg,#173b31,#10251f)] p-3 shadow-[inset_0_0_80px_rgba(0,0,0,0.28),0_24px_70px_rgba(0,0,0,0.25)] lg:grid-cols-[240px_minmax(0,1fr)_240px] lg:grid-rows-[150px_minmax(0,1fr)_180px]">
-          <PlayerPanel aiLevel={aiLevel} className="lg:col-start-2 lg:row-start-1" currentPlayerId={currentPlayer.id} llmEnabled={llmEnabled} player={state.players[2]} speech={latestSpeechForPlayer(speeches, state.players[2].id)?.text} onAILevelChange={setAILevel} />
-          <PlayerPanel aiLevel={aiLevel} className="lg:col-start-1 lg:row-start-2" currentPlayerId={currentPlayer.id} llmEnabled={llmEnabled} player={state.players[3]} speech={latestSpeechForPlayer(speeches, state.players[3].id)?.text} onAILevelChange={setAILevel} />
+          <PlayerPanel aiLevel={aiLevel} className="lg:col-start-2 lg:row-start-1" currentPlayerId={currentPlayer.id} llmEnabled={llmEnabled} player={state.players[2]} speech={latestSpeechForPlayer(speeches, state.players[2].id)} onAILevelChange={setAILevel} />
+          <PlayerPanel aiLevel={aiLevel} className="lg:col-start-1 lg:row-start-2" currentPlayerId={currentPlayer.id} llmEnabled={llmEnabled} player={state.players[3]} speech={latestSpeechForPlayer(speeches, state.players[3].id)} onAILevelChange={setAILevel} />
 
           <div className="relative grid min-h-[270px] place-items-center rounded-lg border border-[#d8b66a]/30 bg-[#0f211c]/70 p-3 lg:col-start-2 lg:row-start-2">
             <div className="absolute inset-4 rounded-lg border border-[#d8b66a]/25" />
@@ -211,7 +211,7 @@ export function MahjongPage() {
             </div>
           </div>
 
-          <PlayerPanel aiLevel={aiLevel} className="lg:col-start-3 lg:row-start-2" currentPlayerId={currentPlayer.id} llmEnabled={llmEnabled} player={state.players[1]} speech={latestSpeechForPlayer(speeches, state.players[1].id)?.text} onAILevelChange={setAILevel} />
+          <PlayerPanel aiLevel={aiLevel} className="lg:col-start-3 lg:row-start-2" currentPlayerId={currentPlayer.id} llmEnabled={llmEnabled} player={state.players[1]} speech={latestSpeechForPlayer(speeches, state.players[1].id)} onAILevelChange={setAILevel} />
 
           <section className="relative grid min-h-0 gap-3 rounded-lg border border-[#d8b66a]/35 bg-[#081914]/82 p-3 lg:col-span-3 lg:row-start-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -220,7 +220,7 @@ export function MahjongPage() {
                 <p className="text-sm font-bold text-[#fff8e8]/70">
                   {state.phase === 'claiming' ? t('mahjong.claimPrompt') : canHumanDiscard ? t('mahjong.discardPrompt') : canHumanDraw ? t('mahjong.drawPrompt') : t('mahjong.waitPrompt', { name: currentPlayer.name })}
                 </p>
-                <SpeechBubble text={latestSpeechForPlayer(speeches, human.id)?.text} />
+                <SpeechBubble speech={latestSpeechForPlayer(speeches, human.id)} />
               </div>
               <div className="flex flex-wrap gap-2">
                 <SpeechButton palette="mahjong" onSend={text => recordSpeech(human, text)} />
@@ -286,7 +286,7 @@ function PlayerPanel({
   llmEnabled: boolean
   onAILevelChange: (level: AILevel) => void
   player: MahjongPlayer
-  speech?: string
+  speech?: GameSpeechEntry
 }) {
   const { t } = useI18n()
   const isCurrent = currentPlayerId === player.id
@@ -319,7 +319,7 @@ function PlayerPanel({
               </div>
             )}
       </div>
-      <SpeechBubble text={speech} />
+      <SpeechBubble speech={speech} />
       <div className="mt-2 flex min-h-10 flex-wrap content-end gap-1">
         {player.melds.map(meld => (
           <span key={meld.id} className="rounded-md bg-[#fff8e8]/12 px-2 py-1 text-xs font-black text-[#fff8e8]">
