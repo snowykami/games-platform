@@ -338,8 +338,8 @@ export function UnoPage({ roomId }: { roomId: string }) {
         </section>
       </div>
       {activeWildPicker && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-[#090807]/58 px-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t('uno.chooseWildColor')}>
-          <div className="w-[min(360px,calc(100vw-32px))] rounded-lg border border-white/25 bg-[#14110e] p-4 text-[#fff8e8] shadow-[0_28px_80px_rgba(0,0,0,0.45)]">
+        <div className="fixed inset-0 z-[10000] grid place-items-center bg-[#090807]/72 px-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t('uno.chooseWildColor')}>
+          <div className="relative z-[10001] w-[min(360px,calc(100vw-32px))] rounded-lg border border-white/25 bg-[#14110e] p-4 text-[#fff8e8] shadow-[0_28px_80px_rgba(0,0,0,0.45)]">
             <div className="flex items-center justify-between gap-3">
               <strong>{t('uno.chooseColor')}</strong>
               <span className="text-xs font-black text-[#fff8e8]/65">{formatCard(activeWildPicker.card)}</span>
