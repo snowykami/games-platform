@@ -2,6 +2,8 @@ package runtimecheck
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -10,15 +12,19 @@ import (
 	"github.com/snowykami/games-platform/server/internal/config"
 )
 
-func LogStartup(ctx context.Context, cfg config.Config) {
-	checkDatabase(ctx, cfg.Database)
-	checkRedis(ctx, cfg.Redis)
+func RequireStartup(ctx context.Context, cfg config.Config) error {
+	if err := checkDatabase(ctx, cfg.Database); err != nil {
+		return err
+	}
+	if err := checkRedis(ctx, cfg.Redis); err != nil {
+		return err
+	}
+	return nil
 }
 
-func checkDatabase(ctx context.Context, cfg config.DatabaseConfig) {
+func checkDatabase(ctx context.Context, cfg config.DatabaseConfig) error {
 	if !cfg.Enabled() {
-		slog.Info("database check skipped", "configured", false)
-		return
+		return errors.New("DB_URL is required")
 	}
 
 	startedAt := time.Now()
@@ -27,23 +33,21 @@ func checkDatabase(ctx context.Context, cfg config.DatabaseConfig) {
 
 	pool, err := pgxpool.New(checkCtx, cfg.URL)
 	if err != nil {
-		slog.Error("database connection failed", "error", err)
-		return
+		return fmt.Errorf("database connection failed: %w", err)
 	}
 	defer pool.Close()
 
 	if err := pool.Ping(checkCtx); err != nil {
-		slog.Error("database ping failed", "error", err)
-		return
+		return fmt.Errorf("database ping failed: %w", err)
 	}
 
 	slog.Info("database connected", "driver", "postgres", "duration", time.Since(startedAt).String())
+	return nil
 }
 
-func checkRedis(ctx context.Context, cfg config.RedisConfig) {
+func checkRedis(ctx context.Context, cfg config.RedisConfig) error {
 	if !cfg.Enabled() {
-		slog.Info("redis check skipped", "configured", false)
-		return
+		return errors.New("REDIS_URL is required")
 	}
 
 	startedAt := time.Now()
@@ -52,17 +56,16 @@ func checkRedis(ctx context.Context, cfg config.RedisConfig) {
 
 	options, err := redis.ParseURL(cfg.URL)
 	if err != nil {
-		slog.Error("redis url invalid", "error", err)
-		return
+		return fmt.Errorf("redis url invalid: %w", err)
 	}
 
 	client := redis.NewClient(options)
 	defer client.Close()
 
 	if err := client.Ping(checkCtx).Err(); err != nil {
-		slog.Error("redis ping failed", "error", err)
-		return
+		return fmt.Errorf("redis ping failed: %w", err)
 	}
 
 	slog.Info("redis connected", "duration", time.Since(startedAt).String())
+	return nil
 }

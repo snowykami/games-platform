@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -29,7 +30,10 @@ type gamesResponse struct {
 
 func main() {
 	cfg := config.Load()
-	runtimecheck.LogStartup(context.Background(), cfg)
+	if err := runtimecheck.RequireStartup(context.Background(), cfg); err != nil {
+		slog.Error("startup dependency check failed", "error", err)
+		os.Exit(1)
+	}
 
 	server := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
