@@ -41,7 +41,6 @@ export interface MahjongOnlineWinResult {
 
 export interface MahjongOnlinePlayer {
   id: string
-  userId: string
   name: string
   role: 'host' | 'player'
   kind: 'guest' | 'oidc' | 'ai'
@@ -72,7 +71,8 @@ export interface MahjongClaimOption {
 
 export interface MahjongOnlineRoom {
   id: string
-  hostUserId: string
+  hostPlayerId?: string
+  youPlayerId?: string
   phase: MahjongPhase
   players: MahjongOnlinePlayer[]
   wallCount: number
@@ -132,7 +132,6 @@ const winResultSchema: z.ZodType<MahjongOnlineWinResult> = z.object({
 })
 const playerSchema: z.ZodType<MahjongOnlinePlayer> = z.object({
   id: z.string(),
-  userId: z.string(),
   name: z.string(),
   role: z.enum(['host', 'player']),
   kind: z.enum(['guest', 'oidc', 'ai']),
@@ -168,7 +167,8 @@ const claimSchema: z.ZodType<MahjongClaimOption> = z.object({
 })
 const roomSchema: z.ZodType<MahjongOnlineRoom> = z.object({
   id: z.string(),
-  hostUserId: z.string(),
+  hostPlayerId: z.string().optional(),
+  youPlayerId: z.string().optional(),
   phase: z.enum(['lobby', 'playing', 'claiming', 'finished']),
   players: z.array(playerSchema),
   wallCount: z.number(),

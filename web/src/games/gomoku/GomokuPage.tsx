@@ -4,22 +4,22 @@ import type { GameSpeechEntry } from '@/games/speech'
 import { ArrowLeft, Copy, RotateCcw } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import { useAuth } from '@/auth/AuthContext'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
+import { useAutoFollowScroll } from '@/games/useAutoFollowScroll'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { useGomokuRoom } from './useGomokuRoom'
 
 export function GomokuPage({ roomId }: { roomId: string }) {
-  const { user } = useAuth()
   const { t } = useI18n()
   const { actions, error, isLoading, room } = useGomokuRoom(roomId)
   const [message, setMessage] = useState(() => t('gomoku.ready'))
+  const historyScroll = useAutoFollowScroll<HTMLDivElement>()
 
-  const human = useMemo(() => room?.players.find(player => player.userId === user?.id), [room?.players, user?.id])
+  const human = useMemo(() => room?.players.find(player => player.id === room.youPlayerId), [room?.players, room?.youPlayerId])
   const currentPlayer = room?.players.find(player => player.id === room.currentPlayerId)
   const winner = room?.players.find(player => player.id === room.winnerId)
   const moveMap = useMemo(() => {
@@ -30,7 +30,7 @@ export function GomokuPage({ roomId }: { roomId: string }) {
   const winningCells = useMemo(() => new Set(room?.winningLine.map(point => cellKey(point.x, point.y)) ?? []), [room?.winningLine])
   const lastMove = room?.moves.at(-1)
   const isHumanTurn = Boolean(room && human && room.phase === 'playing' && room.currentPlayerId === human.id)
-  const isHost = Boolean(room && user && room.hostUserId === user.id)
+  const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
 
   async function handleCopyRoom() {
     await navigator.clipboard?.writeText(window.location.href)
@@ -150,7 +150,7 @@ export function GomokuPage({ roomId }: { roomId: string }) {
                     key={player.id}
                     active={player.id === room.currentPlayerId}
                     player={player}
-                    self={player.userId === user?.id}
+                    self={player.id === room.youPlayerId}
                     speech={latestSpeechForPlayer(room.speeches, player.id)}
                     onRename={actions.renamePlayer}
                     onSpeak={actions.say}
@@ -161,7 +161,7 @@ export function GomokuPage({ roomId }: { roomId: string }) {
 
             <div className="gomoku-panel min-h-0 overflow-hidden p-4">
               <h2 className="mb-3 text-lg font-black">{t('gomoku.history')}</h2>
-              <div className="grid max-h-60 gap-2 overflow-auto pr-1">
+              <div ref={historyScroll.containerRef} className="grid max-h-60 gap-2 overflow-auto pr-1" onScroll={historyScroll.handleScroll}>
                 {room.log.map(entry => (
                   <p key={entry.id} className="rounded-lg bg-[#0b1110]/58 px-3 py-2 text-sm font-bold leading-6 text-[#f4f0e4]/76">
                     {entry.text}

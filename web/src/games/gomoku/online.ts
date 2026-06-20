@@ -7,7 +7,6 @@ export type GomokuStone = 'black' | 'white'
 
 export interface GomokuPlayer {
   id: string
-  userId: string
   name: string
   role: 'host' | 'player'
   kind: 'guest' | 'oidc' | 'ai'
@@ -50,7 +49,8 @@ export interface GomokuPublicAction {
 
 export interface GomokuOnlineRoom {
   id: string
-  hostUserId: string
+  hostPlayerId?: string
+  youPlayerId?: string
   phase: GomokuPhase
   players: GomokuPlayer[]
   boardSize: number
@@ -69,7 +69,6 @@ const stoneSchema = z.enum(['black', 'white'])
 
 const playerSchema = z.object({
   id: z.string(),
-  userId: z.string(),
   name: z.string(),
   role: z.enum(['host', 'player']),
   kind: z.enum(['guest', 'oidc', 'ai']),
@@ -107,7 +106,8 @@ const moveSchema = pointSchema.extend({
 
 const roomSchema: z.ZodType<GomokuOnlineRoom> = z.object({
   id: z.string(),
-  hostUserId: z.string(),
+  hostPlayerId: z.string().optional(),
+  youPlayerId: z.string().optional(),
   phase: z.enum(['lobby', 'playing', 'finished']),
   players: z.array(playerSchema),
   boardSize: z.number(),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 )
 
 type Level string
@@ -14,6 +15,8 @@ const (
 	LevelMaster   Level = "master"
 	LevelLLM      Level = "ai"
 )
+
+const DecisionTimeout = 30 * time.Second
 
 type LegalAction struct {
 	ID          string `json:"id"`

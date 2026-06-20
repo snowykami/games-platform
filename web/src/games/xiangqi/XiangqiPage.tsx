@@ -3,13 +3,13 @@ import type { XiangqiOnlineMove, XiangqiOnlinePiece, XiangqiOnlinePlayer } from 
 import type { XiangqiMove, XiangqiPiece, XiangqiPosition, XiangqiSide } from './types'
 import type { GameSpeechEntry } from '@/games/speech'
 import { ArrowLeft, Copy, Flag, RefreshCw, RotateCw } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import { useAuth } from '@/auth/AuthContext'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
+import { useAutoFollowScroll } from '@/games/useAutoFollowScroll'
 import { useI18n } from '@/i18n/context'
 import { Button } from '@/shared/components/ui/button'
 import { cn } from '@/shared/lib/utils'
@@ -20,22 +20,21 @@ const BOARD_FILES = Array.from({ length: 9 }, (_, index) => index)
 const BOARD_RANKS = Array.from({ length: 10 }, (_, index) => index)
 
 export function XiangqiPage({ roomId }: { roomId: string }) {
-  const { user } = useAuth()
   const { t } = useI18n()
   const { actions, error, isLoading, room } = useXiangqiRoom(roomId)
   const [selectedId, setSelectedId] = useState<string>()
   const [perspective, setPerspective] = useState<XiangqiSide>('red')
   const [message, setMessage] = useState(() => t('xiangqi.tableReady'))
-  const recordListRef = useRef<HTMLOListElement | null>(null)
+  const recordScroll = useAutoFollowScroll<HTMLOListElement>()
 
-  const human = useMemo(() => room?.players.find(player => player.userId === user?.id), [room?.players, user?.id])
+  const human = useMemo(() => room?.players.find(player => player.id === room.youPlayerId), [room?.players, room?.youPlayerId])
   const currentPlayer = room?.players.find(player => player.id === room.currentPlayerId)
   const winner = room?.players.find(player => player.id === room.winnerId)
   const pieces = useMemo(() => room?.pieces.map(toEnginePiece) ?? [], [room?.pieces])
   const lastMove = room?.moves.at(-1) ? toEngineMove(room.moves.at(-1)!) : undefined
   const selectedPiece = pieces.find(piece => piece.id === selectedId)
   const isHumanTurn = Boolean(room && human && room.phase === 'playing' && room.currentPlayerId === human.id)
-  const isHost = Boolean(room && user && room.hostUserId === user.id)
+  const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
   const isAIThinking = Boolean(room && currentPlayer?.isAI && room.phase === 'playing')
   const engineState = useMemo(() => ({
     checkSide: room?.checkSide,
@@ -57,15 +56,6 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
         text: room.checkSide === currentPlayer?.side ? `${formatSide(room.checkSide)}${t('xiangqi.checked')}` : `${formatSide(lastMove.piece.side)}${t('xiangqi.check')}`,
       }
     : undefined
-
-  useEffect(() => {
-    const recordList = recordListRef.current
-    if (!recordList) {
-      return
-    }
-
-    recordList.scrollTop = recordList.scrollHeight
-  }, [room?.moves.length])
 
   async function handleCopyRoom() {
     await navigator.clipboard?.writeText(window.location.href)
@@ -192,7 +182,7 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
                     key={player.id}
                     active={player.id === room.currentPlayerId}
                     player={player}
-                    self={player.userId === user?.id}
+                    self={player.id === room.youPlayerId}
                     speech={latestSpeechForPlayer(room.speeches, player.id)}
                     onRename={actions.renamePlayer}
                     onSpeak={actions.say}
@@ -214,7 +204,7 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
                   {t('xiangqi.moves')}
                 </span>
               </div>
-              <ol ref={recordListRef} className="grid min-h-0 content-start gap-2 overflow-y-auto overscroll-contain pr-1">
+              <ol ref={recordScroll.containerRef} className="grid min-h-0 content-start gap-2 overflow-y-auto overscroll-contain pr-1" onScroll={recordScroll.handleScroll}>
                 {room.moves.length === 0 && (
                   <li className="rounded-lg bg-[#fff8e8]/8 px-3 py-2 text-sm font-bold text-[#fff8e8]/62">{t('xiangqi.opening')}</li>
                 )}

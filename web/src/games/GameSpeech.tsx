@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import type { CSSProperties, KeyboardEvent } from 'react'
 import { MessageCircle, Send, X } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -6,11 +6,16 @@ import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 
 interface SpeechBubbleProps {
+  anchorClassName?: string
+  align?: 'start' | 'center'
   className?: string
+  placement?: 'auto' | 'above' | 'below'
   speech?: {
+    playerName?: string
     text: string
     spokenAt?: string
   }
+  speakerName?: string
   spokenAt?: string
   text?: string
   ttlMs?: number
@@ -23,11 +28,12 @@ interface SpeechButtonProps {
   palette?: 'dark' | 'gomoku' | 'mahjong' | 'xiangqi'
 }
 
-export function SpeechBubble({ className, speech, spokenAt, text, ttlMs = 5000 }: SpeechBubbleProps) {
+export function SpeechBubble({ align = 'start', anchorClassName, className, placement = 'auto', speech, speakerName, spokenAt, text, ttlMs = 5000 }: SpeechBubbleProps) {
   const anchorRef = useRef<HTMLSpanElement>(null)
   const [position, setPosition] = useState<{ above: boolean, left: number, top: number }>()
   const [renderedAt] = useState(() => Date.now())
   const bubbleText = speech?.text ?? text
+  const bubbleSpeakerName = speakerName ?? speech?.playerName
   const bubbleSpokenAt = speech?.spokenAt ?? spokenAt
   const elapsed = bubbleSpokenAt ? renderedAt - Date.parse(bubbleSpokenAt) : 0
   const remainingMs = Math.max(0, ttlMs - Math.max(0, elapsed))
@@ -43,8 +49,9 @@ export function SpeechBubble({ className, speech, spokenAt, text, ttlMs = 5000 }
         return
       }
       const bubbleWidth = Math.min(224, window.innerWidth - 24)
-      const left = Math.min(Math.max(12, rect.left), window.innerWidth - bubbleWidth - 12)
-      const above = rect.top > 88
+      const rawLeft = align === 'center' ? rect.left - bubbleWidth / 2 : rect.left
+      const left = Math.min(Math.max(12, rawLeft), window.innerWidth - bubbleWidth - 12)
+      const above = placement === 'above' || (placement === 'auto' && rect.top > 88)
       setPosition({ above, left, top: above ? rect.top - 8 : rect.bottom + 8 })
     }
 
@@ -56,7 +63,7 @@ export function SpeechBubble({ className, speech, spokenAt, text, ttlMs = 5000 }
       window.removeEventListener('resize', positionBubble)
       window.removeEventListener('scroll', positionBubble, true)
     }
-  }, [bubbleText, bubbleSpokenAt])
+  }, [align, bubbleText, bubbleSpokenAt, placement])
 
   if (!bubbleText || remainingMs <= 0) {
     return null
@@ -64,12 +71,13 @@ export function SpeechBubble({ className, speech, spokenAt, text, ttlMs = 5000 }
 
   return (
     <>
-      <span ref={anchorRef} aria-hidden className="pointer-events-none absolute left-3 top-0 size-0" />
+      <span ref={anchorRef} aria-hidden className={cn('pointer-events-none absolute left-3 top-0 size-0', anchorClassName)} />
       {position && createPortal(
         <p
           key={`${bubbleSpokenAt ?? ''}:${bubbleText}`}
           className={cn(
-            'pointer-events-none fixed z-[10000] max-w-[min(14rem,calc(100vw-24px))] rounded-2xl border border-black/10 bg-[#fff8e8] px-3 py-2 text-xs font-black leading-5 text-[#171411] shadow-[0_16px_34px_rgba(0,0,0,0.3)] after:absolute after:left-5 after:size-3 after:rotate-45 after:border-black/10 after:bg-[#fff8e8]',
+            'pointer-events-none fixed z-[10000] max-w-[min(14rem,calc(100vw-24px))] rounded-2xl border border-black/10 bg-[#fff8e8] px-3 py-2 text-xs font-black leading-5 text-[#171411] shadow-[0_16px_34px_rgba(0,0,0,0.3)] after:absolute after:size-3 after:rotate-45 after:border-black/10 after:bg-[#fff8e8]',
+            align === 'center' ? 'after:left-1/2 after:-translate-x-1/2' : 'after:left-5',
             position.above
               ? '-translate-y-full after:top-full after:-translate-y-1/2 after:border-b after:border-r'
               : 'after:bottom-full after:translate-y-1/2 after:border-l after:border-t',
@@ -85,6 +93,7 @@ export function SpeechBubble({ className, speech, spokenAt, text, ttlMs = 5000 }
             'top': position.top,
           } as CSSProperties}
         >
+          {bubbleSpeakerName && <span className="mb-0.5 block text-[0.68rem] leading-4 text-[#5d4a35]">{bubbleSpeakerName}</span>}
           {bubbleText}
         </p>,
         document.body,
@@ -139,6 +148,15 @@ export function SpeechButton({ className, disabled = false, onSend, palette = 'd
     setOpen(false)
   }
 
+  function handleTextKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) {
+      return
+    }
+
+    event.preventDefault()
+    void send()
+  }
+
   return (
     <div className={cn('relative inline-flex', className)}>
       <button
@@ -168,6 +186,7 @@ export function SpeechButton({ className, disabled = false, onSend, palette = 'd
             maxLength={120}
             placeholder={t('common.speechPlaceholder')}
             value={text}
+            onKeyDown={handleTextKeyDown}
             onChange={event => setText(event.target.value)}
           />
           <button className={cn('inline-flex min-h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-black', paletteClass(palette, 'send'))} type="button" onClick={send}>

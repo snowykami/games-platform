@@ -16,7 +16,6 @@ export interface XiangqiOnlinePiece {
 
 export interface XiangqiOnlinePlayer {
   id: string
-  userId: string
   name: string
   role: 'host' | 'player'
   kind: 'guest' | 'oidc' | 'ai'
@@ -49,7 +48,8 @@ export interface XiangqiOnlineMove {
 
 export interface XiangqiOnlineRoom {
   id: string
-  hostUserId: string
+  hostPlayerId?: string
+  youPlayerId?: string
   phase: XiangqiPhase
   players: XiangqiOnlinePlayer[]
   pieces: XiangqiOnlinePiece[]
@@ -103,7 +103,6 @@ const moveSchema: z.ZodType<XiangqiOnlineMove> = z.object({
 })
 const playerSchema = z.object({
   id: z.string(),
-  userId: z.string(),
   name: z.string(),
   role: z.enum(['host', 'player']),
   kind: z.enum(['guest', 'oidc', 'ai']),
@@ -120,7 +119,8 @@ const playerSchema = z.object({
 })
 const roomSchema: z.ZodType<XiangqiOnlineRoom> = z.object({
   id: z.string(),
-  hostUserId: z.string(),
+  hostPlayerId: z.string().optional(),
+  youPlayerId: z.string().optional(),
   phase: z.enum(['lobby', 'playing', 'finished']),
   players: z.array(playerSchema),
   pieces: z.array(pieceSchema),

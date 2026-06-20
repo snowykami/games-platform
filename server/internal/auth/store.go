@@ -83,16 +83,10 @@ func (s *Store) CreateGuestSession(guestUUID string) (*User, Session, error) {
 		user = s.users[userID]
 	}
 	if user == nil {
-		role := RolePlayer
-		if !s.adminChosen {
-			role = RoleAdmin
-			s.adminChosen = true
-		}
-
 		user = &User{
 			ID:          "usr_" + randomHex(12),
 			Kind:        IdentityGuest,
-			Role:        role,
+			Role:        RolePlayer,
 			DisplayName: "Guest " + strings.ToUpper(randomHex(2)),
 			CreatedAt:   time.Now().UTC(),
 		}

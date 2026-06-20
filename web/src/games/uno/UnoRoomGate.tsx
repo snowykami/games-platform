@@ -3,7 +3,6 @@ import type { AILevel } from '@/games/ai'
 import { ArrowLeft, Bot, Copy, DoorOpen, Plus, Sparkles, UserMinus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { useAuth } from '@/auth/AuthContext'
 import { getAICapabilities, getAILevelLabel } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { AILevelPicker } from '@/games/AILevelPicker'
@@ -41,7 +40,6 @@ const UNO_THEMES = [
 
 export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   const navigate = useNavigate()
-  const { user } = useAuth()
   const { locale, t, ta } = useI18n()
   const { actions, error, isLoading, room } = useUnoRoom(roomId)
   const [joinCode, setJoinCode] = useState(roomId ?? '')
@@ -52,7 +50,7 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   const [llmModel, setLLMModel] = useState('')
   const [variantKey, setVariantKey] = useState('classic')
   const [themeKey, setThemeKey] = useState('classic')
-  const isHost = Boolean(user && room?.hostUserId === user.id)
+  const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
 
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
@@ -197,7 +195,7 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                 <Copy className="size-4" />
                 {t('common.copyLink')}
               </button>
-              <div className="grid min-w-[250px] grid-cols-[minmax(120px,1fr)_auto] items-end gap-2">
+              <div className="grid min-w-[250px] grid-cols-[minmax(120px,1fr)_auto_auto] items-end gap-2">
                 <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} llmModel={llmModel} onChange={setAILevel} />
                 <button
                   className={cn('uno-button', pendingAI && 'loading')}
@@ -207,6 +205,9 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                 >
                   <Bot className="size-4" />
                   {pendingAI ? t('room.addingAI') : `${t('room.addAI')} (${getAILevelLabel(aiLevel, locale)})`}
+                </button>
+                <button className="uno-button uno-button-primary" disabled={!isHost || !room || room.players.length < 2} type="button" onClick={startGame}>
+                  {t('common.startGame')}
                 </button>
               </div>
             </div>
@@ -220,10 +221,10 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                   <div className="flex min-w-0 items-center gap-2">
                     <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
                     <strong className="truncate text-lg">{player.name}</strong>
-                    {player.userId === user?.id && <PlayerNameEditor buttonClassName="text-[#fff8e8]" name={player.name} onSave={actions.renamePlayer} />}
+                    {player.id === room.youPlayerId && <PlayerNameEditor buttonClassName="text-[#fff8e8]" name={player.name} onSave={actions.renamePlayer} />}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    {player.userId === user?.id && <SpeechButton onSend={actions.say} />}
+                    {player.id === room.youPlayerId && <SpeechButton onSend={actions.say} />}
                     {player.ai
                       ? (
                           <AILevelBadgeSelect
@@ -261,9 +262,6 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <button className="uno-button uno-button-primary sm:w-40" disabled={!isHost || !room || room.players.length < 2} type="button" onClick={startGame}>
-              {t('common.startGame')}
-            </button>
             <p className="text-sm font-bold text-[#fff8e8]/75">{error ?? message}</p>
           </div>
         </div>

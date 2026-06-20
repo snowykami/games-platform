@@ -16,13 +16,43 @@ import (
 )
 
 const (
-	werewolfMinPlayers   = 6
-	werewolfMaxPlayers   = 12
-	avalonMinPlayers     = 5
-	avalonMaxPlayers     = 10
-	undercoverMinPlayers = 4
-	undercoverMaxPlayers = 10
+	werewolfMinPlayers    = 6
+	werewolfMaxPlayers    = 12
+	avalonMinPlayers      = 5
+	avalonMaxPlayers      = 10
+	undercoverMinPlayers  = 4
+	undercoverMaxPlayers  = 10
+	socialDecisionTimeout = aiplayer.DecisionTimeout
 )
+
+type staleAIDecisionError struct {
+	RoomID            string
+	PlayerID          string
+	PlayerName        string
+	ExpectedPhase     Phase
+	CurrentPhase      Phase
+	ExpectedUpdatedAt time.Time
+	CurrentUpdatedAt  time.Time
+	PlayerFound       bool
+	PlayerAlive       bool
+	PlayerIsAI        bool
+	ActionID          string
+	Reason            string
+}
+
+func (err staleAIDecisionError) Error() string {
+	return fmt.Sprintf("stale_ai_decision reason=%s expectedPhase=%s currentPhase=%s expectedUpdatedAt=%s currentUpdatedAt=%s playerFound=%t playerAlive=%t playerIsAI=%t actionID=%s",
+		err.Reason,
+		err.ExpectedPhase,
+		err.CurrentPhase,
+		err.ExpectedUpdatedAt.Format(time.RFC3339Nano),
+		err.CurrentUpdatedAt.Format(time.RFC3339Nano),
+		err.PlayerFound,
+		err.PlayerAlive,
+		err.PlayerIsAI,
+		err.ActionID,
+	)
+}
 
 type Manager struct {
 	aiProvider aiplayer.Provider
@@ -224,6 +254,49 @@ func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, e
 	}
 	room.UpdatedAt = time.Now().UTC()
 	return m.publicRoom(room, actorID), nil
+}
+
+func (m *Manager) RunAISpeech(roomID string) (PublicRoom, bool, error) {
+	if m.aiProvider == nil || !m.aiProvider.Enabled() {
+		return PublicRoom{}, false, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	room, err := m.room(roomID)
+	if err != nil {
+		return PublicRoom{}, false, err
+	}
+	if room.Phase == PhaseLobby || room.Phase == PhaseFinished || len(room.Speeches) == 0 {
+		return m.publicRoom(room, ""), false, nil
+	}
+	lastSpeech := room.Speeches[len(room.Speeches)-1]
+	if lastSpeech.ID == room.LastAISpeechSourceID {
+		return m.publicRoom(room, ""), false, nil
+	}
+	player := nextAISpeechPlayer(room, lastSpeech.PlayerID)
+	if player == nil {
+		room.LastAISpeechSourceID = lastSpeech.ID
+		return m.publicRoom(room, ""), false, nil
+	}
+	room.LastAISpeechSourceID = lastSpeech.ID
+	state := m.aiSpeechState(room, player)
+	decision, err := m.socialDecision(room, player, state, speechActions())
+	if err != nil {
+		return PublicRoom{}, false, err
+	}
+	if decision.ActionID != "speak" || strings.TrimSpace(decision.Speech) == "" {
+		return PublicRoom{}, false, nil
+	}
+	player = findPlayerByID(room, player.ID)
+	if player == nil || !player.IsAI || !player.Alive {
+		return m.publicRoom(room, ""), false, nil
+	}
+	if !recordSpeech(room, player, decision.Speech) {
+		return m.publicRoom(room, ""), false, nil
+	}
+	room.UpdatedAt = time.Now().UTC()
+	return m.publicRoom(room, ""), true, nil
 }
 
 func (m *Manager) RenamePlayer(roomID string, actorID string, displayName string) (PublicRoom, error) {
@@ -1451,17 +1524,13 @@ func (m *Manager) runAIAction(room *Room, player *Player) bool {
 		if _, ok := room.Werewolf.NightActions[player.ID]; ok {
 			return false
 		}
-		actionID, speech := m.chooseWerewolfNightAction(room, player)
+		actionID, _ := m.chooseWerewolfNightAction(room, player)
 		if actionID == "" {
 			return false
 		}
 		if _, err := applyWerewolfNightAction(room, player, actionID); err != nil {
 			return false
 		}
-		if speech == "" {
-			speech = "今晚先看这一位。"
-		}
-		recordSpeech(room, player, speech)
 		m.advanceWerewolfNight(room)
 		return true
 	case PhaseWerewolfVote:
@@ -1518,15 +1587,11 @@ func (m *Manager) runAIAction(room *Room, player *Player) bool {
 		if _, ok := room.Avalon.TeamVotes[player.ID]; ok {
 			return false
 		}
-		approve, speech, ok := m.chooseAvalonTeamVote(room, player)
+		approve, _, ok := m.chooseAvalonTeamVote(room, player)
 		if !ok {
 			return false
 		}
 		room.Avalon.TeamVotes[player.ID] = approve
-		if speech == "" {
-			speech = "我给过。"
-		}
-		recordSpeech(room, player, speech)
 		m.resolveAvalonTeamVote(room)
 		return true
 	case PhaseAvalonQuest:
@@ -1536,14 +1601,11 @@ func (m *Manager) runAIAction(room *Room, player *Player) bool {
 		if _, ok := room.Avalon.QuestCards[player.ID]; ok {
 			return false
 		}
-		card, speech := m.chooseAvalonQuestCard(room, player)
+		card, _ := m.chooseAvalonQuestCard(room, player)
 		if card == "" {
 			return false
 		}
 		room.Avalon.QuestCards[player.ID] = card
-		if speech != "" {
-			recordSpeech(room, player, speech)
-		}
 		m.resolveAvalonQuest(room)
 		return true
 	case PhaseAssassination:
@@ -1642,13 +1704,14 @@ func (m *Manager) publicRoom(room *Room, viewerUserID string) PublicRoom {
 		ID:            room.ID,
 		Game:          room.Game,
 		HostUserID:    room.HostUserID,
+		HostPlayerID:  playerIDForUser(room, room.HostUserID),
 		Phase:         room.Phase,
 		Players:       players,
 		YouPlayerID:   youPlayerID,
 		MinPlayers:    m.minPlayers(),
 		MaxPlayers:    m.maxPlayers(),
 		Werewolf:      werewolfViewForViewer(room, viewer),
-		Avalon:        AvalonView{Round: room.Avalon.Round, LeaderID: room.Avalon.LeaderID, Team: append([]string{}, room.Avalon.Team...), TeamVotes: cloneBoolMap(room.Avalon.TeamVotes), QuestResults: append([]AvalonQuestResult{}, room.Avalon.QuestResults...), RejectedTeams: room.Avalon.RejectedTeams, RequiredTeam: room.Avalon.RequiredTeam, RequiredFails: room.Avalon.RequiredFails, Successes: room.Avalon.Successes, Fails: room.Avalon.Fails},
+		Avalon:        avalonViewForViewer(room),
 		Undercover:    undercoverViewForViewer(room, viewer),
 		Winner:        room.Winner,
 		WinnerMessage: room.WinnerMessage,
@@ -1657,6 +1720,13 @@ func (m *Manager) publicRoom(room *Room, viewerUserID string) PublicRoom {
 		ActionSeq:     room.ActionSeq,
 		RecentActions: append([]PublicAction{}, room.RecentActions...),
 	}
+}
+
+func playerIDForUser(room *Room, userID string) string {
+	if player := findPlayerByUserID(room, userID); player != nil {
+		return player.ID
+	}
+	return ""
 }
 
 func roleVisible(room *Room, viewer *Player, target *Player) bool {
@@ -1701,6 +1771,26 @@ func werewolfViewForViewer(room *Room, viewer *Player) WerewolfView {
 		view.WitchPoisonUsed = room.Werewolf.WitchPoisonUsed
 	}
 	return view
+}
+
+func avalonViewForViewer(room *Room) AvalonView {
+	teamVotes := cloneBoolMap(room.Avalon.TeamVotes)
+	if room.Phase == PhaseAvalonVote {
+		teamVotes = map[string]bool{}
+	}
+	return AvalonView{
+		Round:         room.Avalon.Round,
+		LeaderID:      room.Avalon.LeaderID,
+		Team:          append([]string{}, room.Avalon.Team...),
+		TeamVotes:     teamVotes,
+		TeamVoteCount: len(room.Avalon.TeamVotes),
+		QuestResults:  append([]AvalonQuestResult{}, room.Avalon.QuestResults...),
+		RejectedTeams: room.Avalon.RejectedTeams,
+		RequiredTeam:  room.Avalon.RequiredTeam,
+		RequiredFails: room.Avalon.RequiredFails,
+		Successes:     room.Avalon.Successes,
+		Fails:         room.Avalon.Fails,
+	}
 }
 
 func avalonTeamSize(players int, round int) int {
@@ -1831,7 +1921,7 @@ func (m *Manager) socialDecision(room *Room, player *Player, state map[string]an
 		"memory":    append([]string{}, session.Memory...),
 	}
 	state["privateNotes"] = cloneStringMap(room.PlayerNotes[player.ID])
-	decision, err := m.aiProvider.Decide(context.Background(), aiplayer.DecisionInput{
+	input := aiplayer.DecisionInput{
 		Game:        string(room.Game),
 		Level:       aiplayer.LevelLLM,
 		SessionID:   sessionID(room, player),
@@ -1840,13 +1930,98 @@ func (m *Manager) socialDecision(room *Room, player *Player, state map[string]an
 		SpeechStyle: player.AI.SpeechStyle,
 		State:       state,
 		Actions:     actions,
-	})
+	}
+	provider := m.aiProvider
+	phase := room.Phase
+	updatedAt := room.UpdatedAt
+	playerID := player.ID
+	playerName := player.Name
+
+	// This method is called with m.mu held. Release it while waiting on the LLM
+	// so a slow model cannot block unrelated room actions and broadcasts.
+	m.mu.Unlock()
+	startedAt := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), socialDecisionTimeout)
+	decision, err := provider.Decide(ctx, input)
+	cancel()
+	m.mu.Lock()
 	if err != nil {
 		return decision, err
 	}
-	m.applyAINotes(room, player, decision.Notes)
-	m.rememberAI(room, player, fmt.Sprintf("phase=%s action=%s reason=%s speech=%s", room.Phase, decision.ActionID, strings.TrimSpace(decision.Reason), strings.TrimSpace(decision.Speech)))
+	currentPlayer := findPlayerByID(room, playerID)
+	if currentPlayer == nil || !currentPlayer.Alive || !currentPlayer.IsAI || room.Phase != phase || !room.UpdatedAt.Equal(updatedAt) {
+		staleErr := staleAIDecisionError{
+			RoomID:            room.ID,
+			PlayerID:          playerID,
+			PlayerName:        playerName,
+			ExpectedPhase:     phase,
+			CurrentPhase:      room.Phase,
+			ExpectedUpdatedAt: updatedAt,
+			CurrentUpdatedAt:  room.UpdatedAt,
+			PlayerFound:       currentPlayer != nil,
+			ActionID:          decision.ActionID,
+			Reason:            staleReason(room, currentPlayer, phase, updatedAt),
+		}
+		if currentPlayer != nil {
+			staleErr.PlayerAlive = currentPlayer.Alive
+			staleErr.PlayerIsAI = currentPlayer.IsAI
+		}
+		lastSpeechID := ""
+		lastSpeechPlayer := ""
+		if len(room.Speeches) > 0 {
+			lastSpeech := room.Speeches[len(room.Speeches)-1]
+			lastSpeechID = lastSpeech.ID
+			lastSpeechPlayer = lastSpeech.PlayerName
+		}
+		slog.Warn("social llm decision became stale",
+			"room", room.ID,
+			"game", room.Game,
+			"player", playerID,
+			"playerName", playerName,
+			"reason", staleErr.Reason,
+			"expectedPhase", phase,
+			"currentPhase", room.Phase,
+			"expectedUpdatedAt", updatedAt,
+			"currentUpdatedAt", room.UpdatedAt,
+			"playerFound", staleErr.PlayerFound,
+			"playerAlive", staleErr.PlayerAlive,
+			"playerIsAI", staleErr.PlayerIsAI,
+			"actionID", decision.ActionID,
+			"reasonLength", len(decision.Reason),
+			"speechLength", len(decision.Speech),
+			"lastSpeechID", lastSpeechID,
+			"lastSpeechPlayer", lastSpeechPlayer,
+			"duration", time.Since(startedAt),
+		)
+		return decision, staleErr
+	}
+	m.applyAINotes(room, currentPlayer, decision.Notes)
+	m.rememberAI(room, currentPlayer, fmt.Sprintf("phase=%s action=%s reason=%s speech=%s", room.Phase, decision.ActionID, strings.TrimSpace(decision.Reason), strings.TrimSpace(decision.Speech)))
 	return decision, nil
+}
+
+func staleReason(room *Room, player *Player, expectedPhase Phase, expectedUpdatedAt time.Time) string {
+	reasons := []string{}
+	if player == nil {
+		reasons = append(reasons, "player_missing")
+	} else {
+		if !player.Alive {
+			reasons = append(reasons, "player_not_alive")
+		}
+		if !player.IsAI {
+			reasons = append(reasons, "player_not_ai")
+		}
+	}
+	if room.Phase != expectedPhase {
+		reasons = append(reasons, "phase_changed")
+	}
+	if !room.UpdatedAt.Equal(expectedUpdatedAt) {
+		reasons = append(reasons, "room_updated")
+	}
+	if len(reasons) == 0 {
+		return "unknown"
+	}
+	return strings.Join(reasons, ",")
 }
 
 func (m *Manager) applyAINotes(room *Room, player *Player, notes map[string]string) {
@@ -1855,6 +2030,16 @@ func (m *Manager) applyAINotes(room *Room, player *Player, notes map[string]stri
 			continue
 		}
 		setPlayerNote(room, player.ID, targetID, note)
+	}
+}
+
+func (m *Manager) aiSpeechState(room *Room, player *Player) map[string]any {
+	return map[string]any{
+		"phase":        room.Phase,
+		"role":         player.Role,
+		"alignment":    player.Alignment,
+		"recentSpeech": room.Speeches,
+		"speechGuide":  "像真实玩家一样自然短句回应，可以观察、质疑、接话；没有必要说话就跳过。不要泄露隐藏身份或秘密词。",
 	}
 }
 
@@ -2039,6 +2224,10 @@ func avalonAIState(room *Room, actor *Player, phase string) map[string]any {
 		}
 		players = append(players, entry)
 	}
+	teamVotes := cloneBoolMap(room.Avalon.TeamVotes)
+	if phase == "team_vote" {
+		teamVotes = map[string]bool{}
+	}
 	return map[string]any{
 		"phase":         phase,
 		"round":         room.Avalon.Round,
@@ -2047,7 +2236,8 @@ func avalonAIState(room *Room, actor *Player, phase string) map[string]any {
 		"players":       players,
 		"leaderId":      room.Avalon.LeaderID,
 		"team":          append([]string{}, room.Avalon.Team...),
-		"teamVotes":     cloneBoolMap(room.Avalon.TeamVotes),
+		"teamVotes":     teamVotes,
+		"teamVoteCount": len(room.Avalon.TeamVotes),
 		"questResults":  append([]AvalonQuestResult{}, room.Avalon.QuestResults...),
 		"successes":     room.Avalon.Successes,
 		"fails":         room.Avalon.Fails,
@@ -2056,15 +2246,19 @@ func avalonAIState(room *Room, actor *Player, phase string) map[string]any {
 }
 
 func undercoverAIState(room *Room, player *Player, phase string) map[string]any {
+	word := undercoverWordForPlayer(room, player)
 	return map[string]any{
-		"phase":        phase,
-		"round":        room.Undercover.Round,
-		"yourRole":     player.Role,
-		"yourWord":     undercoverWordForPlayer(room, player),
-		"players":      publicPlayersForAI(room, player),
-		"described":    cloneBoolMap(room.Undercover.Described),
-		"votes":        cloneStringMap(room.Undercover.Votes),
-		"recentSpeech": room.Speeches,
+		"phase":                 phase,
+		"round":                 room.Undercover.Round,
+		"yourRole":              player.Role,
+		"yourWord":              word,
+		"speechPolicy":          "描述阶段必须把 speech 写成最终要说出口的话，不能照抄 action label。只能给间接线索，绝不能直接说出、拼写、引用或复述 yourWord；空白牌也不能声称自己知道具体词。禁止空话套话，例如“生活里常见”“具体场景”“特点不能说太细”“先看大家怎么描述”。像真人一样给一个具体但不泄词的侧面线索。",
+		"badSpeechExamples":     []string{"它在生活里挺常见", "它一般会出现在具体场景里", "它的特点不能说得太细", "我先说个比较宽的范围", "我会先看大家怎么描述"},
+		"forbiddenPublicSpeech": forbiddenPublicSpeech(word),
+		"players":               publicPlayersForAI(room, player),
+		"described":             cloneBoolMap(room.Undercover.Described),
+		"votes":                 cloneStringMap(room.Undercover.Votes),
+		"recentSpeech":          room.Speeches,
 	}
 }
 
@@ -2222,9 +2416,17 @@ func (m *Manager) chooseUndercoverDescription(room *Room, player *Player) string
 	if player.AI != nil && player.AI.Level == string(aiplayer.LevelLLM) && m.aiProvider != nil && m.aiProvider.Enabled() {
 		decision, err := m.socialDecision(room, player, undercoverAIState(room, player, "describe"), actions)
 		if err == nil {
-			if text := actionLabel(decision.ActionID, actions); text != "" {
+			if text, ok := validUndercoverDescription(decision.Speech, undercoverWordForPlayer(room, player)); ok {
 				return text
 			}
+			slog.Warn("undercover llm describe speech rejected",
+				"room", room.ID,
+				"player", player.ID,
+				"playerName", player.Name,
+				"actionID", decision.ActionID,
+				"speech", strings.TrimSpace(decision.Speech),
+			)
+			return fallbackUndercoverDescription(decision.ActionID)
 		} else {
 			slog.Warn("undercover llm describe failed", "room", room.ID, "player", player.ID, "playerName", player.Name, "error", err)
 		}
@@ -2362,10 +2564,27 @@ func recordSpeech(room *Room, player *Player, text string) bool {
 		Text:       text,
 		SpokenAt:   time.Now().UTC(),
 	})
+	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 说：%s", player.Name, text)))
 	if len(room.Speeches) > 18 {
 		room.Speeches = room.Speeches[len(room.Speeches)-18:]
 	}
 	return true
+}
+
+func nextAISpeechPlayer(room *Room, lastSpeakerID string) *Player {
+	for _, player := range room.Players {
+		if player.IsAI && player.Alive && player.ID != lastSpeakerID && player.AI != nil {
+			return player
+		}
+	}
+	return nil
+}
+
+func speechActions() []aiplayer.LegalAction {
+	return []aiplayer.LegalAction{
+		{ID: "speak", Label: "说一句话", Description: "用自然、简短的玩家语气回应桌面发言。"},
+		{ID: "skip", Label: "不发言", Description: "没有必要回应时选择。"},
+	}
 }
 
 func playerNote(room *Room, viewer *Player, targetID string) string {
@@ -2562,25 +2781,63 @@ func undercoverDescriptionActions(room *Room, player *Player) []aiplayer.LegalAc
 	word := undercoverWordForPlayer(room, player)
 	if word == "" {
 		return []aiplayer.LegalAction{
-			{ID: "say:blank-soft", Label: "这个词和日常体验有关。"},
-			{ID: "say:blank-object", Label: "它应该是大家都见过的东西。"},
-			{ID: "say:blank-scene", Label: "我会先从使用场景判断。"},
+			{ID: "say:blank-follow", Label: "空白牌：跟随已有线索", Description: "根据最近发言接一个不露怯的侧面说法。speech 必须是最终发言，不能泛泛说常见、场景或特点。"},
+			{ID: "say:blank-tone", Label: "空白牌：用语气试探", Description: "用谨慎语气给模糊但像真人的线索，不声称知道具体词。speech 必须自然短句。"},
+			{ID: "say:blank-soft", Label: "空白牌：保守绕开核心", Description: "绕开核心名词，说一个安全的边缘联想。speech 不能说“我先看大家怎么描述”。"},
 		}
 	}
 	return []aiplayer.LegalAction{
-		{ID: "say:scene", Label: fmt.Sprintf("%s一般会出现在具体场景里。", word)},
-		{ID: "say:common", Label: fmt.Sprintf("我觉得%s挺常见。", word)},
-		{ID: "say:feature", Label: fmt.Sprintf("%s的特点不能说太细。", word)},
+		{ID: "say:use", Label: "从用途或接触方式给线索", Description: "给一个关于使用方式、接触方式或参与动作的侧面线索。speech 必须是最终发言，不得说出底词，不得使用空话。"},
+		{ID: "say:association", Label: "从相邻事物给线索", Description: "说它旁边常伴随的类别、动作或氛围，但不能点名底词。speech 必须像真人发言。"},
+		{ID: "say:feeling", Label: "从感觉或语境给线索", Description: "给一个带个人感受的侧面线索，不能只说常见、场景、特点。speech 必须短而具体。"},
 	}
 }
 
-func actionLabel(actionID string, actions []aiplayer.LegalAction) string {
-	for _, action := range actions {
-		if action.ID == actionID {
-			return action.Label
+func validUndercoverDescription(text string, word string) (string, bool) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", false
+	}
+	runes := []rune(text)
+	if len(runes) > 48 {
+		text = string(runes[:48])
+	}
+	lowerText := strings.ToLower(text)
+	for _, phrase := range []string{"生活里挺常见", "生活里很常见", "具体场景", "特点不能说得太细", "比较宽的范围", "看大家怎么描述", "常见但不好说"} {
+		if strings.Contains(lowerText, strings.ToLower(phrase)) {
+			return "", false
 		}
 	}
-	return ""
+	word = strings.TrimSpace(word)
+	if word != "" && strings.Contains(text, word) {
+		return "", false
+	}
+	return text, true
+}
+
+func fallbackUndercoverDescription(actionID string) string {
+	switch actionID {
+	case "say:use":
+		return "我想到的是它被用起来的样子。"
+	case "say:association":
+		return "我会先从它旁边的东西联想。"
+	case "say:feeling":
+		return "我对它的第一感觉比较明确。"
+	case "say:blank-follow":
+		return "我先顺着前面的方向说。"
+	case "say:blank-tone":
+		return "这个我不敢说太满。"
+	default:
+		return "我先给个边缘一点的线索。"
+	}
+}
+
+func forbiddenPublicSpeech(word string) []string {
+	word = strings.TrimSpace(word)
+	if word == "" {
+		return []string{}
+	}
+	return []string{word}
 }
 
 func undercoverVoteActions(room *Room, player *Player) []aiplayer.LegalAction {

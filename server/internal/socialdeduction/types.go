@@ -63,7 +63,7 @@ type AIProfile struct {
 
 type Player struct {
 	ID             string     `json:"id"`
-	UserID         string     `json:"userId"`
+	UserID         string     `json:"-"`
 	Name           string     `json:"name"`
 	Seat           int        `json:"seat"`
 	RoomRole       string     `json:"roomRole"`
@@ -80,7 +80,7 @@ type Player struct {
 
 type PublicPlayer struct {
 	ID             string     `json:"id"`
-	UserID         string     `json:"userId"`
+	UserID         string     `json:"-"`
 	Name           string     `json:"name"`
 	Seat           int        `json:"seat"`
 	RoomRole       string     `json:"roomRole"`
@@ -208,29 +208,31 @@ type AvalonQuestResult struct {
 }
 
 type Room struct {
-	ID            string
-	Game          GameKind
-	HostUserID    string
-	Phase         Phase
-	Players       []*Player
-	Werewolf      WerewolfState
-	Avalon        AvalonState
-	Undercover    UndercoverState
-	Winner        Alignment
-	WinnerMessage string
-	Log           []LogEntry
-	Speeches      []SpeechEntry
-	PlayerNotes   map[string]map[string]string
-	ActionSeq     int
-	RecentActions []PublicAction
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                   string
+	Game                 GameKind
+	HostUserID           string
+	Phase                Phase
+	Players              []*Player
+	Werewolf             WerewolfState
+	Avalon               AvalonState
+	Undercover           UndercoverState
+	Winner               Alignment
+	WinnerMessage        string
+	Log                  []LogEntry
+	Speeches             []SpeechEntry
+	LastAISpeechSourceID string
+	PlayerNotes          map[string]map[string]string
+	ActionSeq            int
+	RecentActions        []PublicAction
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type PublicRoom struct {
 	ID            string         `json:"id"`
 	Game          GameKind       `json:"game"`
-	HostUserID    string         `json:"hostUserId"`
+	HostUserID    string         `json:"-"`
+	HostPlayerID  string         `json:"hostPlayerId,omitempty"`
 	Phase         Phase          `json:"phase"`
 	Players       []PublicPlayer `json:"players"`
 	YouPlayerID   string         `json:"youPlayerId,omitempty"`
@@ -266,6 +268,7 @@ type AvalonView struct {
 	LeaderID      string              `json:"leaderId,omitempty"`
 	Team          []string            `json:"team"`
 	TeamVotes     map[string]bool     `json:"teamVotes"`
+	TeamVoteCount int                 `json:"teamVoteCount"`
 	QuestResults  []AvalonQuestResult `json:"questResults"`
 	RejectedTeams int                 `json:"rejectedTeams"`
 	RequiredTeam  int                 `json:"requiredTeam"`

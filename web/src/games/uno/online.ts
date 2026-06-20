@@ -7,7 +7,6 @@ export type UnoPhase = 'lobby' | 'playing' | 'finished'
 
 export interface UnoOnlinePlayer {
   id: string
-  userId: string
   name: string
   role: 'host' | 'player'
   kind: 'guest' | 'oidc' | 'ai'
@@ -38,7 +37,8 @@ export interface UnoPublicAction {
 
 export interface UnoOnlineRoom {
   id: string
-  hostUserId: string
+  hostPlayerId?: string
+  youPlayerId?: string
   variantKey: string
   themeKey: string
   phase: UnoPhase
@@ -94,13 +94,13 @@ const speechSchema = z.object({
 
 const roomSchema: z.ZodType<UnoOnlineRoom> = z.object({
   id: z.string(),
-  hostUserId: z.string(),
+  hostPlayerId: z.string().optional(),
+  youPlayerId: z.string().optional(),
   variantKey: z.string(),
   themeKey: z.string(),
   phase: z.enum(['lobby', 'playing', 'finished']),
   players: z.array(z.object({
     id: z.string(),
-    userId: z.string(),
     name: z.string(),
     role: z.enum(['host', 'player']),
     kind: z.enum(['guest', 'oidc', 'ai']),

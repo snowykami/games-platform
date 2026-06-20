@@ -35,7 +35,6 @@ export interface WerewolfRolePreset {
 
 export interface SocialPlayer {
   id: string
-  userId: string
   name: string
   seat: number
   roomRole: 'host' | 'player'
@@ -59,7 +58,7 @@ export interface SocialPlayer {
 export interface SocialRoom {
   id: string
   game: SocialGameSlug
-  hostUserId: string
+  hostPlayerId?: string
   phase: SocialPhase
   players: SocialPlayer[]
   youPlayerId?: string
@@ -83,6 +82,7 @@ export interface SocialRoom {
     leaderId?: string
     team: string[]
     teamVotes: Record<string, boolean>
+    teamVoteCount: number
     questResults: Array<{ round: number, teamSize: number, failCards: number }>
     rejectedTeams: number
     requiredTeam: number
@@ -173,7 +173,6 @@ const defaultWerewolfRoleConfig: WerewolfRoleConfig = {
 
 const playerSchema = z.object({
   id: z.string(),
-  userId: z.string(),
   name: z.string(),
   seat: z.number(),
   roomRole: z.enum(['host', 'player']),
@@ -205,7 +204,7 @@ const speechSchema = z.object({
 const roomSchema: z.ZodType<SocialRoom> = z.object({
   id: z.string(),
   game: z.enum(['werewolf', 'avalon', 'undercover']),
-  hostUserId: z.string(),
+  hostPlayerId: z.string().optional(),
   phase: z.enum(['lobby', 'night', 'day', 'vote', 'hunter', 'team', 'team_vote', 'quest', 'assassination', 'describe', 'undercover_vote', 'finished']),
   players: z.array(playerSchema),
   youPlayerId: z.string().optional(),
@@ -229,13 +228,14 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
     leaderId: z.string().optional(),
     team: z.array(z.string()).default([]),
     teamVotes: z.record(z.string(), z.boolean()).default({}),
+    teamVoteCount: z.number().default(0),
     questResults: z.array(z.object({ round: z.number(), teamSize: z.number(), failCards: z.number() })).default([]),
     rejectedTeams: z.number().default(0),
     requiredTeam: z.number().default(0),
     requiredFails: z.number().default(0),
     successes: z.number().default(0),
     fails: z.number().default(0),
-  }).default({ fails: 0, questResults: [], rejectedTeams: 0, requiredFails: 0, requiredTeam: 0, round: 0, successes: 0, team: [], teamVotes: {} }),
+  }).default({ fails: 0, questResults: [], rejectedTeams: 0, requiredFails: 0, requiredTeam: 0, round: 0, successes: 0, team: [], teamVoteCount: 0, teamVotes: {} }),
   undercover: z.object({
     round: z.number().default(0),
     presetId: z.string().default(''),

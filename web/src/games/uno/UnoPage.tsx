@@ -5,7 +5,6 @@ import type { GameSpeechEntry } from '@/games/speech'
 import { ArrowLeft, Ban, Copy, Palette, Plus, RefreshCw, RotateCcw, RotateCw, SkipForward } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
-import { useAuth } from '@/auth/AuthContext'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
@@ -33,7 +32,6 @@ const COLOR_SWATCHES: Record<UnoColor, string> = {
 }
 
 export function UnoPage({ roomId }: { roomId: string }) {
-  const { user } = useAuth()
   const { t } = useI18n()
   const { actions, error, isLoading, room } = useUnoRoom(roomId)
   const [message, setMessage] = useState(() => t('uno.tableReady'))
@@ -43,7 +41,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
   const [wildPicker, setWildPicker] = useState<{ card: UnoCard, color: UnoColor }>()
   const lastActionSeqRef = useRef(0)
 
-  const human = useMemo(() => room?.players.find(player => player.userId === user?.id), [room?.players, user?.id])
+  const human = useMemo(() => room?.players.find(player => player.id === room.youPlayerId), [room?.players, room?.youPlayerId])
   const seatedPlayers = useMemo(() => room && human ? orderPlayersFromViewer(room.players, human.id) : [], [human, room])
   const currentPlayer = room?.players.find(player => player.id === room.currentPlayerId)
   const winner = room?.players.find(player => player.id === room.winnerId)
@@ -52,7 +50,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
   const playableCardIds = useMemo(() => new Set(room?.playableCardIds ?? []), [room?.playableCardIds])
   const playableCards = useMemo(() => hand.filter(card => playableCardIds.has(card.id)), [hand, playableCardIds])
   const aiPlayerCount = room?.players.filter(player => player.isAI).length ?? 0
-  const catchableUnoPlayers = room?.players.filter(player => player.userId !== user?.id && player.needsUno) ?? []
+  const catchableUnoPlayers = room?.players.filter(player => player.id !== room.youPlayerId && player.needsUno) ?? []
   const lastLog = room?.log.at(-1)?.text
   const selectedCardId = isHumanTurn && hand.some(card => card.id === pendingCardId) ? pendingCardId : undefined
   const activeWildPicker = wildPicker && isHumanTurn && hand.some(card => card.id === wildPicker.card.id) ? wildPicker : undefined
@@ -214,7 +212,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
               </StatusPill>
             )}
             {(room.rules.flip || room.flipSide) && <StatusPill>{room.flipSide ? t('uno.darkSide') : t('uno.lightSide')}</StatusPill>}
-            <button className="uno-button ml-auto" disabled={room.hostUserId !== user?.id} type="button" onClick={handleRestart}>
+            <button className="uno-button ml-auto" disabled={room.hostPlayerId !== room.youPlayerId} type="button" onClick={handleRestart}>
               <RotateCcw className="size-4" />
               {t('uno.restart')}
             </button>
@@ -257,7 +255,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
                     activeAction={activeAction}
                     currentPlayerId={room.currentPlayerId}
                     index={index}
-                    isSelf={player.userId === user?.id}
+                    isSelf={player.id === room.youPlayerId}
                     onRename={actions.renamePlayer}
                     onSpeak={actions.say}
                     player={player}

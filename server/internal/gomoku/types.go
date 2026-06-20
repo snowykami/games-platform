@@ -28,7 +28,7 @@ type AIProfile struct {
 
 type Player struct {
 	ID             string     `json:"id"`
-	UserID         string     `json:"userId"`
+	UserID         string     `json:"-"`
 	Name           string     `json:"name"`
 	Role           string     `json:"role"`
 	Kind           string     `json:"kind"`
@@ -87,27 +87,30 @@ type PublicAction struct {
 }
 
 type Room struct {
-	ID                 string
-	HostUserID         string
-	Phase              Phase
-	Players            []*Player
-	Board              [BoardSize][BoardSize]Stone
-	Moves              []Move
-	CurrentPlayerIndex int
-	WinnerID           string
-	WinningLine        []Point
-	IsDraw             bool
-	Log                []LogEntry
-	Speeches           []SpeechEntry
-	ActionSeq          int
-	RecentActions      []PublicAction
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                   string
+	HostUserID           string
+	Phase                Phase
+	Players              []*Player
+	Board                [BoardSize][BoardSize]Stone
+	Moves                []Move
+	CurrentPlayerIndex   int
+	WinnerID             string
+	WinningLine          []Point
+	IsDraw               bool
+	Log                  []LogEntry
+	Speeches             []SpeechEntry
+	LastAISpeechSourceID string
+	ActionSeq            int
+	RecentActions        []PublicAction
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type PublicRoom struct {
 	ID              string         `json:"id"`
-	HostUserID      string         `json:"hostUserId"`
+	HostUserID      string         `json:"-"`
+	HostPlayerID    string         `json:"hostPlayerId,omitempty"`
+	YouPlayerID     string         `json:"youPlayerId,omitempty"`
 	Phase           Phase          `json:"phase"`
 	Players         []Player       `json:"players"`
 	BoardSize       int            `json:"boardSize"`

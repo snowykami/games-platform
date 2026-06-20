@@ -53,7 +53,7 @@ type AIProfile struct {
 
 type Player struct {
 	ID             string     `json:"id"`
-	UserID         string     `json:"userId"`
+	UserID         string     `json:"-"`
 	Name           string     `json:"name"`
 	Role           string     `json:"role"`
 	Kind           string     `json:"kind"`
@@ -120,6 +120,7 @@ type Room struct {
 	WinnerID              string
 	Log                   []LogEntry
 	Speeches              []SpeechEntry
+	LastAISpeechSourceID  string
 	ActionSeq             int
 	RecentActions         []PublicAction
 	TurnDeadline          *time.Time
@@ -130,7 +131,9 @@ type Room struct {
 
 type PublicRoom struct {
 	ID                   string         `json:"id"`
-	HostUserID           string         `json:"hostUserId"`
+	HostUserID           string         `json:"-"`
+	HostPlayerID         string         `json:"hostPlayerId,omitempty"`
+	YouPlayerID          string         `json:"youPlayerId,omitempty"`
 	VariantKey           string         `json:"variantKey"`
 	ThemeKey             string         `json:"themeKey"`
 	Phase                Phase          `json:"phase"`

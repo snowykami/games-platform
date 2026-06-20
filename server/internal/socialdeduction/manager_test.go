@@ -2,7 +2,9 @@ package socialdeduction
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +37,74 @@ func TestPublicRoomHidesWerewolfRoles(t *testing.T) {
 	wolfView := manager.publicRoom(room, "u2")
 	if wolfView.Players[2].Role != RoleWerewolf {
 		t.Fatalf("expected werewolves to see each other, got %q", wolfView.Players[2].Role)
+	}
+}
+
+func TestPublicRoomDoesNotSerializeStableUserIDs(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := &Room{
+		ID:         "WWFTEST",
+		Game:       GameWerewolf,
+		HostUserID: "u1",
+		Phase:      PhaseWerewolfNight,
+		Players: []*Player{
+			testPlayer("p1", "u1", "Host", RoleVillager, AlignmentGood),
+			testPlayer("p2", "u2", "Wolf", RoleWerewolf, AlignmentEvil),
+		},
+		Werewolf: WerewolfState{Day: 1, NightActions: map[string]string{}, Votes: map[string]string{}},
+	}
+
+	view := manager.publicRoom(room, "u1")
+	payload, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal public room: %v", err)
+	}
+	serialized := string(payload)
+	if strings.Contains(serialized, "userId") || strings.Contains(serialized, "hostUserId") {
+		t.Fatalf("public room leaked stable user IDs: %s", serialized)
+	}
+	if view.HostPlayerID != "p1" || view.YouPlayerID != "p1" {
+		t.Fatalf("expected per-room player IDs, got host=%q you=%q", view.HostPlayerID, view.YouPlayerID)
+	}
+}
+
+func TestAvalonTeamVotesHiddenUntilVoteCompletes(t *testing.T) {
+	manager := NewManager(GameAvalon, nil)
+	room := &Room{
+		ID:         "AVLTEST",
+		Game:       GameAvalon,
+		HostUserID: "u1",
+		Phase:      PhaseAvalonVote,
+		Players: []*Player{
+			testPlayer("p1", "u1", "Merlin", RoleMerlin, AlignmentGood),
+			testPlayer("p2", "u2", "Assassin", RoleAssassin, AlignmentEvil),
+			testPlayer("p3", "u3", "Loyal", RoleLoyal, AlignmentGood),
+			testPlayer("p4", "u4", "Loyal Two", RoleLoyal, AlignmentGood),
+			testPlayer("p5", "u5", "Loyal Three", RoleLoyal, AlignmentGood),
+		},
+		Avalon: AvalonState{
+			Round:         1,
+			LeaderID:      "p1",
+			Team:          []string{"p1", "p3"},
+			TeamVotes:     map[string]bool{"p1": true, "p2": false},
+			QuestCards:    map[string]string{},
+			RequiredTeam:  2,
+			RequiredFails: 1,
+		},
+	}
+
+	voteView := manager.publicRoom(room, "u3")
+	if len(voteView.Avalon.TeamVotes) != 0 {
+		t.Fatalf("expected hidden votes during team vote, got %#v", voteView.Avalon.TeamVotes)
+	}
+	if voteView.Avalon.TeamVoteCount != 2 {
+		t.Fatalf("expected submitted vote count 2, got %d", voteView.Avalon.TeamVoteCount)
+	}
+
+	room.Phase = PhaseAvalonQuest
+	revealedView := manager.publicRoom(room, "u3")
+	if len(revealedView.Avalon.TeamVotes) != 2 {
+		t.Fatalf("expected votes after team vote phase, got %#v", revealedView.Avalon.TeamVotes)
 	}
 }
 
@@ -226,8 +296,81 @@ func TestWerewolfNightUsesLLMDecision(t *testing.T) {
 	if room.Werewolf.SeerChecks["p2"] != AlignmentGood {
 		t.Fatalf("expected seer check to store p2 alignment, got %q", room.Werewolf.SeerChecks["p2"])
 	}
-	if len(room.Speeches) != 1 || room.Speeches[0].Text != "我先看二号。" {
-		t.Fatalf("expected LLM speech to be recorded, got %+v", room.Speeches)
+	if len(room.Speeches) != 0 {
+		t.Fatalf("expected werewolf night speech to stay private, got %+v", room.Speeches)
+	}
+}
+
+func TestUndercoverDescriptionActionsDoNotRevealSecretWord(t *testing.T) {
+	room := &Room{
+		ID:    "UNDCLUE1",
+		Game:  GameUndercover,
+		Phase: PhaseUndercoverDescribe,
+		Players: []*Player{
+			testAIPlayer("p1", "Clue Bot", RoleCivilian, AlignmentGood),
+		},
+		Undercover: UndercoverState{
+			WordPair: UndercoverWordPair{CivilianWord: "苹果", UndercoverWord: "梨"},
+		},
+	}
+
+	actions := undercoverDescriptionActions(room, room.Players[0])
+	if len(actions) == 0 {
+		t.Fatal("expected clue actions")
+	}
+	for _, action := range actions {
+		if strings.Contains(action.Label, "苹果") || strings.Contains(action.Description, "苹果") {
+			t.Fatalf("expected action to avoid secret word, got %+v", action)
+		}
+	}
+	state := undercoverAIState(room, room.Players[0], "describe")
+	forbidden, ok := state["forbiddenPublicSpeech"].([]string)
+	if !ok || len(forbidden) != 1 || forbidden[0] != "苹果" {
+		t.Fatalf("expected forbidden public speech to include secret word, got %#v", state["forbiddenPublicSpeech"])
+	}
+}
+
+func TestUndercoverLLMDescriptionRejectsUnsafeSpeech(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled: true,
+		decision: aiplayer.Decision{
+			ActionID: "say:use",
+			Speech:   "我的词是苹果",
+			Source:   "llm",
+		},
+	}
+	manager := NewManager(GameUndercover, provider)
+	room := &Room{
+		ID:    "UNDCLUE2",
+		Game:  GameUndercover,
+		Phase: PhaseUndercoverDescribe,
+		Players: []*Player{
+			testAIPlayer("p1", "Clue Bot", RoleCivilian, AlignmentGood),
+			testPlayer("p2", "u2", "Guest", RoleUndercover, AlignmentEvil),
+			testPlayer("p3", "u3", "Guest Two", RoleCivilian, AlignmentGood),
+			testPlayer("p4", "u4", "Guest Three", RoleCivilian, AlignmentGood),
+		},
+		Undercover: UndercoverState{
+			Round:            1,
+			WordPair:         UndercoverWordPair{CivilianWord: "苹果", UndercoverWord: "梨"},
+			CurrentSpeakerID: "p1",
+			Described:        map[string]bool{},
+			Votes:            map[string]string{},
+		},
+	}
+	manager.rooms[room.ID] = room
+
+	if _, _, err := manager.RunNextAI(room.ID); err != nil {
+		t.Fatalf("run ai: %v", err)
+	}
+	if len(room.Speeches) != 1 {
+		t.Fatalf("expected one public clue, got %+v", room.Speeches)
+	}
+	if strings.Contains(room.Speeches[0].Text, "苹果") {
+		t.Fatalf("expected public clue to hide secret word, got %q", room.Speeches[0].Text)
+	}
+	if room.Speeches[0].Text == "我的词是苹果" || strings.Contains(room.Speeches[0].Text, "生活里") || strings.Contains(room.Speeches[0].Text, "具体场景") {
+		t.Fatalf("expected safe non-template fallback, got %q", room.Speeches[0].Text)
 	}
 }
 

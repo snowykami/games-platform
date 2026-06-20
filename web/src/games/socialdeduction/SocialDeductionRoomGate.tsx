@@ -1,15 +1,15 @@
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent, KeyboardEvent, ReactNode } from 'react'
 import type { SocialGameSlug, SocialPlayer, SocialRole, SocialRoom, WerewolfRoleCounts } from './online'
 import { ArrowLeft, Bot, Copy, DoorOpen, Plus, Shield, Skull, Sparkles, UserMinus, Vote } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { useAuth } from '@/auth/AuthContext'
 import { getAICapabilities } from '@/games/ai'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerNoteEditor } from '@/games/PlayerNoteEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
+import { useAutoFollowScroll } from '@/games/useAutoFollowScroll'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { createSocialRoom } from './online'
@@ -97,7 +97,6 @@ interface SocialDeductionRoomGateProps {
 export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGateProps) {
   const config = GAME_COPY[game]
   const navigate = useNavigate()
-  const { user } = useAuth()
   const { t, ta } = useI18n()
   const { actions, error, isLoading, room } = useSocialRoom(game, roomId)
   const [joinCode, setJoinCode] = useState(roomId ?? '')
@@ -105,7 +104,7 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
   const [pendingAI, setPendingAI] = useState(false)
   const [llmEnabled, setLLMEnabled] = useState(false)
   const [llmModel, setLLMModel] = useState('')
-  const isHost = Boolean(user && room?.hostUserId === user.id)
+  const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
 
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
@@ -249,6 +248,9 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
                   <Bot className="size-4" />
                   {pendingAI ? t('room.addingAI') : t('room.addAI')}
                 </button>
+                <button className={socialButton(config, true)} disabled={!isHost || room.players.length < room.minPlayers} type="button" onClick={startGame}>
+                  {t('common.startGame')}
+                </button>
               </div>
             </div>
           </div>
@@ -257,9 +259,6 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
           {game === 'undercover' && <UndercoverLobbyConfig actions={actions} config={config} isHost={isHost} room={room} />}
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <button className={cn(socialButton(config, true), 'sm:w-40')} disabled={!isHost || room.players.length < room.minPlayers} type="button" onClick={startGame}>
-              {t('common.startGame')}
-            </button>
             <p className="text-sm font-bold text-[#fff8e8]/75">{error ?? message}</p>
           </div>
         </div>
@@ -470,12 +469,12 @@ function SocialGamePage({
   game: SocialGameSlug
   room: SocialRoom
 }) {
-  const { user } = useAuth()
   const { t } = useI18n()
   const [message, setMessage] = useState(() => t('social.connected'))
-  const you = room.players.find(player => player.id === room.youPlayerId || player.userId === user?.id)
+  const tableLogScroll = useAutoFollowScroll<HTMLDivElement>()
+  const you = room.players.find(player => player.id === room.youPlayerId)
   const leader = room.players.find(player => player.id === room.avalon.leaderId)
-  const isHost = Boolean(user && room.hostUserId === user.id)
+  const isHost = Boolean(room.hostPlayerId && room.hostPlayerId === room.youPlayerId)
 
   async function copyLink() {
     await navigator.clipboard?.writeText(window.location.href)
@@ -534,7 +533,7 @@ function SocialGamePage({
 
         <aside className={cn('grid min-h-0 content-start gap-3 overflow-hidden rounded-lg border p-4 shadow-[0_22px_64px_rgba(0,0,0,0.28)]', config.panel)}>
           <h2 className="text-xl font-black">{t('social.tableLog')}</h2>
-          <div className="grid max-h-[34svh] gap-2 overflow-auto pr-1">
+          <div ref={tableLogScroll.containerRef} className="grid max-h-[34svh] gap-2 overflow-auto pr-1" onScroll={tableLogScroll.handleScroll}>
             {room.log.map(entry => (
               <p key={entry.id} className="rounded-lg bg-black/24 px-3 py-2 text-sm font-bold leading-6 text-[#fff8e8]/76">{entry.text}</p>
             ))}
@@ -570,6 +569,14 @@ function ActionPanel({
 }) {
   const { t } = useI18n()
   const [selectedTeam, setSelectedTeam] = useState<string[]>(room.avalon.team)
+  const [selectedWerewolfVote, setSelectedWerewolfVote] = useState('')
+  const [selectedHunterTarget, setSelectedHunterTarget] = useState('')
+  const [selectedUndercoverVote, setSelectedUndercoverVote] = useState('')
+  const [selectedTeamVote, setSelectedTeamVote] = useState<boolean>()
+  const [teamVoteSubmitted, setTeamVoteSubmitted] = useState(false)
+  const [selectedQuestCard, setSelectedQuestCard] = useState<'success' | 'fail'>()
+  const [questSubmitted, setQuestSubmitted] = useState(false)
+  const [selectedAssassinationTarget, setSelectedAssassinationTarget] = useState('')
   const [description, setDescription] = useState('')
   const livingTargets = room.players.filter(player => player.alive && player.id !== you?.id)
   const alivePlayers = room.players.filter(player => player.alive)
@@ -583,6 +590,26 @@ function ActionPanel({
     setSelectedTeam(selectedTeam.includes(playerId)
       ? selectedTeam.filter(id => id !== playerId)
       : selectedTeam.length < room.avalon.requiredTeam ? [...selectedTeam, playerId] : selectedTeam)
+  }
+
+  async function submitUndercoverDescription() {
+    const nextDescription = description.trim()
+    if (!isCurrentUndercoverSpeaker || !nextDescription) {
+      return
+    }
+
+    await actions.undercoverDescribe(nextDescription)
+    setDescription('')
+    setMessage(t('undercover.described'))
+  }
+
+  function handleDescriptionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) {
+      return
+    }
+
+    event.preventDefault()
+    void submitUndercoverDescription()
   }
 
   if (!you) {
@@ -641,6 +668,7 @@ function ActionPanel({
 
     if (room.phase === 'hunter') {
       const canShoot = you.id === room.werewolf.hunterPendingId
+      const selectedHunterPlayer = room.players.find(player => player.id === selectedHunterTarget)
       return (
         <Panel config={config}>
           <h2 className="text-xl font-black">{t('werewolf.hunterShot')}</h2>
@@ -648,15 +676,25 @@ function ActionPanel({
             {canShoot ? t('werewolf.chooseHunterTarget') : t('werewolf.waitHunter', { name: hunterPending?.name ?? '-' })}
           </p>
           {canShoot && livingTargets.map(player => (
-            <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.hunterShot(player.id).then(() => setMessage(t('werewolf.hunterSubmitted')))}>
-              <Skull className="size-4" />
+            <ChoiceButton key={player.id} config={config} icon={<Skull className="size-4" />} selected={selectedHunterTarget === player.id} onClick={() => setSelectedHunterTarget(player.id)}>
               {player.name}
-            </button>
+            </ChoiceButton>
           ))}
           {canShoot && (
-            <button className={socialButton(config, true)} type="button" onClick={() => void actions.hunterShot('').then(() => setMessage(t('werewolf.hunterSubmitted')))}>
+            <button className={cn(socialButton(config), selectedHunterTarget === 'skip' && 'ring-2 ring-[#fff8e8]')} type="button" onClick={() => setSelectedHunterTarget('skip')}>
               {t('werewolf.skipHunter')}
             </button>
+          )}
+          {canShoot && (
+            <ConfirmChoiceButton
+              config={config}
+              disabled={!selectedHunterTarget}
+              label={t('social.confirmAction')}
+              selectedLabel={selectedHunterTarget === 'skip' ? t('werewolf.skipHunter') : selectedHunterPlayer?.name}
+              onConfirm={() => void actions.hunterShot(selectedHunterTarget === 'skip' ? '' : selectedHunterTarget).then(() => {
+                setMessage(t('werewolf.hunterSubmitted'))
+              })}
+            />
           )}
         </Panel>
       )
@@ -676,15 +714,26 @@ function ActionPanel({
     }
 
     if (room.phase === 'vote') {
+      const hasVoted = Boolean(room.werewolf.votes[you.id])
+      const selectedPlayer = room.players.find(player => player.id === selectedWerewolfVote)
       return (
         <Panel config={config}>
           <h2 className="text-xl font-black">{t('werewolf.exileVote')}</h2>
+          {hasVoted && <SubmittedNotice config={config} label={t('werewolf.voted')} />}
           {livingTargets.map(player => (
-            <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.werewolfVote(player.id).then(() => setMessage(t('werewolf.voted')))}>
-              <Vote className="size-4" />
+            <ChoiceButton key={player.id} config={config} disabled={hasVoted} icon={<Vote className="size-4" />} selected={selectedWerewolfVote === player.id} onClick={() => setSelectedWerewolfVote(player.id)}>
               {player.name}
-            </button>
+            </ChoiceButton>
           ))}
+          {!hasVoted && (
+            <ConfirmChoiceButton
+              config={config}
+              disabled={!selectedWerewolfVote}
+              label={t('social.confirmVote')}
+              selectedLabel={selectedPlayer?.name}
+              onConfirm={() => void actions.werewolfVote(selectedWerewolfVote).then(() => setMessage(t('werewolf.voted')))}
+            />
+          )}
         </Panel>
       )
     }
@@ -705,16 +754,14 @@ function ActionPanel({
             maxLength={80}
             placeholder={t('undercover.describePlaceholder')}
             value={description}
+            onKeyDown={handleDescriptionKeyDown}
             onChange={event => setDescription(event.target.value)}
           />
           <button
             className={socialButton(config, true)}
             disabled={!isCurrentUndercoverSpeaker || !description.trim()}
             type="button"
-            onClick={() => void actions.undercoverDescribe(description).then(() => {
-              setDescription('')
-              setMessage(t('undercover.described'))
-            })}
+            onClick={() => void submitUndercoverDescription()}
           >
             {t('undercover.submitDescription')}
           </button>
@@ -723,16 +770,27 @@ function ActionPanel({
     }
 
     if (room.phase === 'undercover_vote') {
+      const hasVoted = Boolean(room.undercover.votes[you.id])
+      const selectedPlayer = room.players.find(player => player.id === selectedUndercoverVote)
       return (
         <Panel config={config}>
           <h2 className="text-xl font-black">{t('undercover.voteTitle')}</h2>
           <p className="text-sm leading-6 text-[#fff8e8]/76">{t('undercover.voteHint')}</p>
+          {hasVoted && <SubmittedNotice config={config} label={t('undercover.voted')} />}
           {livingTargets.map(player => (
-            <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.undercoverVote(player.id).then(() => setMessage(t('undercover.voted')))}>
-              <Vote className="size-4" />
+            <ChoiceButton key={player.id} config={config} disabled={hasVoted} icon={<Vote className="size-4" />} selected={selectedUndercoverVote === player.id} onClick={() => setSelectedUndercoverVote(player.id)}>
               {player.name}
-            </button>
+            </ChoiceButton>
           ))}
+          {!hasVoted && (
+            <ConfirmChoiceButton
+              config={config}
+              disabled={!selectedUndercoverVote}
+              label={t('social.confirmVote')}
+              selectedLabel={selectedPlayer?.name}
+              onConfirm={() => void actions.undercoverVote(selectedUndercoverVote).then(() => setMessage(t('undercover.voted')))}
+            />
+          )}
         </Panel>
       )
     }
@@ -769,14 +827,28 @@ function ActionPanel({
   }
 
   if (room.phase === 'team_vote') {
+    const selectedVoteLabel = selectedTeamVote === undefined ? undefined : selectedTeamVote ? t('avalon.approve') : t('avalon.reject')
     return (
       <Panel config={config}>
         <h2 className="text-xl font-black">{t('avalon.teamVote')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">{room.avalon.team.map(id => room.players.find(player => player.id === id)?.name).filter(Boolean).join(' / ')}</p>
+        {teamVoteSubmitted && <SubmittedNotice config={config} label={t('avalon.voted')} />}
         <div className="grid grid-cols-2 gap-2">
-          <button className={socialButton(config, true)} type="button" onClick={() => void actions.teamVote(true).then(() => setMessage(t('avalon.voted')))}>{t('avalon.approve')}</button>
-          <button className={socialButton(config)} type="button" onClick={() => void actions.teamVote(false).then(() => setMessage(t('avalon.voted')))}>{t('avalon.reject')}</button>
+          <ChoiceButton config={config} disabled={teamVoteSubmitted} selected={selectedTeamVote === true} onClick={() => setSelectedTeamVote(true)}>{t('avalon.approve')}</ChoiceButton>
+          <ChoiceButton config={config} disabled={teamVoteSubmitted} selected={selectedTeamVote === false} onClick={() => setSelectedTeamVote(false)}>{t('avalon.reject')}</ChoiceButton>
         </div>
+        {!teamVoteSubmitted && (
+          <ConfirmChoiceButton
+            config={config}
+            disabled={selectedTeamVote === undefined}
+            label={t('social.confirmVote')}
+            selectedLabel={selectedVoteLabel}
+            onConfirm={() => void actions.teamVote(Boolean(selectedTeamVote)).then(() => {
+              setTeamVoteSubmitted(true)
+              setMessage(t('avalon.voted'))
+            })}
+          />
+        )}
       </Panel>
     )
   }
@@ -787,31 +859,123 @@ function ActionPanel({
         <h2 className="text-xl font-black">{t('avalon.quest')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">{onQuest ? t('avalon.playQuestCard') : t('avalon.waitQuest')}</p>
         {onQuest && (
-          <div className="grid grid-cols-2 gap-2">
-            <button className={socialButton(config, true)} type="button" onClick={() => void actions.playQuest('success').then(() => setMessage(t('avalon.questSubmitted')))}>{t('avalon.successCard')}</button>
-            <button className={socialButton(config)} disabled={you.alignment !== 'evil'} type="button" onClick={() => void actions.playQuest('fail').then(() => setMessage(t('avalon.questSubmitted')))}>{t('avalon.failCard')}</button>
-          </div>
+          <>
+            {questSubmitted && <SubmittedNotice config={config} label={t('avalon.questSubmitted')} />}
+            <div className="grid grid-cols-2 gap-2">
+              <ChoiceButton config={config} disabled={questSubmitted} selected={selectedQuestCard === 'success'} onClick={() => setSelectedQuestCard('success')}>{t('avalon.successCard')}</ChoiceButton>
+              <ChoiceButton config={config} disabled={questSubmitted || you.alignment !== 'evil'} selected={selectedQuestCard === 'fail'} onClick={() => setSelectedQuestCard('fail')}>{t('avalon.failCard')}</ChoiceButton>
+            </div>
+            {!questSubmitted && (
+              <ConfirmChoiceButton
+                config={config}
+                disabled={!selectedQuestCard}
+                label={t('social.confirmAction')}
+                selectedLabel={selectedQuestCard ? t(selectedQuestCard === 'success' ? 'avalon.successCard' : 'avalon.failCard') : undefined}
+                onConfirm={() => {
+                  if (!selectedQuestCard) {
+                    return
+                  }
+                  void actions.playQuest(selectedQuestCard).then(() => {
+                    setQuestSubmitted(true)
+                    setMessage(t('avalon.questSubmitted'))
+                  })
+                }}
+              />
+            )}
+          </>
         )}
       </Panel>
     )
   }
 
   if (room.phase === 'assassination') {
+    const selectedPlayer = room.players.find(player => player.id === selectedAssassinationTarget)
     return (
       <Panel config={config}>
         <h2 className="text-xl font-black">{t('avalon.assassination')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">{isAssassin ? t('avalon.chooseMerlin') : t('avalon.waitAssassin')}</p>
         {isAssassin && room.players.filter(player => player.alignment === 'good' || !player.visibleToYou).map(player => (
-          <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.assassinate(player.id).then(() => setMessage(t('avalon.assassinated')))}>
-            <Skull className="size-4" />
+          <ChoiceButton key={player.id} config={config} icon={<Skull className="size-4" />} selected={selectedAssassinationTarget === player.id} onClick={() => setSelectedAssassinationTarget(player.id)}>
             {player.name}
-          </button>
+          </ChoiceButton>
         ))}
+        {isAssassin && (
+          <ConfirmChoiceButton
+            config={config}
+            disabled={!selectedAssassinationTarget}
+            label={t('social.confirmAction')}
+            selectedLabel={selectedPlayer?.name}
+            onConfirm={() => void actions.assassinate(selectedAssassinationTarget).then(() => setMessage(t('avalon.assassinated')))}
+          />
+        )}
       </Panel>
     )
   }
 
   return <Panel config={config}>{t('social.waiting')}</Panel>
+}
+
+function ChoiceButton({
+  children,
+  config,
+  disabled = false,
+  icon,
+  onClick,
+  selected,
+}: {
+  children: ReactNode
+  config: typeof GAME_COPY[SocialGameSlug]
+  disabled?: boolean
+  icon?: ReactNode
+  onClick: () => void
+  selected: boolean
+}) {
+  return (
+    <button
+      className={cn(socialButton(config), selected && 'ring-2 ring-[#fff8e8] ring-offset-2 ring-offset-black/40')}
+      disabled={disabled}
+      type="button"
+      onClick={onClick}
+    >
+      {icon}
+      {children}
+    </button>
+  )
+}
+
+function ConfirmChoiceButton({
+  config,
+  disabled,
+  label,
+  onConfirm,
+  selectedLabel,
+}: {
+  config: typeof GAME_COPY[SocialGameSlug]
+  disabled: boolean
+  label: string
+  onConfirm: () => void
+  selectedLabel?: string
+}) {
+  const { t } = useI18n()
+  return (
+    <div className="mt-1 grid gap-2 rounded-lg border border-white/12 bg-black/18 p-2">
+      <p className="min-h-5 text-xs font-black text-[#fff8e8]/65">
+        {selectedLabel ? t('social.selectedChoice', { name: selectedLabel }) : t('social.selectBeforeConfirm')}
+      </p>
+      <button className={socialButton(config, true)} disabled={disabled} type="button" onClick={onConfirm}>
+        <Vote className="size-4" />
+        {label}
+      </button>
+    </div>
+  )
+}
+
+function SubmittedNotice({ config, label }: { config: typeof GAME_COPY[SocialGameSlug], label: string }) {
+  return (
+    <div className={cn('rounded-lg px-3 py-2 text-sm font-black', config.primary)}>
+      {label}
+    </div>
+  )
 }
 
 function PlayerGrid({
@@ -829,60 +993,105 @@ function PlayerGrid({
   llmModel: string
   room: SocialRoom
 }) {
-  const { t } = useI18n()
   return (
     <div className={cn('grid content-start gap-3 overflow-auto pr-1', compact ? 'sm:grid-cols-2 xl:grid-cols-3' : 'sm:grid-cols-2')}>
       {room.players.map(player => (
-        <article key={player.id} className="relative rounded-lg border border-white/16 bg-black/26 p-3 shadow-[0_16px_34px_rgba(0,0,0,0.18)]">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
-              <strong className="truncate text-base">{player.name}</strong>
-              {player.id === room.youPlayerId && <PlayerNameEditor buttonClassName="text-[#fff8e8]" className="min-w-[120px]" name={player.name} onSave={actions.renamePlayer} />}
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {player.id === room.youPlayerId && <SpeechButton onSend={actions.say} />}
-              {player.ai
-                ? (
-                    <span className="shrink-0 rounded-full bg-[#fff8e8] px-2 py-0.5 text-xs font-black text-[#171411]">
-                      {`AI: ${llmModel || t('common.ai')}`}
-                    </span>
-                  )
-                : (
-                    <span className="rounded-full bg-[#fff8e8] px-2 py-0.5 text-xs font-black text-[#171411]">
-                      {player.roomRole === 'host' ? t('common.host') : player.connected ? t('common.online') : t('common.offline')}
-                    </span>
-                  )}
-              {isHost && room.phase === 'lobby' && player.roomRole !== 'host' && (
-                <button
-                  aria-label={t('common.removePlayer')}
-                  className={cn(socialIconButton(config))}
-                  title={t('common.removePlayer')}
-                  type="button"
-                  onClick={() => void actions.removePlayer(player.id)}
-                >
-                  <UserMinus className="size-4" />
-                </button>
-              )}
-            </div>
-          </div>
-          <SpeechBubble speech={latestSpeechForPlayer(room.speeches, player.id)} />
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className={cn('rounded-full px-2 py-0.5 text-xs font-black', player.alive ? 'bg-emerald-200 text-emerald-950' : 'bg-zinc-300 text-zinc-950')}>
-              {player.alive ? t('social.alive') : t('social.out')}
-            </span>
-            {player.visibleToYou && player.role
-              ? <RoleBadge role={player.role} />
-              : <span className="rounded-full bg-white/12 px-2 py-0.5 text-xs font-black">{t('social.hiddenRole')}</span>}
-          </div>
-          <p className="mt-2 min-h-8 text-sm leading-6 text-[#fff8e8]/70">
-            {player.ai?.personality ?? (player.kind === 'guest' ? t('xiangqi.guestReady') : t('xiangqi.oidcReady'))}
-          </p>
-          {room.youPlayerId && player.id !== room.youPlayerId && (
-            <PlayerNoteEditor className="mt-2" note={player.note} onSave={note => actions.updatePlayerNote(player.id, note)} />
-          )}
-        </article>
+        <SocialPlayerCard
+          key={player.id}
+          actions={actions}
+          config={config}
+          isHost={isHost}
+          llmModel={llmModel}
+          player={player}
+          room={room}
+        />
       ))}
+    </div>
+  )
+}
+
+function SocialPlayerCard({
+  actions,
+  config,
+  isHost,
+  llmModel,
+  player,
+  room,
+}: {
+  actions: ReturnType<typeof useSocialRoom>['actions']
+  config: typeof GAME_COPY[SocialGameSlug]
+  isHost: boolean
+  llmModel: string
+  player: SocialPlayer
+  room: SocialRoom
+}) {
+  const { t } = useI18n()
+  const isSelf = player.id === room.youPlayerId
+  const playerStatusLabel = player.ai ? (llmModel ? `AI: ${llmModel}` : t('common.ai')) : player.roomRole === 'host' ? t('common.host') : player.connected ? t('common.online') : t('common.offline')
+  const canRemove = isHost && room.phase === 'lobby' && player.roomRole !== 'host'
+  const canNote = Boolean(room.youPlayerId && !isSelf)
+
+  return (
+    <article className="relative grid gap-2 rounded-lg border border-white/16 bg-black/26 p-3 shadow-[0_16px_34px_rgba(0,0,0,0.18)]">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2 pt-0.5">
+          <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
+          <strong className="min-w-0 truncate text-base">{player.name}</strong>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className="inline-flex min-h-6 max-w-32 items-center truncate rounded-full bg-[#fff8e8] px-2 text-xs font-black leading-none text-[#171411]" title={playerStatusLabel}>
+            {playerStatusLabel}
+          </span>
+          {canRemove && (
+            <button
+              aria-label={t('common.removePlayer')}
+              className={cn(socialIconButton(config))}
+              title={t('common.removePlayer')}
+              type="button"
+              onClick={() => void actions.removePlayer(player.id)}
+            >
+              <UserMinus className="size-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {isSelf && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-white/6 p-1">
+          <PlayerNameEditor buttonClassName="text-[#fff8e8]" className="min-w-[180px]" name={player.name} onSave={actions.renamePlayer} />
+          <SpeechButton onSend={actions.say} />
+        </div>
+      )}
+
+      <div className="relative h-0">
+        <SpeechBubble
+          align="center"
+          anchorClassName="left-1/2 -translate-x-1/2"
+          placement="below"
+          speech={latestSpeechForPlayer(room.speeches, player.id)}
+          speakerName={player.name}
+        />
+      </div>
+
+      <SocialPlayerBadges player={player} />
+
+      {canNote && (
+        <PlayerNoteEditor className="mt-1" note={player.note} onSave={note => actions.updatePlayerNote(player.id, note)} />
+      )}
+    </article>
+  )
+}
+
+function SocialPlayerBadges({ player }: { player: SocialPlayer }) {
+  const { t } = useI18n()
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className={cn('inline-flex min-h-6 items-center rounded-full px-2 text-xs font-black leading-none', player.alive ? 'bg-emerald-200 text-emerald-950' : 'bg-zinc-300 text-zinc-950')}>
+        {player.alive ? t('social.alive') : t('social.out')}
+      </span>
+      {player.visibleToYou && player.role
+        ? <RoleBadge role={player.role} />
+        : <span className="inline-flex min-h-6 items-center rounded-full bg-white/12 px-2 text-xs font-black leading-none">{t('social.hiddenRole')}</span>}
     </div>
   )
 }
@@ -892,12 +1101,12 @@ function SelfIntel({ config, game, room, you }: { config: typeof GAME_COPY[Socia
   const visiblePlayers = room.players.filter(player => player.visibleToYou && player.id !== you?.id && player.role)
   const seerChecks = Object.entries(room.werewolf.seerChecks ?? {})
   const yourWord = undercoverWord(room, you)
+  const shouldCenterIntel = game === 'undercover'
   return (
-    <section className={cn('rounded-lg border p-4', config.panel)}>
+    <section className={cn('rounded-lg border p-4', config.panel, shouldCenterIntel && 'text-center')}>
       <h2 className={cn('text-xl font-black', config.accent)}>{t('social.yourIntel')}</h2>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {you?.role ? <RoleBadge role={you.role} size="large" /> : <span className="rounded-full bg-white/12 px-3 py-1 text-sm font-black">{t('social.hiddenRole')}</span>}
-        {you?.alignment && <AlignmentBadge alignment={you.alignment} />}
+      <div className={cn('mt-3 flex flex-wrap gap-2', shouldCenterIntel && 'justify-center')}>
+        {you?.role ? <RoleBadge role={you.role} size="large" /> : <span className="inline-flex min-h-8 items-center rounded-full bg-white/12 px-3 text-sm font-black leading-none">{t('social.hiddenRole')}</span>}
       </div>
       <p className="mt-3 text-sm leading-6 text-[#fff8e8]/72">
         {game === 'werewolf' ? t('werewolf.intelHint') : game === 'undercover' ? t('undercover.intelHint') : t('avalon.intelHint')}
@@ -965,15 +1174,10 @@ function RoleList({ game }: { game: SocialGameSlug }) {
 function RoleBadge({ role, size = 'normal' }: { role: SocialRole, size?: 'normal' | 'large' }) {
   const { t } = useI18n()
   return (
-    <span className={cn('rounded-full px-2 py-0.5 font-black', size === 'large' ? 'text-sm' : 'text-xs', alignmentClass(ROLE_ALIGNMENT[role]))}>
+    <span className={cn('inline-flex items-center rounded-full font-black leading-none', size === 'large' ? 'min-h-8 px-3 text-sm' : 'min-h-6 px-2 text-xs', alignmentClass(ROLE_ALIGNMENT[role]))}>
       {roleLabel(role, t)}
     </span>
   )
-}
-
-function AlignmentBadge({ alignment }: { alignment: 'good' | 'evil' | 'neutral' }) {
-  const { t } = useI18n()
-  return <span className={cn('rounded-full px-3 py-1 text-sm font-black', alignmentClass(alignment))}>{t(`social.alignments.${alignment}`)}</span>
 }
 
 function alignmentClass(alignment: 'good' | 'evil' | 'neutral') {

@@ -15,6 +15,8 @@ import (
 	"github.com/snowykami/games-platform/server/internal/config"
 )
 
+const maxLoggedResponseBodyBytes = 4096
+
 type OpenAIProvider struct {
 	api    string
 	model  string
@@ -28,7 +30,7 @@ func NewOpenAIProvider(cfg config.AIConfig) *OpenAIProvider {
 		model: strings.TrimSpace(cfg.LLMModel),
 		token: strings.TrimSpace(cfg.LLMToken),
 		client: &http.Client{
-			Timeout: 8 * time.Second,
+			Timeout: DecisionTimeout,
 		},
 	}
 }
@@ -54,7 +56,7 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 		Messages: []chatMessage{
 			{
 				Role:    "system",
-				Content: "You are a multiplayer tabletop game AI. Choose exactly one action from the provided legal actions and never invent actions. If you speak, keep it natural, short, and like a normal player at the table; avoid cringe roleplay, catchphrases, exposition, and overacting. It is fine to leave speech empty. Reply only by calling choose_action.",
+				Content: "You are a multiplayer tabletop game AI. Choose exactly one action from the provided legal actions and never invent actions. Treat private words, roles, cards, night actions, votes, and notes as secret: never reveal them directly in speech, never quote the secret word, and never say private action details out loud. If you speak, keep it natural, short, indirect, and like a normal player at the table; avoid cringe roleplay, catchphrases, exposition, and overacting. It is fine to leave speech empty. Reply only by calling choose_action.",
 			},
 			{
 				Role:    "user",
@@ -108,29 +110,52 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 	}
 	defer response.Body.Close()
 
+	responseBody, readErr := readResponseBody(response.Body)
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
 		slog.Warn("llm provider returned non-success status",
 			"game", input.Game,
 			"session", input.SessionID,
 			"player", input.PlayerName,
 			"level", input.Level,
 			"actionCount", len(input.Actions),
+			"api", p.api,
+			"model", p.model,
 			"status", response.StatusCode,
-			"body", strings.TrimSpace(string(responseBody)),
+			"body", responseBody,
+			"readError", readErr,
 			"duration", time.Since(startedAt),
 		)
 		return Decision{}, fmt.Errorf("llm provider returned status %d", response.StatusCode)
 	}
+	if readErr != nil {
+		slog.Warn("llm response body read failed",
+			"game", input.Game,
+			"session", input.SessionID,
+			"player", input.PlayerName,
+			"level", input.Level,
+			"actionCount", len(input.Actions),
+			"api", p.api,
+			"model", p.model,
+			"status", response.StatusCode,
+			"body", responseBody,
+			"duration", time.Since(startedAt),
+			"error", readErr,
+		)
+		return Decision{}, readErr
+	}
 
 	var result chatResponse
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal([]byte(responseBody), &result); err != nil {
 		slog.Warn("llm response decode failed",
 			"game", input.Game,
 			"session", input.SessionID,
 			"player", input.PlayerName,
 			"level", input.Level,
 			"actionCount", len(input.Actions),
+			"api", p.api,
+			"model", p.model,
+			"status", response.StatusCode,
+			"body", responseBody,
 			"duration", time.Since(startedAt),
 			"error", err,
 		)
@@ -143,6 +168,10 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 			"player", input.PlayerName,
 			"level", input.Level,
 			"actionCount", len(input.Actions),
+			"api", p.api,
+			"model", p.model,
+			"status", response.StatusCode,
+			"body", responseBody,
 			"duration", time.Since(startedAt),
 		)
 		return Decision{}, errors.New("llm provider did not call choose_action")
@@ -157,6 +186,11 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 			"player", input.PlayerName,
 			"level", input.Level,
 			"actionCount", len(input.Actions),
+			"api", p.api,
+			"model", p.model,
+			"status", response.StatusCode,
+			"body", responseBody,
+			"toolArguments", arguments,
 			"duration", time.Since(startedAt),
 			"error", err,
 		)
@@ -170,6 +204,11 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 			"level", input.Level,
 			"actionCount", len(input.Actions),
 			"actionID", choice.ActionID,
+			"api", p.api,
+			"model", p.model,
+			"status", response.StatusCode,
+			"body", responseBody,
+			"toolArguments", arguments,
 			"duration", time.Since(startedAt),
 		)
 		return Decision{}, fmt.Errorf("llm selected illegal action %q", choice.ActionID)
@@ -188,6 +227,16 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 	)
 
 	return Decision{ActionID: choice.ActionID, Reason: choice.Reason, Speech: choice.Speech, Notes: choice.Notes, Source: "llm"}, nil
+}
+
+func readResponseBody(body io.Reader) (string, error) {
+	data, err := io.ReadAll(body)
+	text := strings.TrimSpace(string(data))
+	runes := []rune(text)
+	if len(runes) > maxLoggedResponseBodyBytes {
+		text = string(runes[:maxLoggedResponseBodyBytes]) + "...<truncated>"
+	}
+	return text, err
 }
 
 func mustJSON(value any) string {
@@ -217,7 +266,7 @@ func chooseActionTool() toolSpec {
 					},
 					"speech": map[string]any{
 						"type":        "string",
-						"description": "Optional natural table talk in Chinese, no more than 24 Chinese characters. Leave empty if silence is better.",
+						"description": "Optional natural table talk in Chinese, no more than 24 Chinese characters. Never reveal private words, roles, cards, night actions, votes, or notes. Leave empty if silence is better.",
 					},
 					"notes": map[string]any{
 						"type":                 "object",

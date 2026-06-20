@@ -4,7 +4,6 @@ import type { AILevel } from '@/games/ai'
 import { ArrowLeft, Bot, CircleDot, Copy, DoorOpen, Hand, Plus, RefreshCw, ScrollText, Sparkles, UserMinus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { useAuth } from '@/auth/AuthContext'
 import { getAICapabilities, getAILevelLabel } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { AILevelPicker } from '@/games/AILevelPicker'
@@ -21,7 +20,6 @@ interface MahjongRoomGateProps {
 
 export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
   const navigate = useNavigate()
-  const { user } = useAuth()
   const { actions, error, isLoading, room } = useMahjongRoom(roomId)
   const [joinCode, setJoinCode] = useState(roomId ?? '')
   const [message, setMessage] = useState('创建或加入一个麻将房间。')
@@ -29,7 +27,7 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
   const [llmModel, setLLMModel] = useState('')
-  const isHost = Boolean(user && room?.hostUserId === user.id)
+  const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
 
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
@@ -152,10 +150,25 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
                 {roomId}
               </h2>
             </div>
-            <button className="mahjong-action" type="button" onClick={copyLink}>
-              <Copy className="size-4" />
-              复制链接
-            </button>
+            <div className="flex flex-wrap items-end gap-2">
+              <button className="mahjong-action" type="button" onClick={copyLink}>
+                <Copy className="size-4" />
+                复制链接
+              </button>
+              <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} llmModel={llmModel} palette="dark" onChange={setAILevel} />
+              <button
+                className={cn('mahjong-action', pendingAI && 'loading')}
+                disabled={pendingAI || !isHost || !room || room.players.length >= 4}
+                type="button"
+                onClick={addAIPlayer}
+              >
+                <Bot className="size-4" />
+                {pendingAI ? '添加中' : `添加 AI (${getAILevelLabel(aiLevel, 'zh')})`}
+              </button>
+              <button className="mahjong-action mahjong-action-primary" disabled={!isHost || !room || room.players.length < 4} type="button" onClick={startGame}>
+                开始游戏
+              </button>
+            </div>
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -166,10 +179,10 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
                   <div className="flex min-w-0 items-center gap-2">
                     <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
                     <strong className="truncate text-lg">{player.name}</strong>
-                    {player.userId === user?.id && <PlayerNameEditor buttonClassName="text-[#fff8e8]" name={player.name} onSave={actions.renamePlayer} />}
+                    {player.id === room.youPlayerId && <PlayerNameEditor buttonClassName="text-[#fff8e8]" name={player.name} onSave={actions.renamePlayer} />}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    {player.userId === user?.id && <SpeechButton palette="mahjong" onSend={actions.say} />}
+                    {player.id === room.youPlayerId && <SpeechButton palette="mahjong" onSend={actions.say} />}
                     {player.ai
                       ? (
                           <AILevelBadgeSelect
@@ -207,22 +220,7 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
             ))}
           </div>
 
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end">
-            <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} llmModel={llmModel} palette="dark" onChange={setAILevel} />
-            <button
-              className={cn('mahjong-action', pendingAI && 'loading')}
-              disabled={pendingAI || !isHost || !room || room.players.length >= 4}
-              type="button"
-              onClick={addAIPlayer}
-            >
-              <Bot className="size-4" />
-              {pendingAI ? '添加中' : `添加 AI (${getAILevelLabel(aiLevel, 'zh')})`}
-            </button>
-            <button className="mahjong-action mahjong-action-primary sm:ml-auto" disabled={!isHost || !room || room.players.length < 4} type="button" onClick={startGame}>
-              开始游戏
-            </button>
-          </div>
-          <p className="mt-3 min-h-6 text-sm font-bold text-[#fff8e8]/72">{error ?? message}</p>
+          <p className="mt-4 min-h-6 text-sm font-bold text-[#fff8e8]/72">{error ?? message}</p>
         </div>
 
         <aside className="rounded-lg border border-[#d8b66a]/35 bg-[#10251f]/80 p-5 shadow-[0_24px_70px_rgba(0,0,0,0.22)]">
@@ -237,9 +235,8 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
 }
 
 function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: MahjongOnlineRoom, roomId: string }) {
-  const { user } = useAuth()
   const { actions } = useMahjongRoom(roomId)
-  const human = room.players.find(player => player.userId === user?.id)
+  const human = room.players.find(player => player.id === room.youPlayerId)
   const currentPlayer = room.players.find(player => player.id === room.currentPlayerId)
   const winner = room.players.find(player => player.id === room.winnerId)
 
@@ -269,7 +266,7 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
               <ArrowLeft className="size-4" />
               游戏大厅
             </Link>
-            <button className="mahjong-action mahjong-action-primary" disabled={room.hostUserId !== user?.id} type="button" onClick={() => actions.start()}>
+            <button className="mahjong-action mahjong-action-primary" disabled={room.hostPlayerId !== room.youPlayerId} type="button" onClick={() => actions.start()}>
               <RefreshCw className="size-4" />
               重开
             </button>

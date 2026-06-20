@@ -92,7 +92,7 @@ type AIProfile struct {
 
 type Player struct {
 	ID             string     `json:"id"`
-	UserID         string     `json:"userId"`
+	UserID         string     `json:"-"`
 	Name           string     `json:"name"`
 	Role           string     `json:"role"`
 	Kind           string     `json:"kind"`
@@ -109,7 +109,7 @@ type Player struct {
 
 type PublicPlayer struct {
 	ID             string     `json:"id"`
-	UserID         string     `json:"userId"`
+	UserID         string     `json:"-"`
 	Name           string     `json:"name"`
 	Role           string     `json:"role"`
 	Kind           string     `json:"kind"`
@@ -179,32 +179,35 @@ type LastDiscard struct {
 }
 
 type Room struct {
-	ID                 string
-	HostUserID         string
-	Phase              Phase
-	Players            []*Player
-	Wall               []Tile
-	DeadWall           []Tile
-	CurrentPlayerIndex int
-	DealerIndex        int
-	RoundWind          Wind
-	HasDrawn           bool
-	LastDiscard        *LastDiscard
-	ClaimOptions       []ClaimOption
-	RuleSet            RuleSet
-	WinnerID           string
-	WinResult          WinResult
-	Log                []LogEntry
-	Speeches           []SpeechEntry
-	ActionSeq          int
-	RecentActions      []PublicAction
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                   string
+	HostUserID           string
+	Phase                Phase
+	Players              []*Player
+	Wall                 []Tile
+	DeadWall             []Tile
+	CurrentPlayerIndex   int
+	DealerIndex          int
+	RoundWind            Wind
+	HasDrawn             bool
+	LastDiscard          *LastDiscard
+	ClaimOptions         []ClaimOption
+	RuleSet              RuleSet
+	WinnerID             string
+	WinResult            WinResult
+	Log                  []LogEntry
+	Speeches             []SpeechEntry
+	LastAISpeechSourceID string
+	ActionSeq            int
+	RecentActions        []PublicAction
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type PublicRoom struct {
 	ID              string         `json:"id"`
-	HostUserID      string         `json:"hostUserId"`
+	HostUserID      string         `json:"-"`
+	HostPlayerID    string         `json:"hostPlayerId,omitempty"`
+	YouPlayerID     string         `json:"youPlayerId,omitempty"`
 	Phase           Phase          `json:"phase"`
 	Players         []PublicPlayer `json:"players"`
 	WallCount       int            `json:"wallCount"`

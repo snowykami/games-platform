@@ -49,6 +49,8 @@ type wsMessage struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
+const websocketWriteTimeout = 2 * time.Second
+
 func NewHandler(manager *Manager) *Handler {
 	return &Handler{manager: manager, hub: NewHub(manager)}
 }
@@ -122,6 +124,7 @@ func (h *Handler) joinRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	h.hub.Broadcast(room.ID)
 	h.hub.ScheduleAI(room.ID)
+	h.hub.ScheduleAISpeech(room.ID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
 }
 
@@ -263,17 +266,19 @@ type Subscriber struct {
 }
 
 type Hub struct {
-	manager     *Manager
-	mu          sync.Mutex
-	subscribers map[*Subscriber]struct{}
-	aiRunning   map[string]struct{}
+	manager         *Manager
+	mu              sync.Mutex
+	subscribers     map[*Subscriber]struct{}
+	aiRunning       map[string]struct{}
+	aiSpeechRunning map[string]struct{}
 }
 
 func NewHub(manager *Manager) *Hub {
 	return &Hub{
-		manager:     manager,
-		subscribers: map[*Subscriber]struct{}{},
-		aiRunning:   map[string]struct{}{},
+		manager:         manager,
+		subscribers:     map[*Subscriber]struct{}{},
+		aiRunning:       map[string]struct{}{},
+		aiSpeechRunning: map[string]struct{}{},
 	}
 }
 
@@ -312,6 +317,7 @@ func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, conn 
 		}
 		h.Broadcast(roomID)
 		h.ScheduleAI(roomID)
+		h.ScheduleAISpeech(roomID)
 	}
 }
 
@@ -330,11 +336,23 @@ func (h *Hub) Broadcast(roomID string) {
 		if err != nil {
 			continue
 		}
-		_ = sub.conn.Write(context.Background(), websocket.MessageText, mustMarshal(map[string]any{
+		ctx, cancel := context.WithTimeout(context.Background(), websocketWriteTimeout)
+		err = sub.conn.Write(ctx, websocket.MessageText, mustMarshal(map[string]any{
 			"type": "room.state",
 			"room": room,
 		}))
+		cancel()
+		if err != nil {
+			h.dropSubscriber(sub)
+		}
 	}
+}
+
+func (h *Hub) dropSubscriber(sub *Subscriber) {
+	h.mu.Lock()
+	delete(h.subscribers, sub)
+	h.mu.Unlock()
+	_ = sub.conn.Close(websocket.StatusPolicyViolation, "write failed")
 }
 
 func (h *Hub) CloseUser(roomID string, userID string) {
@@ -443,11 +461,37 @@ func (h *Hub) ScheduleAI(roomID string) {
 			}
 			if room.ID != "" {
 				h.Broadcast(room.ID)
+				h.ScheduleAISpeech(room.ID)
 			}
 			if !shouldContinue {
 				return
 			}
 		}
+	}()
+}
+
+func (h *Hub) ScheduleAISpeech(roomID string) {
+	h.mu.Lock()
+	if _, ok := h.aiSpeechRunning[roomID]; ok {
+		h.mu.Unlock()
+		return
+	}
+	h.aiSpeechRunning[roomID] = struct{}{}
+	h.mu.Unlock()
+
+	go func() {
+		defer func() {
+			h.mu.Lock()
+			delete(h.aiSpeechRunning, roomID)
+			h.mu.Unlock()
+		}()
+
+		time.Sleep(900 * time.Millisecond)
+		room, changed, err := h.manager.RunAISpeech(roomID)
+		if err != nil || !changed || room.ID == "" {
+			return
+		}
+		h.Broadcast(room.ID)
 	}()
 }
 

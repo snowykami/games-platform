@@ -217,6 +217,80 @@ func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, e
 	return publicRoom(room, actorID), nil
 }
 
+func (m *Manager) RunAISpeech(roomID string) (PublicRoom, bool, error) {
+	if m.aiProvider == nil || !m.aiProvider.Enabled() {
+		return PublicRoom{}, false, nil
+	}
+	room, err := m.lockRoom(roomID)
+	if err != nil {
+		return PublicRoom{}, false, err
+	}
+	if room.Phase == PhaseLobby || len(room.Speeches) == 0 {
+		view := publicRoom(room, "")
+		room.mu.Unlock()
+		return view, false, nil
+	}
+	lastSpeech := room.Speeches[len(room.Speeches)-1]
+	if lastSpeech.ID == room.LastAISpeechSourceID {
+		view := publicRoom(room, "")
+		room.mu.Unlock()
+		return view, false, nil
+	}
+	player := nextAISpeechPlayer(room, lastSpeech.PlayerID)
+	if player == nil || player.AI == nil {
+		room.LastAISpeechSourceID = lastSpeech.ID
+		view := publicRoom(room, "")
+		room.mu.Unlock()
+		return view, false, nil
+	}
+	room.LastAISpeechSourceID = lastSpeech.ID
+	input := aiplayer.DecisionInput{
+		Game:        "uno",
+		Level:       aiplayer.LevelLLM,
+		SessionID:   player.ID + ":speech",
+		PlayerName:  player.Name,
+		Personality: player.AI.Personality,
+		SpeechStyle: player.AI.SpeechStyle,
+		State: map[string]any{
+			"phase":        room.Phase,
+			"activeColor":  room.ActiveColor,
+			"topCard":      discardTopCard(room),
+			"handCount":    len(player.Hand),
+			"recentSpeech": recentSpeeches(room),
+			"speechGuide":  "像 UNO 朋友局里自然接一句，短句即可；如果没必要回应就跳过。",
+		},
+		Actions: speechActions(),
+	}
+	updatedAt := room.UpdatedAt
+	playerID := player.ID
+	room.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), aiplayer.DecisionTimeout)
+	decision, err := m.aiProvider.Decide(ctx, input)
+	cancel()
+	if err != nil {
+		return PublicRoom{}, false, err
+	}
+	if decision.ActionID != "speak" || strings.TrimSpace(decision.Speech) == "" {
+		return PublicRoom{}, false, nil
+	}
+
+	room, err = m.lockRoom(roomID)
+	if err != nil {
+		return PublicRoom{}, false, err
+	}
+	defer room.mu.Unlock()
+	player = findPlayerByID(room, playerID)
+	if player == nil || !player.IsAI || !room.UpdatedAt.Equal(updatedAt) {
+		return publicRoom(room, ""), false, nil
+	}
+	if !recordSpeech(room, player, decision.Speech) {
+		return publicRoom(room, ""), false, nil
+	}
+	room.UpdatedAt = time.Now().UTC()
+	return publicRoom(room, ""), true, nil
+}
+
 func (m *Manager) RenamePlayer(roomID string, actorID string, displayName string) (PublicRoom, error) {
 	room, err := m.lockRoom(roomID)
 	if err != nil {
@@ -606,6 +680,8 @@ func publicRoom(room *Room, viewerID string) PublicRoom {
 	return PublicRoom{
 		ID:                   room.ID,
 		HostUserID:           room.HostUserID,
+		HostPlayerID:         playerIDForUser(room, room.HostUserID),
+		YouPlayerID:          playerIDForUser(room, viewerID),
 		VariantKey:           room.VariantKey,
 		ThemeKey:             room.ThemeKey,
 		Phase:                room.Phase,
@@ -627,6 +703,13 @@ func publicRoom(room *Room, viewerID string) PublicRoom {
 		TurnDeadline:         cloneTimePtr(room.TurnDeadline),
 		TurnRemainingSeconds: turnRemainingSeconds(room.TurnDeadline),
 	}
+}
+
+func playerIDForUser(room *Room, userID string) string {
+	if player := findPlayerByUserID(room, userID); player != nil {
+		return player.ID
+	}
+	return ""
 }
 
 func playCard(room *Room, player *Player, cardIndex int, color Color) {
@@ -1139,7 +1222,7 @@ func (m *Manager) decideWithLLM(room *Room, player *Player, actions []aiTurnActi
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), aiplayer.DecisionTimeout)
 	defer cancel()
 	return m.aiProvider.Decide(ctx, aiplayer.DecisionInput{
 		Game:        "uno",
@@ -1410,6 +1493,22 @@ func recentSpeeches(room *Room) []SpeechEntry {
 		speeches = speeches[len(speeches)-8:]
 	}
 	return append([]SpeechEntry{}, speeches...)
+}
+
+func nextAISpeechPlayer(room *Room, lastSpeakerID string) *Player {
+	for _, player := range room.Players {
+		if player.IsAI && player.ID != lastSpeakerID && player.AI != nil {
+			return player
+		}
+	}
+	return nil
+}
+
+func speechActions() []aiplayer.LegalAction {
+	return []aiplayer.LegalAction{
+		{ID: "speak", Label: "说一句话", Description: "用自然、简短的玩家语气回应桌面发言。"},
+		{ID: "skip", Label: "不发言", Description: "没有必要回应时选择。"},
+	}
 }
 
 func formatCard(card Card) string {

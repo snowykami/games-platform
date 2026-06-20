@@ -51,7 +51,7 @@ func (m *Manager) CreateRoom(user UserView) PublicRoom {
 	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 创建了房间。", user.DisplayName)))
 	m.rooms[room.ID] = room
 
-	return publicRoom(room)
+	return publicRoom(room, user.ID)
 }
 
 func (m *Manager) JoinRoom(roomID string, user UserView) (PublicRoom, error) {
@@ -80,7 +80,7 @@ func (m *Manager) JoinRoom(roomID string, user UserView) (PublicRoom, error) {
 	player.Connected = true
 	player.DisconnectedAt = nil
 	room.UpdatedAt = time.Now().UTC()
-	return publicRoom(room), nil
+	return publicRoom(room, user.ID), nil
 }
 
 func (m *Manager) Leave(roomID string, userID string) {
@@ -138,7 +138,7 @@ func (m *Manager) AddAI(roomID string, actorID string, options AIOptions) (Publi
 	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 加入了房间。", profile.Name)))
 	room.UpdatedAt = time.Now().UTC()
 
-	return publicRoom(room), nil
+	return publicRoom(room, actorID), nil
 }
 
 func (m *Manager) UpdateAI(roomID string, actorID string, playerID string, options AIOptions) (PublicRoom, error) {
@@ -166,7 +166,7 @@ func (m *Manager) UpdateAI(roomID string, actorID string, playerID string, optio
 	level := aiplayer.NormalizeLevel(options.Level, m.aiProvider != nil && m.aiProvider.Enabled())
 	player.AI.Level = string(level)
 	room.UpdatedAt = time.Now().UTC()
-	return publicRoom(room), nil
+	return publicRoom(room, actorID), nil
 }
 
 func (m *Manager) RemovePlayer(roomID string, actorID string, playerID string) (PublicRoom, error) {
@@ -193,7 +193,7 @@ func (m *Manager) RemovePlayer(roomID string, actorID string, playerID string) (
 		room.Players = append(room.Players[:index], room.Players[index+1:]...)
 		room.Log = append(room.Log, createLog(fmt.Sprintf("%s 被房主移出了房间。", player.Name)))
 		room.UpdatedAt = time.Now().UTC()
-		return publicRoom(room), nil
+		return publicRoom(room, actorID), nil
 	}
 	return PublicRoom{}, errors.New("player_not_found")
 }
@@ -214,7 +214,83 @@ func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, e
 		return PublicRoom{}, errors.New("invalid_speech")
 	}
 	room.UpdatedAt = time.Now().UTC()
-	return publicRoom(room), nil
+	return publicRoom(room, actorID), nil
+}
+
+func (m *Manager) RunAISpeech(roomID string) (PublicRoom, bool, error) {
+	if m.aiProvider == nil || !m.aiProvider.Enabled() {
+		return PublicRoom{}, false, nil
+	}
+	m.mu.Lock()
+	room, err := m.room(roomID)
+	if err != nil {
+		m.mu.Unlock()
+		return PublicRoom{}, false, err
+	}
+	if room.Phase == PhaseLobby || len(room.Speeches) == 0 {
+		view := publicRoom(room, "")
+		m.mu.Unlock()
+		return view, false, nil
+	}
+	lastSpeech := room.Speeches[len(room.Speeches)-1]
+	if lastSpeech.ID == room.LastAISpeechSourceID {
+		view := publicRoom(room, "")
+		m.mu.Unlock()
+		return view, false, nil
+	}
+	player := nextAISpeechPlayer(room, lastSpeech.PlayerID)
+	if player == nil || player.AI == nil {
+		room.LastAISpeechSourceID = lastSpeech.ID
+		view := publicRoom(room, "")
+		m.mu.Unlock()
+		return view, false, nil
+	}
+	room.LastAISpeechSourceID = lastSpeech.ID
+	input := aiplayer.DecisionInput{
+		Game:        "gomoku",
+		Level:       aiplayer.LevelLLM,
+		SessionID:   player.ID + ":speech",
+		PlayerName:  player.Name,
+		Personality: player.AI.Personality,
+		SpeechStyle: player.AI.SpeechStyle,
+		State: map[string]any{
+			"phase":        room.Phase,
+			"stone":        player.Stone,
+			"moves":        room.Moves,
+			"recentSpeech": recentSpeeches(room),
+			"speechGuide":  "像五子棋对局里自然接一句，短句即可；可以评价局势，但不要长篇分析。",
+		},
+		Actions: speechActions(),
+	}
+	updatedAt := room.UpdatedAt
+	playerID := player.ID
+	m.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), aiplayer.DecisionTimeout)
+	decision, err := m.aiProvider.Decide(ctx, input)
+	cancel()
+	if err != nil {
+		return PublicRoom{}, false, err
+	}
+	if decision.ActionID != "speak" || strings.TrimSpace(decision.Speech) == "" {
+		return PublicRoom{}, false, nil
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	room, err = m.room(roomID)
+	if err != nil {
+		return PublicRoom{}, false, err
+	}
+	player = findPlayerByID(room, playerID)
+	if player == nil || !player.IsAI || !room.UpdatedAt.Equal(updatedAt) {
+		return publicRoom(room, ""), false, nil
+	}
+	if !recordSpeech(room, player, decision.Speech) {
+		return publicRoom(room, ""), false, nil
+	}
+	room.UpdatedAt = time.Now().UTC()
+	return publicRoom(room, ""), true, nil
 }
 
 func (m *Manager) RenamePlayer(roomID string, actorID string, displayName string) (PublicRoom, error) {
@@ -237,7 +313,7 @@ func (m *Manager) RenamePlayer(roomID string, actorID string, displayName string
 	player.Name = nextName
 	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 改名为 %s。", oldName, nextName)))
 	room.UpdatedAt = time.Now().UTC()
-	return publicRoom(room), nil
+	return publicRoom(room, actorID), nil
 }
 
 func (m *Manager) Start(roomID string, actorID string) (PublicRoom, error) {
@@ -265,7 +341,7 @@ func (m *Manager) Start(roomID string, actorID string) (PublicRoom, error) {
 	room.Players[1].Stone = StoneWhite
 	room.Log = append(room.Log, createLog("五子棋开始，黑棋先行。"))
 	room.UpdatedAt = time.Now().UTC()
-	return publicRoom(room), nil
+	return publicRoom(room, actorID), nil
 }
 
 func (m *Manager) Place(roomID string, actorID string, x int, y int) (PublicRoom, error) {
@@ -285,7 +361,7 @@ func (m *Manager) Place(roomID string, actorID string, x int, y int) (PublicRoom
 
 	placeStone(room, player, x, y)
 	room.UpdatedAt = time.Now().UTC()
-	return publicRoom(room), nil
+	return publicRoom(room, actorID), nil
 }
 
 func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
@@ -298,12 +374,12 @@ func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
 		return PublicRoom{}, false, err
 	}
 	if room.Phase != PhasePlaying || len(room.Players) == 0 {
-		return publicRoom(room), false, nil
+		return publicRoom(room, ""), false, nil
 	}
 
 	player := room.Players[room.CurrentPlayerIndex]
 	if !player.IsAI {
-		return publicRoom(room), false, nil
+		return publicRoom(room, ""), false, nil
 	}
 
 	level := ""
@@ -319,7 +395,7 @@ func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
 
 	x, y, speech := m.chooseAIPosition(room, player)
 	if !inBounds(x, y) {
-		return publicRoom(room), false, nil
+		return publicRoom(room, ""), false, nil
 	}
 	placeStone(room, player, x, y)
 	recordSpeech(room, player, speech)
@@ -336,10 +412,10 @@ func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
 		"duration", time.Since(startedAt),
 		"continue", shouldContinue,
 	)
-	return publicRoom(room), shouldContinue, nil
+	return publicRoom(room, ""), shouldContinue, nil
 }
 
-func (m *Manager) Public(roomID string) (PublicRoom, error) {
+func (m *Manager) Public(roomID string, viewerID string) (PublicRoom, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -347,7 +423,7 @@ func (m *Manager) Public(roomID string) (PublicRoom, error) {
 	if err != nil {
 		return PublicRoom{}, err
 	}
-	return publicRoom(room), nil
+	return publicRoom(room, viewerID), nil
 }
 
 func (m *Manager) currentHuman(roomID string, actorID string) (*Room, *Player, error) {
@@ -444,7 +520,7 @@ func placeStone(room *Room, player *Player, x int, y int) {
 	room.CurrentPlayerIndex = (room.CurrentPlayerIndex + 1) % len(room.Players)
 }
 
-func publicRoom(room *Room) PublicRoom {
+func publicRoom(room *Room, viewerID string) PublicRoom {
 	players := make([]Player, 0, len(room.Players))
 	for _, player := range room.Players {
 		players = append(players, *player)
@@ -463,6 +539,8 @@ func publicRoom(room *Room) PublicRoom {
 	return PublicRoom{
 		ID:              room.ID,
 		HostUserID:      room.HostUserID,
+		HostPlayerID:    playerIDForUser(room, room.HostUserID),
+		YouPlayerID:     playerIDForUser(room, viewerID),
 		Phase:           room.Phase,
 		Players:         players,
 		BoardSize:       BoardSize,
@@ -476,6 +554,13 @@ func publicRoom(room *Room) PublicRoom {
 		ActionSeq:       room.ActionSeq,
 		RecentActions:   append([]PublicAction{}, room.RecentActions...),
 	}
+}
+
+func playerIDForUser(room *Room, userID string) string {
+	if player := findPlayerByUserID(room, userID); player != nil {
+		return player.ID
+	}
+	return ""
 }
 
 func winningLine(room *Room, x int, y int, stone Stone) []Point {
@@ -537,7 +622,7 @@ func (m *Manager) decideGomokuWithLLM(room *Room, player *Player) (int, int, str
 	}
 
 	actions := gomokuLegalActions(room)
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), aiplayer.DecisionTimeout)
 	defer cancel()
 	decision, err := m.aiProvider.Decide(ctx, aiplayer.DecisionInput{
 		Game:        "gomoku",
@@ -760,6 +845,22 @@ func recentSpeeches(room *Room) []SpeechEntry {
 		speeches = speeches[len(speeches)-8:]
 	}
 	return append([]SpeechEntry{}, speeches...)
+}
+
+func nextAISpeechPlayer(room *Room, lastSpeakerID string) *Player {
+	for _, player := range room.Players {
+		if player.IsAI && player.ID != lastSpeakerID && player.AI != nil {
+			return player
+		}
+	}
+	return nil
+}
+
+func speechActions() []aiplayer.LegalAction {
+	return []aiplayer.LegalAction{
+		{ID: "speak", Label: "说一句话", Description: "用自然、简短的玩家语气回应桌面发言。"},
+		{ID: "skip", Label: "不发言", Description: "没有必要回应时选择。"},
+	}
 }
 
 func createLog(text string) LogEntry {
