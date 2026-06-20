@@ -213,14 +213,14 @@ export function MahjongPage() {
 
           <PlayerPanel aiLevel={aiLevel} className="lg:col-start-3 lg:row-start-2" currentPlayerId={currentPlayer.id} llmEnabled={llmEnabled} player={state.players[1]} speech={latestSpeechForPlayer(speeches, state.players[1].id)?.text} onAILevelChange={setAILevel} />
 
-          <section className="grid min-h-0 gap-3 rounded-lg border border-[#d8b66a]/35 bg-[#081914]/82 p-3 lg:col-span-3 lg:row-start-3">
+          <section className="relative grid min-h-0 gap-3 rounded-lg border border-[#d8b66a]/35 bg-[#081914]/82 p-3 lg:col-span-3 lg:row-start-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <strong className="text-lg">{t('mahjong.yourHand')}</strong>
                 <p className="text-sm font-bold text-[#fff8e8]/70">
                   {state.phase === 'claiming' ? t('mahjong.claimPrompt') : canHumanDiscard ? t('mahjong.discardPrompt') : canHumanDraw ? t('mahjong.drawPrompt') : t('mahjong.waitPrompt', { name: currentPlayer.name })}
                 </p>
-                <SpeechBubble className="mt-2" text={latestSpeechForPlayer(speeches, human.id)?.text} />
+                <SpeechBubble text={latestSpeechForPlayer(speeches, human.id)?.text} />
               </div>
               <div className="flex flex-wrap gap-2">
                 <SpeechButton palette="mahjong" onSend={text => recordSpeech(human, text)} />
@@ -292,7 +292,7 @@ function PlayerPanel({
   const isCurrent = currentPlayerId === player.id
 
   return (
-    <article className={cn('grid min-h-32 content-between rounded-lg border border-[#d8b66a]/35 bg-[#081914]/72 p-3 shadow-[0_18px_40px_rgba(0,0,0,0.18)]', isCurrent && 'ring-2 ring-[#ffd166]', className)}>
+    <article className={cn('relative grid min-h-32 content-between rounded-lg border border-[#d8b66a]/35 bg-[#081914]/72 p-3 shadow-[0_18px_40px_rgba(0,0,0,0.18)]', isCurrent && 'ring-2 ring-[#ffd166]', className)}>
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="flex items-center gap-2">

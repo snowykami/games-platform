@@ -1,6 +1,6 @@
 import type { FormEvent, ReactNode } from 'react'
 import type { AILevel } from '@/games/ai'
-import { ArrowLeft, Bot, Copy, DoorOpen, Plus, Sparkles } from 'lucide-react'
+import { ArrowLeft, Bot, Copy, DoorOpen, Plus, Sparkles, UserMinus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
@@ -8,12 +8,15 @@ import { getAICapabilities, getAILevelLabel } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { AILevelPicker } from '@/games/AILevelPicker'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { createUnoRoom } from './online'
 import { UnoPage } from './UnoPage'
+import { UnoVariantInfoButton } from './UnoVariantInfo'
 import { useUnoRoom } from './useUnoRoom'
+import { getUnoThemeLabel, getUnoThemeOption, getUnoVariantOption } from './variantInfo'
 
 interface UnoRoomGateProps {
   roomId?: string
@@ -45,6 +48,7 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   const [pendingAI, setPendingAI] = useState(false)
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
+  const [llmModel, setLLMModel] = useState('')
   const [variantKey, setVariantKey] = useState('classic')
   const [themeKey, setThemeKey] = useState('classic')
   const isHost = Boolean(user && room?.hostUserId === user.id)
@@ -52,6 +56,7 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
       setLLMEnabled(capabilities.llmEnabled)
+      setLLMModel(capabilities.model ?? '')
       if (!capabilities.llmEnabled && aiLevel === 'ai') {
         setAILevel('normal')
       }
@@ -141,8 +146,8 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
             </div>
 
             <div className="grid min-h-0 content-start gap-4 overflow-y-auto pr-1">
-              <OptionGroup label={t('uno.variantType')} options={UNO_VARIANTS.map(key => unoVariantOption(key, t))} value={variantKey} onChange={setVariantKey} />
-              <OptionGroup label={t('uno.themeType')} options={UNO_THEMES.map(key => unoThemeOption(key, t))} value={themeKey} onChange={setThemeKey} />
+              <OptionGroup label={t('uno.variantType')} options={UNO_VARIANTS.map(key => getUnoVariantOption(key, t))} value={variantKey} onChange={setVariantKey} />
+              <OptionGroup label={t('uno.themeType')} options={UNO_THEMES.map(key => getUnoThemeOption(key, t))} value={themeKey} onChange={setThemeKey} />
             </div>
 
             <div className="grid gap-3">
@@ -181,9 +186,9 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                 {roomId}
               </h2>
               <p className="mt-1 text-xs font-bold text-[#fff8e8]/60">
-                {variantLabel(room?.variantKey, t)}
+                <UnoVariantInfoButton className="mr-2 min-h-7 px-2 text-[11px]" variantKey={room?.variantKey} />
                 {' / '}
-                {themeLabel(room?.themeKey, t)}
+                {getUnoThemeLabel(room?.themeKey, t)}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -192,7 +197,7 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                 {t('common.copyLink')}
               </button>
               <div className="grid min-w-[250px] grid-cols-[minmax(120px,1fr)_auto] items-end gap-2">
-                <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} onChange={setAILevel} />
+                <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} llmModel={llmModel} onChange={setAILevel} />
                 <button
                   className={cn('uno-button', pendingAI && 'loading')}
                   disabled={pendingAI || !isHost || !room || room.players.length >= 10}
@@ -209,9 +214,12 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
           <div className="grid content-start gap-3 overflow-auto pr-1 sm:grid-cols-2">
             {isLoading && <p className="text-sm font-bold text-[#fff8e8]/70">{t('room.connecting')}</p>}
             {room?.players.map(player => (
-              <article key={player.id} className="rounded-lg border border-white/25 bg-[#090807]/50 p-4 shadow-[0_16px_34px_rgba(0,0,0,0.2)]">
+              <article key={player.id} className="relative rounded-lg border border-white/25 bg-[#090807]/50 p-4 shadow-[0_16px_34px_rgba(0,0,0,0.2)]">
                 <div className="flex items-center justify-between gap-3">
-                  <strong className="truncate text-lg">{player.name}</strong>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
+                    <strong className="truncate text-lg">{player.name}</strong>
+                  </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {player.userId === user?.id && <SpeechButton onSend={actions.say} />}
                     {player.ai
@@ -220,6 +228,7 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                             disabled={!isHost || room.phase !== 'lobby'}
                             level={player.ai.level}
                             llmEnabled={llmEnabled}
+                            llmModel={llmModel}
                             onChange={level => void actions.updateAI(player.id, level)}
                           />
                         )
@@ -228,9 +237,20 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                             {player.role === 'host' ? t('common.host') : player.connected ? t('common.online') : t('common.offline')}
                           </span>
                         )}
+                    {isHost && room.phase === 'lobby' && player.role !== 'host' && (
+                      <button
+                        aria-label={t('common.removePlayer')}
+                        className="uno-button min-h-7 px-2"
+                        title={t('common.removePlayer')}
+                        type="button"
+                        onClick={() => void actions.removePlayer(player.id)}
+                      >
+                        <UserMinus className="size-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
-                <SpeechBubble className="mt-3" text={latestSpeechForPlayer(room.speeches, player.id)?.text} />
+                <SpeechBubble text={latestSpeechForPlayer(room.speeches, player.id)?.text} />
                 <p className="mt-2 min-h-10 text-sm leading-6 text-[#fff8e8]/72">
                   {player.ai?.personality ?? (player.kind === 'guest' ? t('xiangqi.guestReady') : t('xiangqi.oidcReady'))}
                 </p>
@@ -261,8 +281,8 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
 function UnoShell({ children }: { children: ReactNode }) {
   const { t } = useI18n()
   return (
-    <main className="h-svh overflow-hidden bg-[#15110e] text-[#fff8e8]">
-      <div className="mx-auto grid h-full w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3">
+    <main className="min-h-svh overflow-y-auto bg-[#15110e] text-[#fff8e8] lg:h-svh lg:overflow-hidden">
+      <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3 lg:h-full lg:min-h-0">
         <header className="flex items-end justify-between gap-4">
           <div>
             <p className="mb-1 text-xs font-black tracking-normal text-[#fff8e8]/75">LAN UNO TABLE</p>
@@ -320,30 +340,4 @@ function OptionGroup({
       </div>
     </fieldset>
   )
-}
-
-function variantLabel(key: string | undefined, t: (key: string) => string) {
-  return key ? unoVariantOption(key, t).name : t('uno.classicVariant')
-}
-
-function themeLabel(key: string | undefined, t: (key: string) => string) {
-  return key ? unoThemeOption(key, t).name : t('uno.classicTheme')
-}
-
-function unoVariantOption(key: string, t: (key: string) => string) {
-  const normalizedKey = key.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
-  return {
-    description: t(`uno.variants.${normalizedKey}.description`),
-    key,
-    name: t(`uno.variants.${normalizedKey}.name`),
-  }
-}
-
-function unoThemeOption(key: string, t: (key: string) => string) {
-  const normalizedKey = key.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
-  return {
-    description: t(`uno.themes.${normalizedKey}.description`),
-    key,
-    name: t(`uno.themes.${normalizedKey}.name`),
-  }
 }

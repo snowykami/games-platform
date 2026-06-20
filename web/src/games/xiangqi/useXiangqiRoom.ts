@@ -1,7 +1,7 @@
 import type { XiangqiOnlineRoom } from './online'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/context'
-import { addXiangqiAI, joinXiangqiRoom, moveXiangqiPiece, sayXiangqi, startXiangqiRoom, updateXiangqiAI } from './online'
+import { addXiangqiAI, joinXiangqiRoom, moveXiangqiPiece, removeXiangqiPlayer, sayXiangqi, startXiangqiRoom, updateXiangqiAI } from './online'
 
 export function useXiangqiRoom(roomId: string | undefined) {
   const { t } = useI18n()
@@ -82,6 +82,7 @@ export function useXiangqiRoom(roomId: string | undefined) {
     addAI: (level: string) => roomId ? run(() => addXiangqiAI(roomId, level)) : Promise.resolve(),
     move: (pieceId: string, x: number, y: number) => roomId ? run(() => moveXiangqiPiece(roomId, pieceId, x, y)) : Promise.resolve(),
     refresh,
+    removePlayer: (playerId: string) => roomId ? run(() => removeXiangqiPlayer(roomId, playerId)) : Promise.resolve(),
     say: (text: string) => roomId ? run(() => sayXiangqi(roomId, text)) : Promise.resolve(),
     start: () => roomId ? run(() => startXiangqiRoom(roomId)) : Promise.resolve(),
     updateAI: (playerId: string, level: string) => roomId ? run(() => updateXiangqiAI(roomId, playerId, level)) : Promise.resolve(),

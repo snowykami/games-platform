@@ -1,7 +1,7 @@
 import type { FormEvent, ReactNode } from 'react'
 import type { MahjongClaimOption, MahjongOnlinePlayer, MahjongOnlineRoom, MahjongOnlineTile, MahjongOnlineWinResult, MahjongSpeechEntry, MahjongWind } from './online'
 import type { AILevel } from '@/games/ai'
-import { ArrowLeft, Bot, CircleDot, Copy, DoorOpen, Hand, Plus, RefreshCw, ScrollText, Sparkles } from 'lucide-react'
+import { ArrowLeft, Bot, CircleDot, Copy, DoorOpen, Hand, Plus, RefreshCw, ScrollText, Sparkles, UserMinus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
@@ -9,6 +9,7 @@ import { getAICapabilities, getAILevelLabel } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { AILevelPicker } from '@/games/AILevelPicker'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { cn } from '@/shared/lib/utils'
 import { createMahjongRoom } from './online'
 import { useMahjongRoom } from './useMahjongRoom'
@@ -26,11 +27,13 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
   const [pendingAI, setPendingAI] = useState(false)
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
+  const [llmModel, setLLMModel] = useState('')
   const isHost = Boolean(user && room?.hostUserId === user.id)
 
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
       setLLMEnabled(capabilities.llmEnabled)
+      setLLMModel(capabilities.model ?? '')
       if (!capabilities.llmEnabled && aiLevel === 'ai') {
         setAILevel('normal')
       }
@@ -157,25 +160,44 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {isLoading && <p className="text-sm font-bold text-[#fff8e8]/70">正在连接...</p>}
             {room?.players.map(player => (
-              <article key={player.id} className="rounded-lg border border-[#d8b66a]/25 bg-[#10251f]/72 p-4">
+              <article key={player.id} className="relative rounded-lg border border-[#d8b66a]/25 bg-[#10251f]/72 p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <strong className="truncate text-lg">{player.name}</strong>
-                  {player.ai
-                    ? (
-                        <AILevelBadgeSelect
-                          disabled={!isHost || room.phase !== 'lobby'}
-                          level={player.ai.level}
-                          llmEnabled={llmEnabled}
-                          palette="mahjong"
-                          onChange={level => void actions.updateAI(player.id, level)}
-                        />
-                      )
-                    : (
-                        <span className="rounded-full bg-[#ffd166] px-2 py-0.5 text-xs font-black text-[#143128]">
-                          {player.role === 'host' ? '房主' : player.connected ? '在线' : '离线'}
-                        </span>
-                      )}
+                  <div className="flex min-w-0 items-center gap-2">
+                    <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
+                    <strong className="truncate text-lg">{player.name}</strong>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {player.userId === user?.id && <SpeechButton palette="mahjong" onSend={actions.say} />}
+                    {player.ai
+                      ? (
+                          <AILevelBadgeSelect
+                            disabled={!isHost || room.phase !== 'lobby'}
+                            level={player.ai.level}
+                            llmEnabled={llmEnabled}
+                            llmModel={llmModel}
+                            palette="mahjong"
+                            onChange={level => void actions.updateAI(player.id, level)}
+                          />
+                        )
+                      : (
+                          <span className="rounded-full bg-[#ffd166] px-2 py-0.5 text-xs font-black text-[#143128]">
+                            {player.role === 'host' ? '房主' : player.connected ? '在线' : '离线'}
+                          </span>
+                        )}
+                    {isHost && room.phase === 'lobby' && player.role !== 'host' && (
+                      <button
+                        aria-label="移除玩家"
+                        className="mahjong-action min-h-7 px-2"
+                        title="移除玩家"
+                        type="button"
+                        onClick={() => void actions.removePlayer(player.id)}
+                      >
+                        <UserMinus className="size-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
+                <SpeechBubble text={latestSpeechForPlayer(room.speeches, player.id)?.text} />
                 <p className="mt-2 min-h-10 text-sm leading-6 text-[#fff8e8]/72">
                   {player.ai?.personality ?? '准备入座。'}
                 </p>
@@ -184,7 +206,7 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
           </div>
 
           <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end">
-            <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} palette="dark" onChange={setAILevel} />
+            <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} llmModel={llmModel} palette="dark" onChange={setAILevel} />
             <button
               className={cn('mahjong-action', pendingAI && 'loading')}
               disabled={pendingAI || !isHost || !room || room.players.length >= 4}
@@ -296,14 +318,14 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
 
           <PlayerPanel className="lg:col-start-3 lg:row-start-2" currentPlayerId={currentPlayer.id} player={room.players[1]} speech={latestSpeechForPlayer(room.speeches, room.players[1]?.id)?.text} />
 
-          <section className="grid min-h-0 gap-3 rounded-lg border border-[#d8b66a]/35 bg-[#081914]/82 p-3 lg:col-span-3 lg:row-start-3">
+          <section className="relative grid min-h-0 gap-3 rounded-lg border border-[#d8b66a]/35 bg-[#081914]/82 p-3 lg:col-span-3 lg:row-start-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <strong className="text-lg">你的手牌</strong>
                 <p className="text-sm font-bold text-[#fff8e8]/70">
                   {room.phase === 'claiming' ? '可以声明吃、碰或胡。' : canHumanDiscard ? '选择一张牌打出。' : canHumanDraw ? '轮到你摸牌。' : `等待 ${currentPlayer.name}。`}
                 </p>
-                <SpeechBubble className="mt-2" text={latestSpeechForPlayer(room.speeches, human.id)?.text} />
+                <SpeechBubble text={latestSpeechForPlayer(room.speeches, human.id)?.text} />
               </div>
               <div className="flex flex-wrap gap-2">
                 <SpeechButton palette="mahjong" onSend={actions.say} />
@@ -354,8 +376,8 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
 
 function MahjongShell({ children }: { children: ReactNode }) {
   return (
-    <main className="min-h-svh overflow-hidden bg-[#1b342b] text-[#fff8e8]">
-      <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3">
+    <main className="min-h-svh overflow-y-auto bg-[#1b342b] text-[#fff8e8] lg:overflow-hidden">
+      <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3 lg:h-svh lg:min-h-0">
         <header className="flex items-end justify-between gap-4">
           <div>
             <p className="mb-1 text-xs font-black tracking-normal text-[#ffd166]">ONLINE MAHJONG TABLE</p>
@@ -379,10 +401,11 @@ function PlayerPanel({ className, currentPlayerId, player, speech }: { className
   const isCurrent = currentPlayerId === player.id
 
   return (
-    <article className={cn('grid min-h-32 content-between rounded-lg border border-[#d8b66a]/35 bg-[#081914]/72 p-3 shadow-[0_18px_40px_rgba(0,0,0,0.18)]', isCurrent && 'ring-2 ring-[#ffd166]', className)}>
+    <article className={cn('relative grid min-h-32 content-between rounded-lg border border-[#d8b66a]/35 bg-[#081914]/72 p-3 shadow-[0_18px_40px_rgba(0,0,0,0.18)]', isCurrent && 'ring-2 ring-[#ffd166]', className)}>
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="flex items-center gap-2">
+            <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
             <strong>{player.name}</strong>
             <span className="rounded-full bg-[#ffd166] px-2 py-0.5 text-xs font-black text-[#143128]">
               {formatWind(player.wind)}

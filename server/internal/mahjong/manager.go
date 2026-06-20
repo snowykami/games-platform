@@ -82,6 +82,7 @@ func (m *Manager) JoinRoom(roomID string, user UserView) (PublicRoom, error) {
 	}
 
 	player.Connected = true
+	player.DisconnectedAt = nil
 	room.UpdatedAt = time.Now().UTC()
 	return publicRoom(room, user.ID), nil
 }
@@ -94,8 +95,12 @@ func (m *Manager) Leave(roomID string, userID string) {
 	if err != nil {
 		return
 	}
+	now := time.Now().UTC()
 	if player := findPlayerByUserID(room, userID); player != nil {
 		player.Connected = false
+		if !player.IsAI {
+			player.DisconnectedAt = &now
+		}
 	}
 }
 
@@ -163,6 +168,34 @@ func (m *Manager) UpdateAI(roomID string, actorID string, playerID string, optio
 	player.AI.Level = string(level)
 	room.UpdatedAt = time.Now().UTC()
 	return publicRoom(room, actorID), nil
+}
+
+func (m *Manager) RemovePlayer(roomID string, actorID string, playerID string) (PublicRoom, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	room, err := m.room(roomID)
+	if err != nil {
+		return PublicRoom{}, err
+	}
+	if room.HostUserID != actorID {
+		return PublicRoom{}, errors.New("only_host_remove_player")
+	}
+	if room.Phase != PhaseLobby {
+		return PublicRoom{}, errors.New("remove_player_only_lobby")
+	}
+	for index, player := range room.Players {
+		if player.ID != playerID {
+			continue
+		}
+		if player.UserID == room.HostUserID || player.Role == "host" {
+			return PublicRoom{}, errors.New("cannot_remove_host")
+		}
+		room.Players = append(room.Players[:index], room.Players[index+1:]...)
+		room.Log = append(room.Log, createLog(fmt.Sprintf("%s 被房主移出了房间。", player.Name)))
+		room.UpdatedAt = time.Now().UTC()
+		return publicRoom(room, actorID), nil
+	}
+	return PublicRoom{}, errors.New("player_not_found")
 }
 
 func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, error) {
@@ -347,7 +380,6 @@ func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
 
 	tile := chooseAIDiscard(player)
 	discardTile(room, player, tile.ID)
-	recordSpeech(room, player, "先打这张，稳住牌型。")
 	room.UpdatedAt = time.Now().UTC()
 	shouldContinue := room.Phase == PhasePlaying && room.Players[room.CurrentPlayerIndex].IsAI
 	return publicRoom(room, ""), shouldContinue, nil
@@ -613,19 +645,20 @@ func publicRoom(room *Room, viewerID string) PublicRoom {
 			hand = append([]Tile{}, player.Hand...)
 		}
 		players = append(players, PublicPlayer{
-			ID:        player.ID,
-			UserID:    player.UserID,
-			Name:      player.Name,
-			Role:      player.Role,
-			Kind:      player.Kind,
-			IsAI:      player.IsAI,
-			Connected: player.Connected,
-			AI:        player.AI,
-			Wind:      player.Wind,
-			Hand:      hand,
-			HandCount: len(player.Hand),
-			Melds:     append([]Meld{}, player.Melds...),
-			Discards:  append([]Tile{}, player.Discards...),
+			ID:             player.ID,
+			UserID:         player.UserID,
+			Name:           player.Name,
+			Role:           player.Role,
+			Kind:           player.Kind,
+			IsAI:           player.IsAI,
+			Connected:      player.Connected,
+			DisconnectedAt: player.DisconnectedAt,
+			AI:             player.AI,
+			Wind:           player.Wind,
+			Hand:           hand,
+			HandCount:      len(player.Hand),
+			Melds:          append([]Meld{}, player.Melds...),
+			Discards:       append([]Tile{}, player.Discards...),
 		})
 	}
 	currentPlayerID := ""
@@ -878,17 +911,16 @@ func createHumanPlayer(user UserView, role string) *Player {
 }
 
 func nextAIProfile(room *Room, level aiplayer.Level) AIProfile {
-	names := []string{"南山", "西楼", "北川", "青灯"}
-	index := 0
+	profile := aiplayer.NextProfile(usedAINames(room))
+	return AIProfile{Name: profile.Name, Personality: profile.Personality, SpeechStyle: profile.SpeechStyle, Level: string(level)}
+}
+
+func usedAINames(room *Room) map[string]bool {
+	used := map[string]bool{}
 	for _, player := range room.Players {
-		if player.IsAI {
-			index++
-		}
+		used[player.Name] = true
 	}
-	if index >= len(names) {
-		index = len(names) - 1
-	}
-	return AIProfile{Name: names[index], Personality: "稳健型麻将 AI，会优先保留搭子和对子。", Level: string(level)}
+	return used
 }
 
 func findPlayerByUserID(room *Room, userID string) *Player {

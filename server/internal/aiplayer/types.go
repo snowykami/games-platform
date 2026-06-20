@@ -27,6 +27,7 @@ type DecisionInput struct {
 	SessionID   string        `json:"sessionId"`
 	PlayerName  string        `json:"playerName"`
 	Personality string        `json:"personality"`
+	SpeechStyle string        `json:"speechStyle,omitempty"`
 	State       any           `json:"state"`
 	Actions     []LegalAction `json:"actions"`
 }

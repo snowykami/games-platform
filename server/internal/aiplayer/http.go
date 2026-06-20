@@ -15,8 +15,10 @@ type Handler struct {
 }
 
 type capabilitiesResponse struct {
-	LLMEnabled bool    `json:"llmEnabled"`
-	Levels     []Level `json:"levels"`
+	LLMEnabled bool         `json:"llmEnabled"`
+	Levels     []Level      `json:"levels"`
+	Model      string       `json:"model,omitempty"`
+	Profiles   []BotProfile `json:"profiles"`
 }
 
 type decideRequest struct {
@@ -25,6 +27,7 @@ type decideRequest struct {
 	SessionID   string        `json:"sessionId"`
 	PlayerName  string        `json:"playerName"`
 	Personality string        `json:"personality"`
+	SpeechStyle string        `json:"speechStyle"`
 	State       any           `json:"state"`
 	Actions     []LegalAction `json:"actions"`
 }
@@ -50,8 +53,12 @@ func (h *Handler) capabilities(w http.ResponseWriter, _ *http.Request) {
 	if llmEnabled {
 		levels = append(levels, LevelLLM)
 	}
+	model := ""
+	if modelProvider, ok := h.provider.(interface{ ModelName() string }); ok {
+		model = modelProvider.ModelName()
+	}
 
-	httpx.WriteJSON(w, http.StatusOK, capabilitiesResponse{LLMEnabled: llmEnabled, Levels: levels})
+	httpx.WriteJSON(w, http.StatusOK, capabilitiesResponse{LLMEnabled: llmEnabled, Levels: levels, Model: model, Profiles: Profiles()})
 }
 
 func (h *Handler) decide(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +76,7 @@ func (h *Handler) decide(w http.ResponseWriter, r *http.Request) {
 		SessionID:   request.SessionID,
 		PlayerName:  request.PlayerName,
 		Personality: request.Personality,
+		SpeechStyle: request.SpeechStyle,
 		State:       request.State,
 		Actions:     request.Actions,
 	}

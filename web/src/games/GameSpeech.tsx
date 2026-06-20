@@ -22,7 +22,7 @@ export function SpeechBubble({ className, text }: SpeechBubbleProps) {
   }
 
   return (
-    <p className={cn('max-w-52 rounded-lg border border-white/18 bg-[#fff8e8] px-2.5 py-1.5 text-xs font-black leading-5 text-[#171411] shadow-[0_12px_30px_rgba(0,0,0,0.22)]', className)}>
+    <p className={cn('pointer-events-none absolute left-3 top-0 z-50 max-w-56 -translate-y-[calc(100%+8px)] rounded-2xl border border-black/10 bg-[#fff8e8] px-3 py-2 text-xs font-black leading-5 text-[#171411] shadow-[0_16px_34px_rgba(0,0,0,0.3)] after:absolute after:left-5 after:top-full after:size-3 after:-translate-y-1/2 after:rotate-45 after:border-b after:border-r after:border-black/10 after:bg-[#fff8e8]', className)}>
       {text}
     </p>
   )

@@ -151,6 +151,77 @@ func TestJumpInOnlyAllowsExactSameFace(t *testing.T) {
 	}
 }
 
+func TestTickAutoActsAfterTurnTimeout(t *testing.T) {
+	now := time.Now().UTC()
+	deadline := now.Add(-time.Second)
+	manager := NewManager(nil)
+	manager.rooms["ROOMT"] = &Room{
+		ID:    "ROOMT",
+		Phase: PhasePlaying,
+		Players: []*Player{
+			{
+				ID:        "player-1",
+				UserID:    "user-1",
+				Name:      "一号",
+				Connected: true,
+				Hand: []Card{
+					numberCard("green-5", ColorGreen, 5),
+					numberCard("red-1", ColorRed, 1),
+				},
+			},
+			{ID: "player-2", UserID: "user-2", Name: "二号", Connected: true},
+		},
+		CurrentPlayerIndex: 0,
+		Direction:          1,
+		ActiveColor:        ColorGreen,
+		DiscardPile:        []Card{numberCard("green-1", ColorGreen, 1)},
+		TurnDeadline:       &deadline,
+	}
+
+	result := manager.Tick(now)
+
+	if len(result.BroadcastRoomIDs) == 0 {
+		t.Fatal("tick should request a room broadcast after timeout")
+	}
+	room := manager.rooms["ROOMT"]
+	if room.CurrentPlayerIndex != 1 {
+		t.Fatalf("current player index = %d, want timeout to advance to player 2", room.CurrentPlayerIndex)
+	}
+	if len(room.Players[0].Hand) != 1 {
+		t.Fatalf("timed out player hand size = %d, want 1 after auto play", len(room.Players[0].Hand))
+	}
+	if got := room.DiscardPile[len(room.DiscardPile)-1].ID; got != "green-5" {
+		t.Fatalf("top discard = %q, want first legal card green-5", got)
+	}
+	if room.TurnDeadline == nil || !room.TurnDeadline.After(now) {
+		t.Fatal("turn deadline should be refreshed after timeout action")
+	}
+}
+
+func TestTickDestroysRoomAfterAllHumansOffline(t *testing.T) {
+	now := time.Now().UTC()
+	offlineSince := now.Add(-offlineRoomTTL - time.Second)
+	manager := NewManager(nil)
+	manager.rooms["ROOMX"] = &Room{
+		ID:    "ROOMX",
+		Phase: PhaseLobby,
+		Players: []*Player{
+			{ID: "player-1", UserID: "user-1", Name: "一号", Connected: false},
+			{ID: "ai-1", UserID: "ai-user-1", Name: "AI", IsAI: true, Connected: true},
+		},
+		AllHumansOfflineSince: &offlineSince,
+	}
+
+	result := manager.Tick(now)
+
+	if len(result.DestroyedRoomIDs) != 1 || result.DestroyedRoomIDs[0] != "ROOMX" {
+		t.Fatalf("destroyed rooms = %v, want ROOMX", result.DestroyedRoomIDs)
+	}
+	if _, err := manager.Public("ROOMX", "user-1"); err == nil {
+		t.Fatal("destroyed room should no longer be public")
+	}
+}
+
 func TestLLMAITurnDoesNotBlockOtherRooms(t *testing.T) {
 	provider := &blockingProvider{
 		started: make(chan struct{}, 1),

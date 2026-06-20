@@ -6,9 +6,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
+import { UnoVariantInfoButton } from './UnoVariantInfo'
 import { useUnoRoom } from './useUnoRoom'
 
 const UNO_COLORS: UnoColor[] = ['red', 'yellow', 'green', 'blue']
@@ -152,8 +154,8 @@ export function UnoPage({ roomId }: { roomId: string }) {
   }
 
   return (
-    <main className="h-svh overflow-hidden bg-[#15110e] text-[#fff8e8]">
-      <div className="mx-auto grid h-full w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_auto_minmax(0,1fr)] gap-2 py-2 sm:gap-3 sm:py-3">
+    <main className="min-h-svh overflow-y-auto bg-[#15110e] text-[#fff8e8] lg:h-svh lg:overflow-hidden">
+      <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_auto_minmax(0,1fr)] gap-2 py-2 sm:gap-3 sm:py-3 lg:h-full lg:min-h-0">
         <header className="flex min-h-0 items-end justify-between gap-4">
           <div>
             <p className="mb-1 text-[11px] font-black tracking-normal text-[#fff8e8]/75 sm:text-xs">ONLINE UNO TABLE</p>
@@ -181,6 +183,11 @@ export function UnoPage({ roomId }: { roomId: string }) {
               {t('uno.turn')}
               {currentPlayer?.name ?? '-'}
             </StatusPill>
+            {room.phase === 'playing' && room.turnDeadline && (
+              <StatusPill>
+                {t('uno.turnCountdown', { seconds: room.turnRemainingSeconds })}
+              </StatusPill>
+            )}
             <StatusPill>
               <span>{t('uno.currentColor')}</span>
               {room.activeColor ? <ColorDot color={room.activeColor} /> : <span>-</span>}
@@ -197,6 +204,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
               {t('common.room')}
               {room.id}
             </StatusPill>
+            <UnoVariantInfoButton variantKey={room.variantKey} />
             {room.pendingDrawCount > 0 && (
               <StatusPill>
                 {t('uno.penalty')}
@@ -406,10 +414,13 @@ function PlayerSeat({
       )}
       style={seatStyle(index, total)}
     >
-      <div className="flex max-w-full items-center gap-1 text-sm font-black text-[#fff8e8] max-[560px]:text-xs">
-        <span className="min-w-0 truncate">{player.name}</span>
+      <div className="flex w-full min-w-0 items-center justify-center gap-1 text-sm font-black text-[#fff8e8] max-[560px]:text-xs">
+        <div className="flex min-w-0 items-center gap-1">
+          <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
+          <span className="min-w-0 truncate">{player.name}</span>
+        </div>
         {player.role === 'host' && <HostBadge />}
-        {player.isAI && <span className="shrink-0 rounded-full bg-[#fff8e8] px-1.5 text-[11px] text-[#171411]">AI</span>}
+        {player.isAI && <span className="shrink-0 rounded-full bg-[#fff8e8] px-1.5 text-[10px] leading-5 text-[#171411]">AI</span>}
         {isSelf && <SpeechButton className="ml-1" onSend={onSpeak} />}
       </div>
       <SpeechBubble className="max-w-[130px] sm:max-w-[170px]" text={speech} />
@@ -516,15 +527,23 @@ function MiniBackHand({ count }: { count: number }) {
   const cardKeys = Array.from({ length: visible }, (_, slot) => `back-${count}-${slot}`)
 
   return (
-    <div className="flex min-h-8 w-20 items-center justify-center sm:min-h-10 sm:w-28 lg:w-36">
-      {cardKeys.map((key, index) => (
-        <span
-          key={key}
-          className="uno-mini-card-back h-7 w-[18px] rounded-[5px] sm:h-8 sm:w-[21px] lg:h-[38px] lg:w-[25px]"
-          style={{ marginLeft: index === 0 ? 0 : -9, transform: `translateY(${index % 3 * 2}px)` }}
-        />
-      ))}
-    </div>
+    <>
+      <div className="relative grid min-h-8 w-12 place-items-center sm:hidden">
+        <span className="uno-mini-card-back h-8 w-[22px] rounded-[5px]" />
+        <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full border border-[#15110e] bg-[#fff8e8] px-1 text-[11px] font-black leading-none text-[#15110e]">
+          {count}
+        </span>
+      </div>
+      <div className="hidden min-h-10 w-28 items-center justify-center sm:flex lg:w-36">
+        {cardKeys.map((key, index) => (
+          <span
+            key={key}
+            className="uno-mini-card-back h-8 w-[21px] rounded-[5px] lg:h-[38px] lg:w-[25px]"
+            style={{ marginLeft: index === 0 ? 0 : -9, transform: `translateY(${index % 3 * 2}px)` }}
+          />
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -545,7 +564,7 @@ function UnoCardView({ card, className }: { card: UnoCard, className?: string })
 
 function HostBadge() {
   const { t } = useI18n()
-  return <span className="rounded-full bg-[#fff8e8] px-1.5 text-[11px] text-[#171411]">{t('uno.host')}</span>
+  return <span className="shrink-0 whitespace-nowrap rounded-full bg-[#fff8e8] px-1.5 text-[10px] leading-5 text-[#171411]">{t('uno.host')}</span>
 }
 
 function formatColor(color: UnoColor, t: (key: string) => string) {

@@ -37,6 +37,10 @@ func (p *OpenAIProvider) Enabled() bool {
 	return p.api != "" && p.model != "" && p.token != ""
 }
 
+func (p *OpenAIProvider) ModelName() string {
+	return p.model
+}
+
 func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decision, error) {
 	if !p.Enabled() {
 		return Decision{}, errors.New("llm provider is not configured")
@@ -50,7 +54,7 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 		Messages: []chatMessage{
 			{
 				Role:    "system",
-				Content: "You are a game AI. You must choose exactly one action from the provided legal actions. Do not invent actions. Reply only by calling choose_action.",
+				Content: "You are a multiplayer tabletop game AI. Choose exactly one action from the provided legal actions and never invent actions. If you speak, keep it natural, short, and like a normal player at the table; avoid cringe roleplay, catchphrases, exposition, and overacting. It is fine to leave speech empty. Reply only by calling choose_action.",
 			},
 			{
 				Role:    "user",
@@ -213,7 +217,7 @@ func chooseActionTool() toolSpec {
 					},
 					"speech": map[string]any{
 						"type":        "string",
-						"description": "Optional short in-character table talk. Leave empty if the AI should stay silent.",
+						"description": "Optional natural table talk in Chinese, no more than 24 Chinese characters. Leave empty if silence is better.",
 					},
 				},
 				"required":             []string{"actionId"},

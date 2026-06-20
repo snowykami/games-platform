@@ -12,9 +12,11 @@ export interface GomokuPlayer {
   kind: 'guest' | 'oidc' | 'ai'
   isAI: boolean
   connected: boolean
+  disconnectedAt?: string
   ai?: {
     name: string
     personality: string
+    speechStyle?: string
     level: string
   }
   stone?: GomokuStone
@@ -72,9 +74,11 @@ const playerSchema = z.object({
   kind: z.enum(['guest', 'oidc', 'ai']),
   isAI: z.boolean(),
   connected: z.boolean(),
+  disconnectedAt: z.string().optional(),
   ai: z.object({
     name: z.string(),
     personality: z.string(),
+    speechStyle: z.string().optional(),
     level: z.string(),
   }).optional(),
   stone: stoneSchema.optional(),
@@ -154,6 +158,10 @@ export async function updateGomokuAI(roomId: string, playerId: string, level: st
     headers: { 'Content-Type': 'application/json' },
     method: 'PATCH',
   })
+}
+
+export async function removeGomokuPlayer(roomId: string, playerId: string) {
+  return requestRoom(`/api/gomoku/rooms/${encodeURIComponent(roomId)}/players/${encodeURIComponent(playerId)}`, { method: 'DELETE' })
 }
 
 export async function sayGomoku(roomId: string, text: string) {

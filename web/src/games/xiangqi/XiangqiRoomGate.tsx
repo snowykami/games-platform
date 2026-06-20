@@ -1,6 +1,6 @@
 import type { FormEvent, ReactNode } from 'react'
 import type { AILevel } from '@/games/ai'
-import { ArrowLeft, Bot, Copy, DoorOpen, Plus, Sparkles } from 'lucide-react'
+import { ArrowLeft, Bot, Copy, DoorOpen, Plus, Sparkles, UserMinus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
@@ -8,6 +8,7 @@ import { getAICapabilities, getAILevelLabel } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { AILevelPicker } from '@/games/AILevelPicker'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
@@ -29,6 +30,7 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
   const [pendingAI, setPendingAI] = useState(false)
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
+  const [llmModel, setLLMModel] = useState('')
   const isHost = Boolean(user && room?.hostUserId === user.id)
 
   useEffect(() => {
@@ -38,6 +40,7 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
         return
       }
       setLLMEnabled(capabilities.llmEnabled)
+      setLLMModel(capabilities.model ?? '')
       setAILevel(current => current === 'ai' && !capabilities.llmEnabled ? 'normal' : current)
     })
     return () => {
@@ -163,7 +166,7 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
                 {t('common.copyLink')}
               </button>
               <div className="grid min-w-[250px] grid-cols-[minmax(120px,1fr)_auto] items-end gap-2">
-                <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} palette="xiangqi" onChange={setAILevel} />
+                <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} llmModel={llmModel} palette="xiangqi" onChange={setAILevel} />
                 <button
                   className={cn('xiangqi-button', pendingAI && 'loading')}
                   disabled={pendingAI || !isHost || !room || room.players.length >= 2}
@@ -180,9 +183,12 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
           <div className="grid content-start gap-3 overflow-auto pr-1 sm:grid-cols-2">
             {isLoading && <p className="text-sm font-bold text-[#fff8e8]/70">{t('room.connecting')}</p>}
             {room?.players.map(player => (
-              <article key={player.id} className="rounded-lg border border-[#fff8e8]/18 bg-[#10100d]/58 p-4 shadow-[0_16px_34px_rgba(0,0,0,0.18)]">
+              <article key={player.id} className="relative rounded-lg border border-[#fff8e8]/18 bg-[#10100d]/58 p-4 shadow-[0_16px_34px_rgba(0,0,0,0.18)]">
                 <div className="flex items-center justify-between gap-3">
-                  <strong className="truncate text-lg">{player.name}</strong>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
+                    <strong className="truncate text-lg">{player.name}</strong>
+                  </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {player.userId === user?.id && <SpeechButton palette="xiangqi" onSend={actions.say} />}
                     {player.ai
@@ -191,6 +197,7 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
                             disabled={!isHost || room.phase !== 'lobby'}
                             level={player.ai.level}
                             llmEnabled={llmEnabled}
+                            llmModel={llmModel}
                             palette="xiangqi"
                             onChange={level => void actions.updateAI(player.id, level)}
                           />
@@ -200,9 +207,20 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
                             {player.role === 'host' ? t('common.host') : player.connected ? t('common.online') : t('common.offline')}
                           </span>
                         )}
+                    {isHost && room.phase === 'lobby' && player.role !== 'host' && (
+                      <button
+                        aria-label={t('common.removePlayer')}
+                        className="xiangqi-button min-h-7 px-2"
+                        title={t('common.removePlayer')}
+                        type="button"
+                        onClick={() => void actions.removePlayer(player.id)}
+                      >
+                        <UserMinus className="size-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
-                <SpeechBubble className="mt-3" text={latestSpeechForPlayer(room.speeches, player.id)?.text} />
+                <SpeechBubble text={latestSpeechForPlayer(room.speeches, player.id)?.text} />
                 <p className="mt-2 min-h-10 text-sm leading-6 text-[#fff8e8]/72">
                   {player.ai?.personality ?? (player.kind === 'guest' ? t('xiangqi.guestReady') : t('xiangqi.oidcReady'))}
                 </p>
@@ -233,8 +251,8 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
 function XiangqiShell({ children }: { children: ReactNode }) {
   const { t } = useI18n()
   return (
-    <main className="min-h-svh overflow-hidden bg-[#202018] text-[#fff8e8]">
-      <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3">
+    <main className="min-h-svh overflow-y-auto bg-[#202018] text-[#fff8e8] lg:overflow-hidden">
+      <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3 lg:h-svh lg:min-h-0">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="mb-1 text-xs font-black tracking-normal text-[#f2d59a]/80">ONLINE XIANGQI ROOM</p>

@@ -15,8 +15,10 @@ import (
 )
 
 const (
-	minPlayers = 2
-	maxPlayers = 10
+	minPlayers     = 2
+	maxPlayers     = 10
+	turnTimeout    = 30 * time.Second
+	offlineRoomTTL = 60 * time.Second
 )
 
 var colors = []Color{ColorRed, ColorYellow, ColorGreen, ColorBlue}
@@ -25,6 +27,12 @@ type Manager struct {
 	aiProvider aiplayer.Provider
 	mu         sync.RWMutex
 	rooms      map[string]*Room
+}
+
+type TickResult struct {
+	BroadcastRoomIDs  []string
+	ScheduleAIRoomIDs []string
+	DestroyedRoomIDs  []string
 }
 
 func NewManager(aiProvider aiplayer.Provider) *Manager {
@@ -76,6 +84,8 @@ func (m *Manager) JoinRoom(roomID string, user UserView) (PublicRoom, error) {
 	}
 
 	player.Connected = true
+	player.DisconnectedAt = nil
+	room.AllHumansOfflineSince = nil
 	room.UpdatedAt = time.Now().UTC()
 	return publicRoom(room, user.ID), nil
 }
@@ -87,9 +97,14 @@ func (m *Manager) Leave(roomID string, userID string) {
 	}
 	defer room.mu.Unlock()
 
+	now := time.Now().UTC()
 	if player := findPlayerByUserID(room, userID); player != nil {
 		player.Connected = false
+		if !player.IsAI {
+			player.DisconnectedAt = &now
+		}
 	}
+	updateAllHumansOfflineSince(room, now)
 }
 
 func (m *Manager) AddAI(roomID string, actorID string, options AIOptions) (PublicRoom, error) {
@@ -156,6 +171,34 @@ func (m *Manager) UpdateAI(roomID string, actorID string, playerID string, optio
 	return publicRoom(room, actorID), nil
 }
 
+func (m *Manager) RemovePlayer(roomID string, actorID string, playerID string) (PublicRoom, error) {
+	room, err := m.lockRoom(roomID)
+	if err != nil {
+		return PublicRoom{}, err
+	}
+	defer room.mu.Unlock()
+	if room.HostUserID != actorID {
+		return PublicRoom{}, errors.New("only_host_remove_player")
+	}
+	if room.Phase != PhaseLobby {
+		return PublicRoom{}, errors.New("remove_player_only_lobby")
+	}
+	index := slices.IndexFunc(room.Players, func(player *Player) bool {
+		return player.ID == playerID
+	})
+	if index < 0 {
+		return PublicRoom{}, errors.New("player_not_found")
+	}
+	player := room.Players[index]
+	if player.UserID == room.HostUserID || player.Role == "host" {
+		return PublicRoom{}, errors.New("cannot_remove_host")
+	}
+	room.Players = slices.Delete(room.Players, index, index+1)
+	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 被房主移出了房间。", player.Name)))
+	room.UpdatedAt = time.Now().UTC()
+	return publicRoom(room, actorID), nil
+}
+
 func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, error) {
 	room, err := m.lockRoom(roomID)
 	if err != nil {
@@ -198,6 +241,7 @@ func (m *Manager) Start(roomID string, actorID string) (PublicRoom, error) {
 	room.PendingDrawCount = 0
 	room.PendingDrawKind = ""
 	room.FlipSide = false
+	room.TurnDeadline = nil
 	room.Phase = PhasePlaying
 	room.Log = append(room.Log, createLog("游戏开始。"))
 	for _, player := range room.Players {
@@ -216,6 +260,7 @@ func (m *Manager) Start(roomID string, actorID string) (PublicRoom, error) {
 	}
 
 	room.UpdatedAt = time.Now().UTC()
+	refreshTurnDeadline(room, room.UpdatedAt)
 	return publicRoom(room, actorID), nil
 }
 
@@ -255,6 +300,7 @@ func (m *Manager) Play(roomID string, actorID string, cardID string, color Color
 
 	playCard(room, player, cardIndex, color)
 	room.UpdatedAt = time.Now().UTC()
+	refreshTurnDeadline(room, room.UpdatedAt)
 	return publicRoom(room, actorID), nil
 }
 
@@ -379,6 +425,7 @@ func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
 	recordSpeech(room, player, speech)
 
 	room.UpdatedAt = time.Now().UTC()
+	refreshTurnDeadline(room, room.UpdatedAt)
 	shouldContinue := room.Phase == PhasePlaying && len(room.Players) > 0 && room.Players[room.CurrentPlayerIndex].IsAI
 	slog.Info("uno ai turn completed",
 		"room", room.ID,
@@ -390,6 +437,49 @@ func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
 		"continue", shouldContinue,
 	)
 	return publicRoom(room, ""), shouldContinue, nil
+}
+
+func (m *Manager) Tick(now time.Time) TickResult {
+	now = now.UTC()
+	m.mu.RLock()
+	rooms := make([]*Room, 0, len(m.rooms))
+	for _, room := range m.rooms {
+		rooms = append(rooms, room)
+	}
+	m.mu.RUnlock()
+
+	result := TickResult{}
+	for _, room := range rooms {
+		room.mu.Lock()
+		roomID := room.ID
+		destroy := shouldDestroyOfflineRoom(room, now)
+		if destroy {
+			room.mu.Unlock()
+			result.DestroyedRoomIDs = append(result.DestroyedRoomIDs, roomID)
+			continue
+		}
+
+		if room.Phase == PhasePlaying && len(room.Players) > 0 {
+			result.BroadcastRoomIDs = append(result.BroadcastRoomIDs, roomID)
+			if applyTimeoutTurn(room, now) {
+				result.ScheduleAIRoomIDs = append(result.ScheduleAIRoomIDs, roomID)
+			}
+			if room.Phase == PhasePlaying && len(room.Players) > 0 && room.Players[room.CurrentPlayerIndex].IsAI {
+				result.ScheduleAIRoomIDs = append(result.ScheduleAIRoomIDs, roomID)
+			}
+		}
+		room.mu.Unlock()
+	}
+
+	if len(result.DestroyedRoomIDs) > 0 {
+		m.mu.Lock()
+		for _, roomID := range result.DestroyedRoomIDs {
+			delete(m.rooms, roomID)
+		}
+		m.mu.Unlock()
+	}
+
+	return result
 }
 
 func (m *Manager) Public(roomID string, viewerID string) (PublicRoom, error) {
@@ -492,26 +582,28 @@ func publicRoom(room *Room, viewerID string) PublicRoom {
 	}
 
 	return PublicRoom{
-		ID:               room.ID,
-		HostUserID:       room.HostUserID,
-		VariantKey:       room.VariantKey,
-		ThemeKey:         room.ThemeKey,
-		Phase:            room.Phase,
-		Players:          players,
-		TopCard:          topCard,
-		DrawPileCount:    len(room.DrawPile),
-		CurrentPlayerID:  currentPlayerID,
-		Direction:        room.Direction,
-		ActiveColor:      room.ActiveColor,
-		PendingDrawCount: room.PendingDrawCount,
-		FlipSide:         room.FlipSide,
-		Rules:            room.Rules,
-		PlayableCardIDs:  playableCardIDs,
-		WinnerID:         room.WinnerID,
-		Log:              append([]LogEntry{}, logs...),
-		Speeches:         append([]SpeechEntry{}, room.Speeches...),
-		ActionSeq:        room.ActionSeq,
-		RecentActions:    append([]PublicAction{}, room.RecentActions...),
+		ID:                   room.ID,
+		HostUserID:           room.HostUserID,
+		VariantKey:           room.VariantKey,
+		ThemeKey:             room.ThemeKey,
+		Phase:                room.Phase,
+		Players:              players,
+		TopCard:              topCard,
+		DrawPileCount:        len(room.DrawPile),
+		CurrentPlayerID:      currentPlayerID,
+		Direction:            room.Direction,
+		ActiveColor:          room.ActiveColor,
+		PendingDrawCount:     room.PendingDrawCount,
+		FlipSide:             room.FlipSide,
+		Rules:                room.Rules,
+		PlayableCardIDs:      playableCardIDs,
+		WinnerID:             room.WinnerID,
+		Log:                  append([]LogEntry{}, logs...),
+		Speeches:             append([]SpeechEntry{}, room.Speeches...),
+		ActionSeq:            room.ActionSeq,
+		RecentActions:        append([]PublicAction{}, room.RecentActions...),
+		TurnDeadline:         cloneTimePtr(room.TurnDeadline),
+		TurnRemainingSeconds: turnRemainingSeconds(room.TurnDeadline),
 	}
 }
 
@@ -722,11 +814,112 @@ func rotateHands(room *Room) {
 
 func advanceTurn(room *Room) {
 	room.CurrentPlayerIndex = nextIndex(room)
+	refreshTurnDeadline(room, time.Now().UTC())
 }
 
 func nextIndex(room *Room) int {
 	total := len(room.Players)
 	return (room.CurrentPlayerIndex + room.Direction + total) % total
+}
+
+func refreshTurnDeadline(room *Room, now time.Time) {
+	if room.Phase != PhasePlaying || len(room.Players) == 0 {
+		room.TurnDeadline = nil
+		return
+	}
+	deadline := now.UTC().Add(turnTimeout)
+	room.TurnDeadline = &deadline
+}
+
+func applyTimeoutTurn(room *Room, now time.Time) bool {
+	if room.Phase != PhasePlaying || len(room.Players) == 0 || room.TurnDeadline == nil || now.Before(*room.TurnDeadline) {
+		return false
+	}
+	if room.CurrentPlayerIndex >= len(room.Players) {
+		room.CurrentPlayerIndex = 0
+	}
+
+	player := room.Players[room.CurrentPlayerIndex]
+	actions := legalAIActions(room, player)
+	if len(actions) == 0 {
+		actions = []aiTurnAction{{Kind: "draw"}}
+	}
+	action := actions[0]
+	timeoutMessage := fmt.Sprintf("%s 超时，服务端自动行动。", player.Name)
+	room.Log = append(room.Log, createLog(timeoutMessage))
+	recordEffectAction(room, player, player, timeoutMessage)
+
+	if action.Kind == "draw" {
+		drawCount := 1
+		if room.PendingDrawCount > 0 {
+			drawCount = room.PendingDrawCount
+			room.PendingDrawCount = 0
+			room.PendingDrawKind = ""
+		}
+		drawn := drawCards(room, drawCount)
+		player.Hand = append(player.Hand, drawn...)
+		player.HandCount = len(player.Hand)
+		player.NeedsUNO = false
+		message := fmt.Sprintf("%s 超时后自动摸了 %d 张牌。", player.Name, len(drawn))
+		room.Log = append(room.Log, createLog(message))
+		recordDrawAction(room, player, player, len(drawn), message)
+		advanceTurn(room)
+	} else {
+		playCard(room, player, action.CardIndex, action.Color)
+	}
+
+	room.UpdatedAt = now
+	refreshTurnDeadline(room, now)
+	slog.Info("uno turn timeout auto action",
+		"room", room.ID,
+		"player", player.ID,
+		"playerName", player.Name,
+		"action", action.Kind,
+	)
+	return true
+}
+
+func shouldDestroyOfflineRoom(room *Room, now time.Time) bool {
+	if room.Phase != PhaseLobby && room.Phase != PhasePlaying {
+		return false
+	}
+	updateAllHumansOfflineSince(room, now)
+	return room.AllHumansOfflineSince != nil && now.Sub(*room.AllHumansOfflineSince) >= offlineRoomTTL
+}
+
+func updateAllHumansOfflineSince(room *Room, now time.Time) {
+	for _, player := range room.Players {
+		if player.IsAI {
+			continue
+		}
+		if player.Connected {
+			room.AllHumansOfflineSince = nil
+			return
+		}
+	}
+	if room.AllHumansOfflineSince == nil {
+		startedAt := now.UTC()
+		room.AllHumansOfflineSince = &startedAt
+	}
+}
+
+func cloneTimePtr(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func turnRemainingSeconds(deadline *time.Time) int {
+	if deadline == nil {
+		return 0
+	}
+	remaining := time.Until(*deadline)
+	if remaining <= 0 {
+		return 0
+	}
+	return int((remaining + time.Second - time.Nanosecond) / time.Second)
 }
 
 func createDeck(rules RuleSet) []Card {
@@ -932,6 +1125,7 @@ func (m *Manager) decideWithLLM(room *Room, player *Player, actions []aiTurnActi
 		SessionID:   player.ID,
 		PlayerName:  player.Name,
 		Personality: player.AI.Personality,
+		SpeechStyle: player.AI.SpeechStyle,
 		State: map[string]any{
 			"activeColor":      room.ActiveColor,
 			"direction":        room.Direction,
@@ -940,6 +1134,7 @@ func (m *Manager) decideWithLLM(room *Room, player *Player, actions []aiTurnActi
 			"hand":             player.Hand,
 			"opponents":        publicOpponentCounts(room, player.ID),
 			"recentSpeech":     recentSpeeches(room),
+			"speechGuide":      "UNO 发言像普通朋友局：短句、自然、可以吐槽牌不好或提醒颜色，不要中二台词，不要解释规则。",
 		},
 		Actions: legalActions,
 	})
@@ -1048,27 +1243,16 @@ func publicOpponentCounts(room *Room, playerID string) []map[string]any {
 }
 
 func nextAIProfile(room *Room, level aiplayer.Level) AIProfile {
-	profiles := []AIProfile{
-		{Name: "北风", Personality: "谨慎控牌，喜欢保留功能牌。", Level: string(level)},
-		{Name: "南星", Personality: "进攻型玩家，优先压缩手牌。", Level: string(level)},
-		{Name: "阿澈", Personality: "观察型玩家，偏好改变颜色。", Level: string(level)},
-		{Name: "小满", Personality: "轻快随机，偶尔打出意外节奏。", Level: string(level)},
-	}
-	for _, profile := range profiles {
-		if findPlayerByName(room, profile.Name) == nil {
-			return profile
-		}
-	}
-	return AIProfile{Name: fmt.Sprintf("AI %d", len(room.Players)), Personality: "规则驱动玩家，可升级为 LLM function calling 决策。", Level: string(level)}
+	profile := aiplayer.NextProfile(usedAINames(room))
+	return AIProfile{Name: profile.Name, Personality: profile.Personality, SpeechStyle: profile.SpeechStyle, Level: string(level)}
 }
 
-func findPlayerByName(room *Room, name string) *Player {
+func usedAINames(room *Room) map[string]bool {
+	used := map[string]bool{}
 	for _, player := range room.Players {
-		if player.Name == name {
-			return player
-		}
+		used[player.Name] = true
 	}
-	return nil
+	return used
 }
 
 func createRoomID() string {

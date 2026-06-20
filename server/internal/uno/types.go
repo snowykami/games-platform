@@ -47,22 +47,24 @@ type Card struct {
 type AIProfile struct {
 	Name        string `json:"name"`
 	Personality string `json:"personality"`
+	SpeechStyle string `json:"speechStyle,omitempty"`
 	Level       string `json:"level"`
 }
 
 type Player struct {
-	ID        string     `json:"id"`
-	UserID    string     `json:"userId"`
-	Name      string     `json:"name"`
-	Role      string     `json:"role"`
-	Kind      string     `json:"kind"`
-	IsAI      bool       `json:"isAI"`
-	Connected bool       `json:"connected"`
-	AI        *AIProfile `json:"ai,omitempty"`
-	Hand      []Card     `json:"hand,omitempty"`
-	HandCount int        `json:"handCount"`
-	NeedsUNO  bool       `json:"needsUno"`
-	JoinedAt  time.Time  `json:"joinedAt"`
+	ID             string     `json:"id"`
+	UserID         string     `json:"userId"`
+	Name           string     `json:"name"`
+	Role           string     `json:"role"`
+	Kind           string     `json:"kind"`
+	IsAI           bool       `json:"isAI"`
+	Connected      bool       `json:"connected"`
+	DisconnectedAt *time.Time `json:"disconnectedAt,omitempty"`
+	AI             *AIProfile `json:"ai,omitempty"`
+	Hand           []Card     `json:"hand,omitempty"`
+	HandCount      int        `json:"handCount"`
+	NeedsUNO       bool       `json:"needsUno"`
+	JoinedAt       time.Time  `json:"joinedAt"`
 }
 
 type LogEntry struct {
@@ -99,52 +101,56 @@ type PublicAction struct {
 }
 
 type Room struct {
-	mu                 sync.Mutex
-	ID                 string
-	HostUserID         string
-	VariantKey         string
-	ThemeKey           string
-	Phase              Phase
-	Players            []*Player
-	DrawPile           []Card
-	DiscardPile        []Card
-	CurrentPlayerIndex int
-	Direction          int
-	ActiveColor        Color
-	PendingDrawCount   int
-	PendingDrawKind    Kind
-	FlipSide           bool
-	Rules              RuleSet
-	WinnerID           string
-	Log                []LogEntry
-	Speeches           []SpeechEntry
-	ActionSeq          int
-	RecentActions      []PublicAction
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	mu                    sync.Mutex
+	ID                    string
+	HostUserID            string
+	VariantKey            string
+	ThemeKey              string
+	Phase                 Phase
+	Players               []*Player
+	DrawPile              []Card
+	DiscardPile           []Card
+	CurrentPlayerIndex    int
+	Direction             int
+	ActiveColor           Color
+	PendingDrawCount      int
+	PendingDrawKind       Kind
+	FlipSide              bool
+	Rules                 RuleSet
+	WinnerID              string
+	Log                   []LogEntry
+	Speeches              []SpeechEntry
+	ActionSeq             int
+	RecentActions         []PublicAction
+	TurnDeadline          *time.Time
+	AllHumansOfflineSince *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 type PublicRoom struct {
-	ID               string         `json:"id"`
-	HostUserID       string         `json:"hostUserId"`
-	VariantKey       string         `json:"variantKey"`
-	ThemeKey         string         `json:"themeKey"`
-	Phase            Phase          `json:"phase"`
-	Players          []Player       `json:"players"`
-	TopCard          *Card          `json:"topCard,omitempty"`
-	DrawPileCount    int            `json:"drawPileCount"`
-	CurrentPlayerID  string         `json:"currentPlayerId,omitempty"`
-	Direction        int            `json:"direction"`
-	ActiveColor      Color          `json:"activeColor,omitempty"`
-	PendingDrawCount int            `json:"pendingDrawCount"`
-	FlipSide         bool           `json:"flipSide"`
-	Rules            RuleSet        `json:"rules"`
-	PlayableCardIDs  []string       `json:"playableCardIds"`
-	WinnerID         string         `json:"winnerId,omitempty"`
-	Log              []LogEntry     `json:"log"`
-	Speeches         []SpeechEntry  `json:"speeches"`
-	ActionSeq        int            `json:"actionSeq"`
-	RecentActions    []PublicAction `json:"recentActions"`
+	ID                   string         `json:"id"`
+	HostUserID           string         `json:"hostUserId"`
+	VariantKey           string         `json:"variantKey"`
+	ThemeKey             string         `json:"themeKey"`
+	Phase                Phase          `json:"phase"`
+	Players              []Player       `json:"players"`
+	TopCard              *Card          `json:"topCard,omitempty"`
+	DrawPileCount        int            `json:"drawPileCount"`
+	CurrentPlayerID      string         `json:"currentPlayerId,omitempty"`
+	Direction            int            `json:"direction"`
+	ActiveColor          Color          `json:"activeColor,omitempty"`
+	PendingDrawCount     int            `json:"pendingDrawCount"`
+	FlipSide             bool           `json:"flipSide"`
+	Rules                RuleSet        `json:"rules"`
+	PlayableCardIDs      []string       `json:"playableCardIds"`
+	WinnerID             string         `json:"winnerId,omitempty"`
+	Log                  []LogEntry     `json:"log"`
+	Speeches             []SpeechEntry  `json:"speeches"`
+	ActionSeq            int            `json:"actionSeq"`
+	RecentActions        []PublicAction `json:"recentActions"`
+	TurnDeadline         *time.Time     `json:"turnDeadline,omitempty"`
+	TurnRemainingSeconds int            `json:"turnRemainingSeconds"`
 }
 
 type UserView struct {

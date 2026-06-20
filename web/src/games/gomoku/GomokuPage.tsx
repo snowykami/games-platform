@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
@@ -199,12 +200,15 @@ function StoneView({ isLast, isWinning, stone }: { isLast: boolean, isWinning: b
 function PlayerLine({ active, onSpeak, player, self, speech }: { active: boolean, onSpeak: (text: string) => Promise<void>, player: GomokuPlayer, self: boolean, speech?: string }) {
   const { t } = useI18n()
   return (
-    <div className={cn('grid gap-2 rounded-lg border px-3 py-2', active ? 'border-[#1f8f7b] bg-[#1f8f7b]/18' : 'border-white/14 bg-[#0b1110]/50')}>
+    <div className={cn('relative grid gap-2 rounded-lg border px-3 py-2', active ? 'border-[#1f8f7b] bg-[#1f8f7b]/18' : 'border-white/14 bg-[#0b1110]/50')}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className={cn('size-5 shrink-0 rounded-full', player.stone === 'black' ? 'bg-[#050706]' : 'bg-[#f4f0e4]')} />
           <div className="min-w-0">
-            <strong className="block truncate text-sm">{player.name}</strong>
+            <div className="flex min-w-0 items-center gap-2">
+              <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
+              <strong className="block truncate text-sm">{player.name}</strong>
+            </div>
             <span className="text-xs font-bold text-[#f4f0e4]/60">
               {self ? t('gomoku.you') : player.isAI ? t('common.ai') : player.connected ? t('common.online') : t('common.offline')}
             </span>

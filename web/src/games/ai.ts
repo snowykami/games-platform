@@ -20,6 +20,12 @@ export function getAILevelDescription(level: AILevel, locale: keyof typeof messa
 export interface AICapabilities {
   levels: AILevel[]
   llmEnabled: boolean
+  model?: string
+  profiles: Array<{
+    name: string
+    personality: string
+    speechStyle: string
+  }>
 }
 
 export interface LegalAction {
@@ -31,6 +37,12 @@ export interface LegalAction {
 const capabilitiesSchema = z.object({
   levels: z.array(z.enum(['beginner', 'normal', 'master', 'ai'])),
   llmEnabled: z.boolean(),
+  model: z.string().optional(),
+  profiles: z.array(z.object({
+    name: z.string(),
+    personality: z.string(),
+    speechStyle: z.string(),
+  })).default([]),
 })
 
 const decisionSchema = z.object({
@@ -45,7 +57,7 @@ const decisionSchema = z.object({
 export async function getAICapabilities(): Promise<AICapabilities> {
   const response = await fetch('/api/ai/capabilities')
   if (!response.ok) {
-    return { levels: ['beginner', 'normal', 'master'], llmEnabled: false }
+    return { levels: ['beginner', 'normal', 'master'], llmEnabled: false, profiles: [] }
   }
   return capabilitiesSchema.parse(await response.json())
 }
@@ -56,6 +68,7 @@ export async function decideWithAI(input: {
   level: AILevel
   personality?: string
   playerName?: string
+  speechStyle?: string
   sessionId: string
   state: unknown
 }) {

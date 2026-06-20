@@ -86,39 +86,42 @@ type WinResult struct {
 type AIProfile struct {
 	Name        string `json:"name"`
 	Personality string `json:"personality"`
+	SpeechStyle string `json:"speechStyle,omitempty"`
 	Level       string `json:"level"`
 }
 
 type Player struct {
-	ID        string     `json:"id"`
-	UserID    string     `json:"userId"`
-	Name      string     `json:"name"`
-	Role      string     `json:"role"`
-	Kind      string     `json:"kind"`
-	IsAI      bool       `json:"isAI"`
-	Connected bool       `json:"connected"`
-	AI        *AIProfile `json:"ai,omitempty"`
-	Wind      Wind       `json:"wind"`
-	Hand      []Tile     `json:"hand"`
-	Melds     []Meld     `json:"melds"`
-	Discards  []Tile     `json:"discards"`
-	JoinedAt  time.Time  `json:"joinedAt"`
+	ID             string     `json:"id"`
+	UserID         string     `json:"userId"`
+	Name           string     `json:"name"`
+	Role           string     `json:"role"`
+	Kind           string     `json:"kind"`
+	IsAI           bool       `json:"isAI"`
+	Connected      bool       `json:"connected"`
+	DisconnectedAt *time.Time `json:"disconnectedAt,omitempty"`
+	AI             *AIProfile `json:"ai,omitempty"`
+	Wind           Wind       `json:"wind"`
+	Hand           []Tile     `json:"hand"`
+	Melds          []Meld     `json:"melds"`
+	Discards       []Tile     `json:"discards"`
+	JoinedAt       time.Time  `json:"joinedAt"`
 }
 
 type PublicPlayer struct {
-	ID        string     `json:"id"`
-	UserID    string     `json:"userId"`
-	Name      string     `json:"name"`
-	Role      string     `json:"role"`
-	Kind      string     `json:"kind"`
-	IsAI      bool       `json:"isAI"`
-	Connected bool       `json:"connected"`
-	AI        *AIProfile `json:"ai,omitempty"`
-	Wind      Wind       `json:"wind"`
-	Hand      []Tile     `json:"hand"`
-	HandCount int        `json:"handCount"`
-	Melds     []Meld     `json:"melds"`
-	Discards  []Tile     `json:"discards"`
+	ID             string     `json:"id"`
+	UserID         string     `json:"userId"`
+	Name           string     `json:"name"`
+	Role           string     `json:"role"`
+	Kind           string     `json:"kind"`
+	IsAI           bool       `json:"isAI"`
+	Connected      bool       `json:"connected"`
+	DisconnectedAt *time.Time `json:"disconnectedAt,omitempty"`
+	AI             *AIProfile `json:"ai,omitempty"`
+	Wind           Wind       `json:"wind"`
+	Hand           []Tile     `json:"hand"`
+	HandCount      int        `json:"handCount"`
+	Melds          []Meld     `json:"melds"`
+	Discards       []Tile     `json:"discards"`
 }
 
 type ClaimOption struct {

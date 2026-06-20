@@ -12,9 +12,11 @@ export interface UnoOnlinePlayer {
   kind: 'guest' | 'oidc' | 'ai'
   isAI: boolean
   connected: boolean
+  disconnectedAt?: string
   ai?: {
     name: string
     personality: string
+    speechStyle?: string
     level: string
   }
   hand?: UnoCard[]
@@ -61,6 +63,8 @@ export interface UnoOnlineRoom {
   speeches: GameSpeechEntry[]
   actionSeq: number
   recentActions: UnoPublicAction[]
+  turnDeadline?: string
+  turnRemainingSeconds: number
 }
 
 const cardSchema = z.object({
@@ -101,9 +105,11 @@ const roomSchema: z.ZodType<UnoOnlineRoom> = z.object({
     kind: z.enum(['guest', 'oidc', 'ai']),
     isAI: z.boolean(),
     connected: z.boolean(),
+    disconnectedAt: z.string().optional(),
     ai: z.object({
       name: z.string(),
       personality: z.string(),
+      speechStyle: z.string().optional(),
       level: z.string(),
     }).optional(),
     hand: z.array(cardSchema).optional(),
@@ -133,6 +139,8 @@ const roomSchema: z.ZodType<UnoOnlineRoom> = z.object({
     count: z.number().optional(),
     message: z.string(),
   })),
+  turnDeadline: z.string().optional(),
+  turnRemainingSeconds: z.number(),
 })
 
 const roomResponseSchema = z.object({ room: roomSchema })
@@ -167,6 +175,10 @@ export async function updateUnoAI(roomId: string, playerId: string, level: strin
     headers: { 'Content-Type': 'application/json' },
     method: 'PATCH',
   })
+}
+
+export async function removeUnoPlayer(roomId: string, playerId: string) {
+  return requestRoom(`/api/uno/rooms/${encodeURIComponent(roomId)}/players/${encodeURIComponent(playerId)}`, { method: 'DELETE' })
 }
 
 export async function sayUno(roomId: string, text: string) {

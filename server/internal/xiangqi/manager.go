@@ -78,6 +78,7 @@ func (m *Manager) JoinRoom(roomID string, user UserView) (PublicRoom, error) {
 	}
 
 	player.Connected = true
+	player.DisconnectedAt = nil
 	room.UpdatedAt = time.Now().UTC()
 	return publicRoom(room), nil
 }
@@ -91,8 +92,12 @@ func (m *Manager) Leave(roomID string, userID string) {
 		return
 	}
 
+	now := time.Now().UTC()
 	if player := findPlayerByUserID(room, userID); player != nil {
 		player.Connected = false
+		if !player.IsAI {
+			player.DisconnectedAt = &now
+		}
 	}
 }
 
@@ -163,6 +168,35 @@ func (m *Manager) UpdateAI(roomID string, actorID string, playerID string, optio
 	player.AI.Level = string(level)
 	room.UpdatedAt = time.Now().UTC()
 	return publicRoom(room), nil
+}
+
+func (m *Manager) RemovePlayer(roomID string, actorID string, playerID string) (PublicRoom, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	room, err := m.room(roomID)
+	if err != nil {
+		return PublicRoom{}, err
+	}
+	if room.HostUserID != actorID {
+		return PublicRoom{}, errors.New("only_host_remove_player")
+	}
+	if room.Phase != PhaseLobby {
+		return PublicRoom{}, errors.New("remove_player_only_lobby")
+	}
+	for index, player := range room.Players {
+		if player.ID != playerID {
+			continue
+		}
+		if player.UserID == room.HostUserID || player.Role == "host" {
+			return PublicRoom{}, errors.New("cannot_remove_host")
+		}
+		room.Players = append(room.Players[:index], room.Players[index+1:]...)
+		room.Log = append(room.Log, createLog(fmt.Sprintf("%s 被房主移出了房间。", player.Name)))
+		room.UpdatedAt = time.Now().UTC()
+		return publicRoom(room), nil
+	}
+	return PublicRoom{}, errors.New("player_not_found")
 }
 
 func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, error) {
@@ -663,8 +697,10 @@ func (m *Manager) decideXiangqiWithLLM(room *Room, player *Player) (Piece, Posit
 	}
 
 	personality := ""
+	speechStyle := ""
 	if player.AI != nil {
 		personality = player.AI.Personality
+		speechStyle = player.AI.SpeechStyle
 	}
 	decision, err := m.aiProvider.Decide(context.Background(), aiplayer.DecisionInput{
 		Game:        "xiangqi",
@@ -672,6 +708,7 @@ func (m *Manager) decideXiangqiWithLLM(room *Room, player *Player) (Piece, Posit
 		SessionID:   player.ID,
 		PlayerName:  player.Name,
 		Personality: personality,
+		SpeechStyle: speechStyle,
 		State: map[string]any{
 			"side":         player.Side,
 			"pieces":       room.Pieces,
@@ -918,11 +955,16 @@ func findPlayerByID(room *Room, playerID string) *Player {
 }
 
 func nextAIProfile(room *Room, level aiplayer.Level) AIProfile {
-	profiles := []AIProfile{
-		{Name: "玄霜", Personality: "偏好稳健兑子，优先解除将军威胁。", Level: string(level)},
-		{Name: "赤羽", Personality: "进攻倾向更强，会主动制造将军。", Level: string(level)},
+	profile := aiplayer.NextProfile(usedAINames(room))
+	return AIProfile{Name: profile.Name, Personality: profile.Personality, SpeechStyle: profile.SpeechStyle, Level: string(level)}
+}
+
+func usedAINames(room *Room) map[string]bool {
+	used := map[string]bool{}
+	for _, player := range room.Players {
+		used[player.Name] = true
 	}
-	return profiles[len(room.Players)%len(profiles)]
+	return used
 }
 
 func recordAction(room *Room, action PublicAction) {

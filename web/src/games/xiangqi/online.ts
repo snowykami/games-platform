@@ -21,10 +21,12 @@ export interface XiangqiOnlinePlayer {
   kind: 'guest' | 'oidc' | 'ai'
   isAI: boolean
   connected: boolean
+  disconnectedAt?: string
   side?: XiangqiSide
   ai?: {
     name: string
     personality: string
+    speechStyle?: string
     level: string
   }
 }
@@ -106,10 +108,12 @@ const playerSchema = z.object({
   kind: z.enum(['guest', 'oidc', 'ai']),
   isAI: z.boolean(),
   connected: z.boolean(),
+  disconnectedAt: z.string().optional(),
   side: sideSchema.optional(),
   ai: z.object({
     name: z.string(),
     personality: z.string(),
+    speechStyle: z.string().optional(),
     level: z.string(),
   }).optional(),
 })
@@ -159,6 +163,10 @@ export async function updateXiangqiAI(roomId: string, playerId: string, level: s
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ level }),
   })
+}
+
+export async function removeXiangqiPlayer(roomId: string, playerId: string) {
+  return requestRoom(`/api/xiangqi/rooms/${encodeURIComponent(roomId)}/players/${encodeURIComponent(playerId)}`, { method: 'DELETE' })
 }
 
 export async function sayXiangqi(roomId: string, text: string) {

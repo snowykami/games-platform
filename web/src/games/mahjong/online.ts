@@ -46,9 +46,11 @@ export interface MahjongOnlinePlayer {
   kind: 'guest' | 'oidc' | 'ai'
   isAI: boolean
   connected: boolean
+  disconnectedAt?: string
   ai?: {
     name: string
     personality: string
+    speechStyle?: string
     level: string
   }
   wind: MahjongWind
@@ -135,9 +137,11 @@ const playerSchema: z.ZodType<MahjongOnlinePlayer> = z.object({
   kind: z.enum(['guest', 'oidc', 'ai']),
   isAI: z.boolean(),
   connected: z.boolean(),
+  disconnectedAt: z.string().optional(),
   ai: z.object({
     name: z.string(),
     personality: z.string(),
+    speechStyle: z.string().optional(),
     level: z.string(),
   }).optional(),
   wind: z.preprocess(value => value === '' ? 'east' : value, windSchema),
@@ -220,6 +224,10 @@ export async function updateMahjongAI(roomId: string, playerId: string, level: s
     headers: { 'Content-Type': 'application/json' },
     method: 'PATCH',
   })
+}
+
+export async function removeMahjongPlayer(roomId: string, playerId: string) {
+  return requestRoom(`/api/mahjong/rooms/${encodeURIComponent(roomId)}/players/${encodeURIComponent(playerId)}`, { method: 'DELETE' })
 }
 
 export async function sayMahjong(roomId: string, text: string) {

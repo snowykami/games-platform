@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useI18n } from '@/i18n/context'
 import { Button } from '@/shared/components/ui/button'
@@ -414,10 +415,13 @@ function CapturedPieceBurst({
 function PlayerLine({ active, onSpeak, player, self, speech }: { active: boolean, onSpeak: (text: string) => Promise<void>, player: XiangqiOnlinePlayer, self: boolean, speech?: string }) {
   const { t } = useI18n()
   return (
-    <div className={cn('grid gap-2 rounded-lg border px-3 py-2', active ? 'border-[#f2d59a] bg-[#f2d59a]/16' : 'border-[#fff8e8]/14 bg-[#10100d]/50')}>
+    <div className={cn('relative grid gap-2 rounded-lg border px-3 py-2', active ? 'border-[#f2d59a] bg-[#f2d59a]/16' : 'border-[#fff8e8]/14 bg-[#10100d]/50')}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <strong className="block truncate text-sm">{player.name}</strong>
+          <div className="flex min-w-0 items-center gap-2">
+            <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
+            <strong className="block truncate text-sm">{player.name}</strong>
+          </div>
           <span className="text-xs font-bold text-[#fff8e8]/60">
             {self ? t('gomoku.you') : player.isAI ? t('common.ai') : player.connected ? t('common.online') : t('common.offline')}
           </span>

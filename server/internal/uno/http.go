@@ -62,6 +62,7 @@ func (h *Handler) Routes() http.Handler {
 	router.Post("/rooms/{roomID}/join", h.joinRoom)
 	router.Post("/rooms/{roomID}/ai", h.addAI)
 	router.Patch("/rooms/{roomID}/ai/{playerID}", h.updateAI)
+	router.Delete("/rooms/{roomID}/players/{playerID}", h.removePlayer)
 	router.Post("/rooms/{roomID}/speech", h.speech)
 	router.Post("/rooms/{roomID}/start", h.start)
 	router.Post("/rooms/{roomID}/play", h.play)
@@ -160,6 +161,24 @@ func (h *Handler) updateAI(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) removePlayer(w http.ResponseWriter, r *http.Request) {
+	user := mustUser(r)
+	roomID := chi.URLParam(r, "roomID")
+	playerID := chi.URLParam(r, "playerID")
+	targetUserID := ""
+	if current, err := h.manager.Public(roomID, user.ID); err == nil {
+		targetUserID = playerUserID(current.Players, playerID)
+	}
+	room, err := h.manager.RemovePlayer(roomID, user.ID, playerID)
+	if err != nil {
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.hub.CloseUser(room.ID, targetUserID)
+	h.hub.Broadcast(room.ID)
+	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
+}
+
 func (h *Handler) speech(w http.ResponseWriter, r *http.Request) {
 	var request speechRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
@@ -248,11 +267,13 @@ type Hub struct {
 }
 
 func NewHub(manager *Manager) *Hub {
-	return &Hub{
+	hub := &Hub{
 		manager:     manager,
 		subscribers: map[*Subscriber]struct{}{},
 		aiRunning:   map[string]struct{}{},
 	}
+	go hub.runScheduler()
+	return hub
 }
 
 func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, conn *websocket.Conn) {
@@ -315,6 +336,41 @@ func (h *Hub) Broadcast(roomID string) {
 	}
 }
 
+func (h *Hub) CloseRoom(roomID string) {
+	h.mu.Lock()
+	subscribers := make([]*Subscriber, 0, len(h.subscribers))
+	for sub := range h.subscribers {
+		if sub.roomID == roomID {
+			subscribers = append(subscribers, sub)
+			delete(h.subscribers, sub)
+		}
+	}
+	h.mu.Unlock()
+
+	for _, sub := range subscribers {
+		_ = sub.conn.Close(websocket.StatusNormalClosure, "room closed")
+	}
+}
+
+func (h *Hub) CloseUser(roomID string, userID string) {
+	if userID == "" {
+		return
+	}
+	h.mu.Lock()
+	subscribers := make([]*Subscriber, 0, len(h.subscribers))
+	for sub := range h.subscribers {
+		if sub.roomID == roomID && sub.userID == userID {
+			subscribers = append(subscribers, sub)
+			delete(h.subscribers, sub)
+		}
+	}
+	h.mu.Unlock()
+
+	for _, sub := range subscribers {
+		_ = sub.conn.Close(websocket.StatusNormalClosure, "removed from room")
+	}
+}
+
 func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) error {
 	switch message.Type {
 	case "room.add_ai":
@@ -332,6 +388,13 @@ func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) err
 			return errors.New("invalid_ai_payload")
 		}
 		_, err := h.manager.UpdateAI(roomID, userID, request.PlayerID, AIOptions{Level: request.Level})
+		return err
+	case "room.remove_player":
+		var request updateAIRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_player_payload")
+		}
+		_, err := h.manager.RemovePlayer(roomID, userID, request.PlayerID)
 		return err
 	case "room.speech":
 		var request speechRequest
@@ -400,6 +463,36 @@ func (h *Hub) ScheduleAI(roomID string) {
 	}()
 }
 
+func (h *Hub) runScheduler() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for now := range ticker.C {
+		result := h.manager.Tick(now)
+		for _, roomID := range result.DestroyedRoomIDs {
+			h.CloseRoom(roomID)
+		}
+		for _, roomID := range uniqueRoomIDs(result.BroadcastRoomIDs) {
+			h.Broadcast(roomID)
+		}
+		for _, roomID := range uniqueRoomIDs(result.ScheduleAIRoomIDs) {
+			h.ScheduleAI(roomID)
+		}
+	}
+}
+
+func uniqueRoomIDs(roomIDs []string) []string {
+	seen := map[string]struct{}{}
+	unique := make([]string, 0, len(roomIDs))
+	for _, roomID := range roomIDs {
+		if _, ok := seen[roomID]; ok {
+			continue
+		}
+		seen[roomID] = struct{}{}
+		unique = append(unique, roomID)
+	}
+	return unique
+}
+
 func writeWSError(ctx context.Context, conn *websocket.Conn, message string) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -415,4 +508,13 @@ func mustMarshal(value any) []byte {
 		panic(err)
 	}
 	return data
+}
+
+func playerUserID(players []Player, playerID string) string {
+	for _, player := range players {
+		if player.ID == playerID {
+			return player.UserID
+		}
+	}
+	return ""
 }
