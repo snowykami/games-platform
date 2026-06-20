@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Who's the Spy icon">
+  <rect width="128" height="128" rx="28" fill="#211728"/>
+  <path d="M31 29h42a20 20 0 0 1 20 20v50H51a20 20 0 0 1-20-20z" fill="#fff8e8"/>
+  <path d="M56 45c0-12 10-21 23-21s23 9 23 21c0 9-5 15-14 20-6 3-8 6-8 12" fill="none" stroke="#211728" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="80" cy="94" r="6" fill="#211728"/>
+  <circle cx="37" cy="37" r="7" fill="#f4c7ff"/>
+</svg>

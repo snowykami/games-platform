@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Avalon">
+  <rect width="64" height="64" rx="14" fill="#132015"/>
+  <circle cx="32" cy="34" r="20" fill="#1f3b27" stroke="#d9b35f" stroke-width="4"/>
+  <path d="M32 12v34" stroke="#f6e6b8" stroke-width="4" stroke-linecap="round"/>
+  <path d="M22 23h20l-4 8H26l-4-8Z" fill="#d9b35f"/>
+  <path d="M22 47h20" stroke="#f6e6b8" stroke-width="4" stroke-linecap="round"/>
+  <path d="M19 38c6-4 20-4 26 0" fill="none" stroke="#d9b35f" stroke-width="3" stroke-linecap="round"/>
+</svg>

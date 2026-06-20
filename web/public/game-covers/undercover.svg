@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="Who's the Spy cover">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#1b1023"/>
+      <stop offset="0.52" stop-color="#31203b"/>
+      <stop offset="1" stop-color="#0e0b12"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="42%" r="48%">
+      <stop offset="0" stop-color="#f4c7ff" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#f4c7ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#bg)"/>
+  <rect width="1200" height="800" fill="url(#glow)"/>
+  <g fill="none" stroke="#fff8e8" stroke-opacity="0.18" stroke-width="3">
+    <path d="M90 610c150-135 315-202 495-202s358 67 525 202"/>
+    <path d="M150 190c144 96 298 144 462 144s310-48 438-144"/>
+  </g>
+  <g transform="translate(265 175)">
+    <rect x="0" y="0" width="250" height="340" rx="30" fill="#fff8e8" opacity="0.95"/>
+    <text x="125" y="152" text-anchor="middle" font-family="Arial, sans-serif" font-size="92" font-weight="900" fill="#211728">?</text>
+    <text x="125" y="230" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="800" fill="#211728">WORD</text>
+  </g>
+  <g transform="translate(685 175)">
+    <rect x="0" y="0" width="250" height="340" rx="30" fill="#211728" stroke="#f4c7ff" stroke-width="8"/>
+    <circle cx="125" cy="142" r="56" fill="#f4c7ff"/>
+    <path d="M105 142h40M125 122v40" stroke="#211728" stroke-width="16" stroke-linecap="round"/>
+    <text x="125" y="240" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="800" fill="#fff8e8">SPY</text>
+  </g>
+  <g fill="#fff8e8" opacity="0.75" font-family="Arial, sans-serif" font-weight="900">
+    <text x="600" y="610" text-anchor="middle" font-size="76">WHO'S THE SPY</text>
+    <text x="600" y="668" text-anchor="middle" font-size="30" opacity="0.7">describe · doubt · vote</text>
+  </g>
+</svg>

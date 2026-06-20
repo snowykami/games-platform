@@ -19,6 +19,7 @@ import (
 	"github.com/snowykami/games-platform/server/internal/i18n"
 	"github.com/snowykami/games-platform/server/internal/mahjong"
 	"github.com/snowykami/games-platform/server/internal/runtimecheck"
+	"github.com/snowykami/games-platform/server/internal/socialdeduction"
 	"github.com/snowykami/games-platform/server/internal/uno"
 	frontend "github.com/snowykami/games-platform/server/internal/web"
 	"github.com/snowykami/games-platform/server/internal/xiangqi"
@@ -62,6 +63,9 @@ func routes(cfg config.Config) http.Handler {
 	aiHandler := aiplayer.NewHandler(aiProvider)
 	gomokuHandler := gomoku.NewHandler(gomoku.NewManager(aiProvider))
 	mahjongHandler := mahjong.NewHandler(mahjong.NewManager(aiProvider))
+	werewolfHandler := socialdeduction.NewHandler(socialdeduction.NewManager(socialdeduction.GameWerewolf, aiProvider))
+	avalonHandler := socialdeduction.NewHandler(socialdeduction.NewManager(socialdeduction.GameAvalon, aiProvider))
+	undercoverHandler := socialdeduction.NewHandler(socialdeduction.NewManager(socialdeduction.GameUndercover, aiProvider))
 	unoHandler := uno.NewHandler(uno.NewManager(aiProvider))
 	xiangqiHandler := xiangqi.NewHandler(xiangqi.NewManager(aiProvider))
 
@@ -85,8 +89,11 @@ func routes(cfg config.Config) http.Handler {
 			protected.Use(auth.RequireUser)
 			protected.Mount("/ai", aiHandler.Routes())
 			protected.Mount("/gomoku", gomokuHandler.Routes())
+			protected.Mount("/avalon", avalonHandler.Routes())
 			protected.Mount("/mahjong", mahjongHandler.Routes())
 			protected.Mount("/uno", unoHandler.Routes())
+			protected.Mount("/undercover", undercoverHandler.Routes())
+			protected.Mount("/werewolf", werewolfHandler.Routes())
 			protected.Mount("/xiangqi", xiangqiHandler.Routes())
 		})
 		api.Group(func(admin chi.Router) {
@@ -96,8 +103,11 @@ func routes(cfg config.Config) http.Handler {
 	})
 
 	router.With(auth.RequireUser).Get("/ws/gomoku", gomokuHandler.WebSocket)
+	router.With(auth.RequireUser).Get("/ws/avalon", avalonHandler.WebSocket)
 	router.With(auth.RequireUser).Get("/ws/mahjong", mahjongHandler.WebSocket)
 	router.With(auth.RequireUser).Get("/ws/uno", unoHandler.WebSocket)
+	router.With(auth.RequireUser).Get("/ws/undercover", undercoverHandler.WebSocket)
+	router.With(auth.RequireUser).Get("/ws/werewolf", werewolfHandler.WebSocket)
 	router.With(auth.RequireUser).Get("/ws/xiangqi", xiangqiHandler.WebSocket)
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api" || r.URL.Path == "/ws" || strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {

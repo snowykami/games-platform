@@ -3,6 +3,9 @@ import { Link, useParams, useSearchParams } from 'react-router'
 import { GomokuRoomGate } from '@/games/gomoku/GomokuRoomGate'
 import { MahjongRoomGate } from '@/games/mahjong/MahjongRoomGate'
 import { findGame } from '@/games/registry'
+import { AvalonRoomGate } from '@/games/socialdeduction/AvalonRoomGate'
+import { UndercoverRoomGate } from '@/games/socialdeduction/UndercoverRoomGate'
+import { WerewolfRoomGate } from '@/games/socialdeduction/WerewolfRoomGate'
 import { UnoRoomGate } from '@/games/uno/UnoRoomGate'
 import { XiangqiRoomGate } from '@/games/xiangqi/XiangqiRoomGate'
 import { useI18n } from '@/i18n/context'
@@ -41,6 +44,18 @@ export function GamePage() {
 
   if (game.slug === 'xiangqi') {
     return <XiangqiRoomGate roomId={roomId} />
+  }
+
+  if (game.slug === 'werewolf') {
+    return <WerewolfRoomGate roomId={roomId} />
+  }
+
+  if (game.slug === 'avalon') {
+    return <AvalonRoomGate roomId={roomId} />
+  }
+
+  if (game.slug === 'undercover') {
+    return <UndercoverRoomGate roomId={roomId} />
   }
 
   return (
