@@ -16,6 +16,7 @@ interface SpeechBubbleProps {
     spokenAt?: string
   }
   speakerName?: string
+  speakerStyle?: CSSProperties
   spokenAt?: string
   text?: string
   ttlMs?: number
@@ -28,7 +29,7 @@ interface SpeechButtonProps {
   palette?: 'dark' | 'gomoku' | 'mahjong' | 'xiangqi'
 }
 
-export function SpeechBubble({ align = 'start', anchorClassName, className, placement = 'auto', speech, speakerName, spokenAt, text, ttlMs = 5000 }: SpeechBubbleProps) {
+export function SpeechBubble({ align = 'start', anchorClassName, className, placement = 'auto', speech, speakerName, speakerStyle, spokenAt, text, ttlMs = 5000 }: SpeechBubbleProps) {
   const anchorRef = useRef<HTMLSpanElement>(null)
   const [position, setPosition] = useState<{ above: boolean, left: number, top: number }>()
   const [renderedAt] = useState(() => Date.now())
@@ -93,7 +94,7 @@ export function SpeechBubble({ align = 'start', anchorClassName, className, plac
             'top': position.top,
           } as CSSProperties}
         >
-          {bubbleSpeakerName && <span className="mb-0.5 block text-[0.68rem] leading-4 text-[#5d4a35]">{bubbleSpeakerName}</span>}
+          {bubbleSpeakerName && <span className="mb-0.5 block text-[0.68rem] leading-4 text-[#5d4a35]" style={speakerStyle}>{bubbleSpeakerName}</span>}
           {bubbleText}
         </p>,
         document.body,

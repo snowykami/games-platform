@@ -45,8 +45,9 @@ type werewolfRoleConfigRequest struct {
 }
 
 type targetRequest struct {
-	TargetID string `json:"targetId"`
-	ActionID string `json:"actionId,omitempty"`
+	TargetID  string `json:"targetId"`
+	ActionID  string `json:"actionId,omitempty"`
+	Confirmed bool   `json:"confirmed,omitempty"`
 }
 
 type teamRequest struct {
@@ -293,7 +294,7 @@ func (h *Handler) werewolfVote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
-		return h.manager.WerewolfVote(roomID, userID, request.TargetID)
+		return h.manager.WerewolfVote(roomID, userID, request.TargetID, request.Confirmed)
 	})
 }
 

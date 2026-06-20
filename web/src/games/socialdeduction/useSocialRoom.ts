@@ -120,7 +120,7 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined) 
     updateAI: (playerId: string, level: string) => roomId ? run(() => updateSocialAI(game, roomId, playerId, level)) : Promise.resolve(),
     updatePlayerNote: (playerId: string, note: string) => roomId ? run(() => updateSocialPlayerNote(game, roomId, playerId, note)) : Promise.resolve(),
     updateWerewolfRoles: (config: WerewolfRoleConfig) => roomId ? run(() => updateWerewolfRoles(roomId, config)) : Promise.resolve(),
-    werewolfVote: (targetId: string) => roomId ? run(() => werewolfVote(roomId, targetId)) : Promise.resolve(),
+    werewolfVote: (targetId: string, confirmed: boolean) => roomId ? run(() => werewolfVote(roomId, targetId, confirmed)) : Promise.resolve(),
   }), [game, refresh, roomId, run])
 
   return { actions, error, isLoading, room, setRoom }

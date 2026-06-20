@@ -56,14 +56,14 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 		Messages: []chatMessage{
 			{
 				Role:    "system",
-				Content: "You are a multiplayer tabletop game AI. Choose exactly one action from the provided legal actions and never invent actions. Treat private words, roles, cards, night actions, votes, and notes as secret: never reveal them directly in speech, never quote the secret word, and never say private action details out loud. If you speak, keep it natural, short, indirect, and like a normal player at the table; avoid cringe roleplay, catchphrases, exposition, and overacting. It is fine to leave speech empty. Reply only by calling choose_action.",
+				Content: "You are a multiplayer tabletop game AI. Choose exactly one actionId from the legal actions. Never invent actions. Do not write analysis or JSON manually. Treat private words, roles, cards, night actions, votes, and notes as secret: never reveal them directly in speech, never quote the secret word, and never say private action details out loud. If you speak, keep it natural, short, indirect, and like a normal player at the table. Reply only by calling choose_action.",
 			},
 			{
 				Role:    "user",
 				Content: mustJSON(input),
 			},
 		},
-		Tools: []toolSpec{chooseActionTool()},
+		Tools: []toolSpec{chooseActionTool(input.Actions)},
 	}
 
 	startedAt := time.Now()
@@ -179,7 +179,7 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 
 	arguments := result.Choices[0].Message.ToolCalls[0].Function.Arguments
 	var choice chooseActionArguments
-	if err := json.Unmarshal([]byte(arguments), &choice); err != nil {
+	if err := choice.UnmarshalJSON([]byte(arguments)); err != nil {
 		slog.Warn("llm tool arguments decode failed",
 			"game", input.Game,
 			"session", input.SessionID,
@@ -247,7 +247,11 @@ func mustJSON(value any) string {
 	return string(data)
 }
 
-func chooseActionTool() toolSpec {
+func chooseActionTool(actions []LegalAction) toolSpec {
+	actionIDs := make([]string, 0, len(actions))
+	for _, action := range actions {
+		actionIDs = append(actionIDs, action.ID)
+	}
 	return toolSpec{
 		Type: "function",
 		Function: functionSpec{
@@ -259,19 +263,26 @@ func chooseActionTool() toolSpec {
 					"actionId": map[string]any{
 						"type":        "string",
 						"description": "The exact id of one action from the legal actions list.",
+						"enum":        actionIDs,
 					},
 					"reason": map[string]any{
 						"type":        "string",
-						"description": "Short reason in Chinese.",
+						"description": "Short reason in Chinese, no more than 40 Chinese characters.",
+						"maxLength":   60,
 					},
 					"speech": map[string]any{
 						"type":        "string",
 						"description": "Optional natural table talk in Chinese, no more than 24 Chinese characters. Never reveal private words, roles, cards, night actions, votes, or notes. Leave empty if silence is better.",
+						"maxLength":   40,
 					},
-					"notes": map[string]any{
-						"type":                 "object",
-						"description":          "Optional private notes for future social deduction turns, keyed by player id. Keep each note short in Chinese.",
-						"additionalProperties": map[string]any{"type": "string"},
+					"notePlayerId": map[string]any{
+						"type":        "string",
+						"description": "Optional single player id to remember a private note about. Use one id from the visible players list, or leave empty.",
+					},
+					"noteText": map[string]any{
+						"type":        "string",
+						"description": "Optional short private note in Chinese for notePlayerId, no more than 24 Chinese characters. Leave empty if no note is needed.",
+						"maxLength":   40,
 					},
 				},
 				"required":             []string{"actionId"},
@@ -282,10 +293,9 @@ func chooseActionTool() toolSpec {
 }
 
 type chatRequest struct {
-	Model      string        `json:"model"`
-	Messages   []chatMessage `json:"messages"`
-	Tools      []toolSpec    `json:"tools"`
-	ToolChoice *toolChoice   `json:"tool_choice,omitempty"`
+	Model    string        `json:"model"`
+	Messages []chatMessage `json:"messages"`
+	Tools    []toolSpec    `json:"tools"`
 }
 
 type chatMessage struct {
@@ -304,15 +314,6 @@ type functionSpec struct {
 	Parameters  map[string]any `json:"parameters"`
 }
 
-type toolChoice struct {
-	Type     string             `json:"type"`
-	Function toolChoiceFunction `json:"function"`
-}
-
-type toolChoiceFunction struct {
-	Name string `json:"name"`
-}
-
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
@@ -329,5 +330,91 @@ type chooseActionArguments struct {
 	ActionID string            `json:"actionId"`
 	Reason   string            `json:"reason"`
 	Speech   string            `json:"speech"`
+	NoteID   string            `json:"notePlayerId"`
+	NoteText string            `json:"noteText"`
 	Notes    map[string]string `json:"notes"`
+}
+
+func (args *chooseActionArguments) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ActionID     string          `json:"actionId"`
+		Reason       string          `json:"reason"`
+		Speech       string          `json:"speech"`
+		NotePlayerID string          `json:"notePlayerId"`
+		NoteText     string          `json:"noteText"`
+		Notes        json.RawMessage `json:"notes"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	args.ActionID = raw.ActionID
+	args.Reason = trimRunes(raw.Reason, 80)
+	args.Speech = trimRunes(raw.Speech, 40)
+	args.NoteID = strings.TrimSpace(raw.NotePlayerID)
+	args.NoteText = trimRunes(raw.NoteText, 40)
+	args.Notes = notesFromFlatFields(args.NoteID, args.NoteText)
+	if len(args.Notes) == 0 {
+		args.Notes = parseLegacyNotes(raw.Notes)
+	}
+	return nil
+}
+
+func trimRunes(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit])
+}
+
+func notesFromFlatFields(playerID string, note string) map[string]string {
+	if playerID == "" || note == "" {
+		return nil
+	}
+	return map[string]string{playerID: note}
+}
+
+func parseLegacyNotes(raw json.RawMessage) map[string]string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	var notes map[string]string
+	if err := json.Unmarshal(raw, &notes); err == nil {
+		return trimNotes(notes)
+	}
+	var encoded string
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		return nil
+	}
+	encoded = strings.TrimSpace(encoded)
+	if encoded == "" {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(encoded), &notes); err == nil {
+		return trimNotes(notes)
+	}
+	return nil
+}
+
+func trimNotes(notes map[string]string) map[string]string {
+	if len(notes) == 0 {
+		return nil
+	}
+	trimmed := map[string]string{}
+	for playerID, note := range notes {
+		playerID = strings.TrimSpace(playerID)
+		note = trimRunes(note, 40)
+		if playerID != "" && note != "" {
+			trimmed[playerID] = note
+		}
+	}
+	if len(trimmed) == 0 {
+		return nil
+	}
+	return trimmed
 }

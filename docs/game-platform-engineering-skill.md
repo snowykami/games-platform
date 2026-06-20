@@ -10,6 +10,7 @@
 - 所有真人动作和 AI 动作必须走同一套合法动作校验，不允许 AI 直接改权威状态。
 - LLM 是慢且不可信的外部依赖。调用必须有超时，返回 action 必须验证，网络调用不能长期持有房间锁。
 - 联机广播不能被慢连接拖死。WebSocket 写入需要超时、错误清理和尽量隔离单个订阅者失败。
+- 新增或重构游戏时必须同步治理文件结构和文件行数。不要把规则、视图、AI、HTTP、Hub、前端页面交互继续堆进单个大文件；前后端都要按职责拆分。
 
 ## 新游戏上线检查表
 
@@ -29,6 +30,9 @@
   - 旁观/其他玩家看不到隐藏信息。
   - 游戏结束后是否公开，必须按规则明确。
 - 社交推理 AI 输入只能包含该 AI 当前应知道的信息。不要把完整 `Room`、完整投票明细或其他玩家私有备注传给 LLM。
+- 社交推理 AI 输入不得暴露真人/AI 类型。LLM context 中禁止出现 `kind`、`isAI`、`userId`、`aiProfile`、`connected` 等账号或人机身份字段；其他玩家统一使用 `seat_1`、`seat_2` 这类座位别名。
+- AI 输入里的玩家、发言、投票、队伍、夜晚结果、私人备注和 legal action 都必须使用同一套座位别名，并按 viewer 可见性过滤。服务端在应用 intent 前再把别名映射回内部 player ID。
+- 社交推理游戏必须为 AI context 写最小披露测试：狼人杀不能让平民看到他人角色；谁是卧底不能看到他人词或身份；阿瓦隆只能按邪恶阵营和梅林规则披露隐藏身份。
 - 私人备注按 `viewerPlayerId -> targetPlayerId` 保存和投影，广播时按订阅者重新生成视图。
 
 ### 认证与安全
@@ -48,7 +52,7 @@
   - 锁内复制决策所需快照和合法动作。
   - 解锁后调用外部服务。
   - 重新加锁后验证阶段、当前玩家和 action 仍然合法，再应用。
-- 所有外部调用使用 context timeout。LLM 建议 8 秒以内；WebSocket 单连接写入建议 1-2 秒。
+- 所有外部调用使用 context timeout。LLM 使用平台共享常量，默认 30 秒；WebSocket 单连接写入建议 1-2 秒。
 - AI 调度要防止重复 goroutine、死循环和跨房间阻塞。`ScheduleAI` 应按 room 去重。
 - 长连接断开后要清理订阅者；移除玩家时要关闭对应 WebSocket。
 
@@ -65,12 +69,20 @@
 - 抽出共享房间 HTTP/Hub 模板：创建、加入、添加 AI、移除玩家、发言、改名、广播、调度 AI、关闭订阅者。
 - 抽出通用公开视图模式：`Public(roomID, viewerUserID)` 或 `Public(roomID, viewerPlayerID)`，禁止无 viewer 的隐藏信息游戏广播。
 - 抽出 AI 决策管线：构建快照、列出合法动作、调用 provider、验证 action、应用动作、记录 speech/notes。
-- 将大文件按职责拆分：
+- 将后端大文件按职责拆分：
+  - `manager.go`：房间生命周期和协调逻辑。
   - `rules_*.go`：规则和结算。
   - `public_view.go`：公开/私有视图。
-  - `ai_*.go`：AI 状态和动作选择。
+  - `ai_*.go`：AI 状态、action alias、prompt/context 和 fallback。
+  - `room_actor.go` / `agent.go`：Actor 主循环、AI Agent、记忆和调度。
   - `http.go`：只保留路由和请求解码。
-  - 前端按 `Lobby`、`GamePage`、`ActionPanel`、`PlayerGrid`、`RoleSetup` 拆分。
+  - `hub.go`：只保留订阅、广播和连接生命周期。
+- 将前端页面按职责拆分：
+  - slug 页面只做路由、鉴权和数据装配。
+  - 按 `Lobby`、`RoomHeader`、`PlayerList`、`GameTable`、`ActionPanel`、`SpeechBubbleLayer`、`RulesModal` 等组件拆分。
+  - WebSocket/API 状态进入 hook，例如 `useGameRoom` / `useSocialRoom`，组件只消费状态和事件函数。
+  - i18n、按钮 variant、玩家状态点、发言气泡、规则弹窗等可复用能力进入共享模块。
+- 文件行数不是机械指标，但如果单个文件难以扫读，或混合三种以上职责，应作为重构阶段的拆分对象。优先拆稳定边界，避免为了小文件制造空壳转发层。
 
 ## 必备验证
 

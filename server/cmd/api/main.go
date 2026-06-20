@@ -30,6 +30,7 @@ type gamesResponse struct {
 }
 
 func main() {
+	configureLogger()
 	cfg := config.Load()
 	if err := runtimecheck.RequireStartup(context.Background(), cfg); err != nil {
 		slog.Error("startup dependency check failed", "error", err)

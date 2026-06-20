@@ -69,7 +69,7 @@ export interface SocialRoom {
     roleConfig: WerewolfRoleConfig
     rolePresets: WerewolfRolePreset[]
     seerChecks?: Record<string, SocialAlignment>
-    votes: Record<string, string>
+    votes: Record<string, { targetId: string, confirmed: boolean }>
     lastNight?: string
     witchVictimId?: string
     witchAntidoteUsed?: boolean
@@ -215,7 +215,10 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
     roleConfig: werewolfRoleConfigSchema.catch(defaultWerewolfRoleConfig),
     rolePresets: z.array(werewolfRolePresetSchema).default([]),
     seerChecks: z.record(z.string(), alignmentSchema).optional(),
-    votes: z.record(z.string(), z.string()).default({}),
+    votes: z.record(z.string(), z.object({
+      targetId: z.string(),
+      confirmed: z.boolean().default(false),
+    })).default({}),
     lastNight: z.string().optional(),
     witchVictimId: z.string().optional(),
     witchAntidoteUsed: z.boolean().optional(),
@@ -349,8 +352,8 @@ export async function advanceWerewolfDay(roomId: string) {
   return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/advance-day`, { method: 'POST' })
 }
 
-export async function werewolfVote(roomId: string, targetId: string) {
-  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/werewolf-vote`, jsonPost({ targetId }))
+export async function werewolfVote(roomId: string, targetId: string, confirmed: boolean) {
+  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/werewolf-vote`, jsonPost({ confirmed, targetId }))
 }
 
 export async function proposeAvalonTeam(roomId: string, team: string[]) {

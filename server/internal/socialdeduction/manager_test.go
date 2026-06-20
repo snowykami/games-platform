@@ -23,7 +23,7 @@ func TestPublicRoomHidesWerewolfRoles(t *testing.T) {
 			testPlayer("p2", "u2", "Wolf One", RoleWerewolf, AlignmentEvil),
 			testPlayer("p3", "u3", "Wolf Two", RoleWerewolf, AlignmentEvil),
 		},
-		Werewolf: WerewolfState{Day: 1, NightActions: map[string]string{}, Votes: map[string]string{}},
+		Werewolf: WerewolfState{Day: 1, NightActions: map[string]string{}, Votes: map[string]WerewolfVoteIntent{}},
 	}
 
 	hostView := manager.publicRoom(room, "u1")
@@ -51,7 +51,7 @@ func TestPublicRoomDoesNotSerializeStableUserIDs(t *testing.T) {
 			testPlayer("p1", "u1", "Host", RoleVillager, AlignmentGood),
 			testPlayer("p2", "u2", "Wolf", RoleWerewolf, AlignmentEvil),
 		},
-		Werewolf: WerewolfState{Day: 1, NightActions: map[string]string{}, Votes: map[string]string{}},
+		Werewolf: WerewolfState{Day: 1, NightActions: map[string]string{}, Votes: map[string]WerewolfVoteIntent{}},
 	}
 
 	view := manager.publicRoom(room, "u1")
@@ -257,7 +257,7 @@ func TestWerewolfNightUsesLLMDecision(t *testing.T) {
 	provider := &fakeDecisionProvider{
 		enabled: true,
 		decision: aiplayer.Decision{
-			ActionID: "target:p2",
+			ActionID: "target:seat_2",
 			Speech:   "我先看二号。",
 			Source:   "llm",
 		},
@@ -276,7 +276,7 @@ func TestWerewolfNightUsesLLMDecision(t *testing.T) {
 			Day:          1,
 			NightActions: map[string]string{},
 			SeerChecks:   map[string]Alignment{},
-			Votes:        map[string]string{},
+			Votes:        map[string]WerewolfVoteIntent{},
 		},
 	}
 	manager.rooms[room.ID] = room
@@ -287,8 +287,8 @@ func TestWerewolfNightUsesLLMDecision(t *testing.T) {
 	if provider.input.Game != "werewolf" {
 		t.Fatalf("expected werewolf decision input, got %q", provider.input.Game)
 	}
-	if !aiplayer.ValidateAction("target:p2", provider.input.Actions) {
-		t.Fatalf("expected LLM actions to include target:p2, got %+v", provider.input.Actions)
+	if !aiplayer.ValidateAction("target:seat_2", provider.input.Actions) {
+		t.Fatalf("expected LLM actions to include target:seat_2, got %+v", provider.input.Actions)
 	}
 	if room.Werewolf.NightActions["p1"] != "p2" {
 		t.Fatalf("expected seer to target p2, got %q", room.Werewolf.NightActions["p1"])
@@ -298,6 +298,52 @@ func TestWerewolfNightUsesLLMDecision(t *testing.T) {
 	}
 	if len(room.Speeches) != 0 {
 		t.Fatalf("expected werewolf night speech to stay private, got %+v", room.Speeches)
+	}
+}
+
+func TestWerewolfLLMInputDoesNotExposeAIOrHumanIDPrefixes(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled: true,
+		decision: aiplayer.Decision{
+			ActionID: "target:seat_2",
+			Source:   "llm",
+		},
+	}
+	manager := NewManager(GameWerewolf, provider)
+	room := &Room{
+		ID:    "WWFLLMIDS",
+		Game:  GameWerewolf,
+		Phase: PhaseWerewolfNight,
+		Players: []*Player{
+			testAIPlayer("ai_wolf", "北风", RoleWerewolf, AlignmentEvil),
+			testPlayer("plr_human", "u1", "snowykami", RoleVillager, AlignmentGood),
+			testAIPlayer("ai_seer", "南星", RoleSeer, AlignmentGood),
+		},
+		Werewolf: WerewolfState{
+			Day:          1,
+			NightActions: map[string]string{},
+			SeerChecks:   map[string]Alignment{},
+			Votes:        map[string]WerewolfVoteIntent{},
+		},
+	}
+	manager.rooms[room.ID] = room
+
+	if _, _, err := manager.RunNextAI(room.ID); err != nil {
+		t.Fatalf("run ai: %v", err)
+	}
+	payload, err := json.Marshal(provider.input)
+	if err != nil {
+		t.Fatalf("marshal llm input: %v", err)
+	}
+	serialized := string(payload)
+	if strings.Contains(serialized, "ai_") || strings.Contains(serialized, "plr_") {
+		t.Fatalf("expected LLM input to hide internal player ID prefixes, got %s", serialized)
+	}
+	if strings.Contains(serialized, "击杀 snowykami") || strings.Contains(serialized, "击杀 北风") {
+		t.Fatalf("expected LLM kill actions to use seat labels, got %s", serialized)
+	}
+	if room.Werewolf.NightActions["ai_wolf"] != "plr_human" {
+		t.Fatalf("expected aliased action to resolve to real target, got %q", room.Werewolf.NightActions["ai_wolf"])
 	}
 }
 
@@ -378,10 +424,10 @@ func TestWerewolfVoteUsesLLMDecision(t *testing.T) {
 	provider := &fakeDecisionProvider{
 		enabled: true,
 		decision: aiplayer.Decision{
-			ActionID: "vote:p2",
+			ActionID: "vote:seat_2",
 			Notes: map[string]string{
-				"p2":      "发言像狼",
-				"missing": "不会保存",
+				"seat_2":  "发言像狼",
+				"seat_99": "不会保存",
 			},
 			Speech: "二号像狼。",
 			Source: "llm",
@@ -401,7 +447,7 @@ func TestWerewolfVoteUsesLLMDecision(t *testing.T) {
 			Day:          1,
 			NightActions: map[string]string{},
 			SeerChecks:   map[string]Alignment{},
-			Votes:        map[string]string{},
+			Votes:        map[string]WerewolfVoteIntent{},
 		},
 	}
 	manager.rooms[room.ID] = room
@@ -412,11 +458,11 @@ func TestWerewolfVoteUsesLLMDecision(t *testing.T) {
 	if provider.input.Game != "werewolf" {
 		t.Fatalf("expected werewolf decision input, got %q", provider.input.Game)
 	}
-	if !aiplayer.ValidateAction("vote:p2", provider.input.Actions) {
-		t.Fatalf("expected LLM actions to include vote:p2, got %+v", provider.input.Actions)
+	if !aiplayer.ValidateAction("vote:seat_2", provider.input.Actions) {
+		t.Fatalf("expected LLM actions to include vote:seat_2, got %+v", provider.input.Actions)
 	}
-	if room.Werewolf.Votes["p1"] != "p2" {
-		t.Fatalf("expected vote p2, got %q", room.Werewolf.Votes["p1"])
+	if vote := room.Werewolf.Votes["p1"]; vote.TargetID != "p2" || !vote.Confirmed {
+		t.Fatalf("expected confirmed vote p2, got %+v", vote)
 	}
 	if room.PlayerNotes["p1"]["p2"] != "发言像狼" {
 		t.Fatalf("expected AI note to be stored, got %+v", room.PlayerNotes)
@@ -426,6 +472,23 @@ func TestWerewolfVoteUsesLLMDecision(t *testing.T) {
 	}
 	if len(room.Speeches) != 1 || room.Speeches[0].Text != "二号像狼。" {
 		t.Fatalf("expected LLM speech to be recorded, got %+v", room.Speeches)
+	}
+}
+
+func TestWerewolfCanTargetSelfAtNight(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFSELF", PhaseWerewolfNight, []*Player{
+		testPlayer("p1", "u1", "Wolf", RoleWerewolf, AlignmentEvil),
+		testPlayer("p2", "u2", "Witch", RoleWitch, AlignmentGood),
+		testPlayer("p3", "u3", "Villager", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.NightAction(room.ID, "u1", "target:p1"); err != nil {
+		t.Fatalf("werewolf self target should be legal: %v", err)
+	}
+	if room.Werewolf.NightActions["p1"] != "p1" {
+		t.Fatalf("expected wolf self target to be recorded, got %q", room.Werewolf.NightActions["p1"])
 	}
 }
 
@@ -490,13 +553,13 @@ func TestWerewolfHunterCanShootAfterExile(t *testing.T) {
 	})
 	manager.rooms[room.ID] = room
 
-	if _, err := manager.WerewolfVote(room.ID, "u2", "p1"); err != nil {
+	if _, err := manager.WerewolfVote(room.ID, "u2", "p1", true); err != nil {
 		t.Fatalf("wolf vote: %v", err)
 	}
-	if _, err := manager.WerewolfVote(room.ID, "u3", "p1"); err != nil {
+	if _, err := manager.WerewolfVote(room.ID, "u3", "p1", true); err != nil {
 		t.Fatalf("villager vote: %v", err)
 	}
-	if _, err := manager.WerewolfVote(room.ID, "u1", "p2"); err != nil {
+	if _, err := manager.WerewolfVote(room.ID, "u1", "p2", true); err != nil {
 		t.Fatalf("hunter vote: %v", err)
 	}
 	if room.Phase != PhaseWerewolfHunter || room.Werewolf.HunterPendingID != "p1" {
@@ -514,6 +577,49 @@ func TestWerewolfHunterCanShootAfterExile(t *testing.T) {
 	}
 }
 
+func TestWerewolfVoteRequiresConfirmationAndAllowsChanges(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFREVOTE", PhaseWerewolfVote, []*Player{
+		testPlayer("p1", "u1", "Villager A", RoleVillager, AlignmentGood),
+		testPlayer("p2", "u2", "Wolf", RoleWerewolf, AlignmentEvil),
+		testPlayer("p3", "u3", "Villager B", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.WerewolfVote(room.ID, "u1", "p2", false); err != nil {
+		t.Fatalf("select vote: %v", err)
+	}
+	if vote := room.Werewolf.Votes["p1"]; vote.TargetID != "p2" || vote.Confirmed {
+		t.Fatalf("expected unconfirmed selection p2, got %+v", vote)
+	}
+	if room.Phase != PhaseWerewolfVote {
+		t.Fatalf("unconfirmed vote should not resolve, got phase %q", room.Phase)
+	}
+
+	if _, err := manager.WerewolfVote(room.ID, "u1", "p3", false); err != nil {
+		t.Fatalf("change vote: %v", err)
+	}
+	if vote := room.Werewolf.Votes["p1"]; vote.TargetID != "p3" || vote.Confirmed {
+		t.Fatalf("expected changed unconfirmed selection p3, got %+v", vote)
+	}
+
+	if _, err := manager.WerewolfVote(room.ID, "u1", "p3", true); err != nil {
+		t.Fatalf("confirm vote: %v", err)
+	}
+	if _, err := manager.WerewolfVote(room.ID, "u2", "p1", true); err != nil {
+		t.Fatalf("wolf confirm: %v", err)
+	}
+	if room.Phase != PhaseWerewolfVote {
+		t.Fatalf("not all voters confirmed yet, got phase %q", room.Phase)
+	}
+	if _, err := manager.WerewolfVote(room.ID, "u3", "p1", true); err != nil {
+		t.Fatalf("final confirm: %v", err)
+	}
+	if room.Phase == PhaseWerewolfVote {
+		t.Fatalf("expected vote to resolve after all voters confirm")
+	}
+}
+
 func TestWerewolfIdiotSurvivesFirstExile(t *testing.T) {
 	manager := NewManager(GameWerewolf, nil)
 	room := testWerewolfRoom("WWFIDIOT", PhaseWerewolfVote, []*Player{
@@ -523,13 +629,13 @@ func TestWerewolfIdiotSurvivesFirstExile(t *testing.T) {
 	})
 	manager.rooms[room.ID] = room
 
-	if _, err := manager.WerewolfVote(room.ID, "u1", "p2"); err != nil {
+	if _, err := manager.WerewolfVote(room.ID, "u1", "p2", true); err != nil {
 		t.Fatalf("idiot vote: %v", err)
 	}
-	if _, err := manager.WerewolfVote(room.ID, "u2", "p1"); err != nil {
+	if _, err := manager.WerewolfVote(room.ID, "u2", "p1", true); err != nil {
 		t.Fatalf("wolf vote: %v", err)
 	}
-	if _, err := manager.WerewolfVote(room.ID, "u3", "p1"); err != nil {
+	if _, err := manager.WerewolfVote(room.ID, "u3", "p1", true); err != nil {
 		t.Fatalf("villager vote: %v", err)
 	}
 	if !room.Players[0].Alive {
@@ -567,7 +673,7 @@ func testWerewolfRoom(id string, phase Phase, players []*Player) *Room {
 			Day:            1,
 			NightActions:   map[string]string{},
 			SeerChecks:     map[string]Alignment{},
-			Votes:          map[string]string{},
+			Votes:          map[string]WerewolfVoteIntent{},
 			RevealedIdiots: map[string]bool{},
 		},
 	}

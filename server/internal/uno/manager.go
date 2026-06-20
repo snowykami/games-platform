@@ -230,6 +230,11 @@ func (m *Manager) RunAISpeech(roomID string) (PublicRoom, bool, error) {
 		room.mu.Unlock()
 		return view, false, nil
 	}
+	if hasPendingAIRequiredAction(room) {
+		view := publicRoom(room, "")
+		room.mu.Unlock()
+		return view, false, nil
+	}
 	lastSpeech := room.Speeches[len(room.Speeches)-1]
 	if lastSpeech.ID == room.LastAISpeechSourceID {
 		view := publicRoom(room, "")
@@ -533,6 +538,10 @@ func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
 		"continue", shouldContinue,
 	)
 	return publicRoom(room, ""), shouldContinue, nil
+}
+
+func hasPendingAIRequiredAction(room *Room) bool {
+	return room.Phase == PhasePlaying && len(room.Players) > 0 && room.Players[room.CurrentPlayerIndex].IsAI
 }
 
 func (m *Manager) Tick(now time.Time) TickResult {
