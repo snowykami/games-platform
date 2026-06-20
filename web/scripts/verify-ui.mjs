@@ -21,7 +21,7 @@ try {
   await page.screenshot({ fullPage: true, path: '/private/tmp/games-platform-room-gate.png' })
 
   await page.getByRole('button', { name: '创建并进入' }).click()
-  await page.getByRole('heading', { name: /房间 / }).waitFor()
+  await page.getByRole('heading', { name: /房间\s*/ }).waitFor()
   const roomURL = page.url()
   const roomID = new URL(roomURL).searchParams.get('room')
 
@@ -34,7 +34,7 @@ try {
   await guestPage.goto(roomURL, { waitUntil: 'networkidle' })
   await guestPage.getByRole('heading', { name: '登录后进入房间' }).waitFor()
   await guestPage.getByRole('button', { name: '游客登录' }).click()
-  await guestPage.getByRole('heading', { name: new RegExp(`房间\\s+${roomID}`) }).waitFor()
+  await guestPage.getByRole('heading', { name: new RegExp(`房间\\s*${roomID}`) }).waitFor()
 
   await page.getByRole('button', { name: '添加 AI' }).click()
   await page.getByText(/AI 已加入房间|加入了房间/).waitFor()

@@ -140,6 +140,157 @@ a {
   background: #fff2cf;
 }
 
+.gomoku-button {
+  position: relative;
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgb(255 255 255 / 34%);
+  border-radius: 8px;
+  padding: 0 14px;
+  color: #f4f0e4;
+  background: rgb(11 17 16 / 56%);
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 150ms ease,
+    background 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.gomoku-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgb(11 17 16 / 74%);
+  box-shadow: 0 14px 30px rgb(0 0 0 / 24%);
+}
+
+.gomoku-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.gomoku-button.loading {
+  padding-left: 36px;
+}
+
+.gomoku-button.loading::before {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: uno-spin 780ms linear infinite;
+  content: "";
+}
+
+.gomoku-button-primary {
+  border-color: #f4f0e4;
+  color: #101714;
+  background: #f4f0e4;
+  font-weight: 1000;
+}
+
+.gomoku-button-primary:hover:not(:disabled) {
+  background: #ffffff;
+}
+
+.gomoku-panel {
+  border: 1px solid rgb(255 255 255 / 24%);
+  border-radius: 8px;
+  background: rgb(16 23 20 / 44%);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 24%);
+  backdrop-filter: blur(10px);
+}
+
+.gomoku-board {
+  background:
+    radial-gradient(circle at 50% 50%, rgb(31 143 123 / 18%), transparent 34%),
+    linear-gradient(135deg, #c98a48, #e1b56a 48%, #b8753c);
+}
+
+.gomoku-cell:disabled {
+  opacity: 1;
+}
+
+.xiangqi-panel {
+  border: 1px solid rgb(255 248 232 / 18%);
+  border-radius: 8px;
+  background: rgb(16 16 13 / 70%);
+  box-shadow: 0 18px 46px rgb(0 0 0 / 24%);
+}
+
+.xiangqi-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgb(255 248 232 / 35%);
+  border-radius: 8px;
+  padding: 0 14px;
+  color: #fff8e8;
+  background: rgb(255 248 232 / 10%);
+  font-weight: 900;
+  cursor: pointer;
+  transition:
+    transform 150ms ease,
+    background 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.xiangqi-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgb(255 248 232 / 18%);
+  box-shadow: 0 14px 30px rgb(0 0 0 / 24%);
+}
+
+.xiangqi-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.xiangqi-button-primary {
+  border-color: #fff8e8;
+  color: #202018;
+  background: #fff8e8;
+}
+
+.xiangqi-button-primary:hover:not(:disabled) {
+  background: #f3deb3;
+}
+
+.xiangqi-piece {
+  transition:
+    left 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    top 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 160ms ease;
+}
+
+.xiangqi-piece:hover:not(:disabled) {
+  box-shadow:
+    0 0 0 3px rgb(242 213 154 / 42%),
+    0 14px 28px rgb(52 27 16 / 34%);
+}
+
+.xiangqi-piece:disabled {
+  cursor: default;
+}
+
+.xiangqi-capture-burst {
+  animation: xiangqi-capture-burst 380ms ease-out forwards;
+}
+
+.xiangqi-check-banner {
+  animation: xiangqi-check-banner 1300ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  transform-origin: center;
+}
+
 .uno-card-back,
 .uno-mini-card-back {
   border: 2px solid #fff8e8;
@@ -178,19 +329,20 @@ a {
 
 .uno-flying-card {
   position: absolute;
-  left: 50%;
-  top: 62%;
+  left: var(--from-x, 50%);
+  top: var(--from-y, 62%);
   transform: translate(-50%, -50%);
 }
 
 .uno-flying-back {
   position: absolute;
-  left: 50%;
-  top: 50%;
+  left: var(--from-x, 50%);
+  top: var(--from-y, 50%);
   display: block;
   width: 56px;
   aspect-ratio: 2 / 3;
   border-radius: 10px;
+  transform: translate(-50%, -50%);
 }
 
 .uno-flying-back::before {
@@ -237,9 +389,105 @@ a {
   animation: uno-toast-pop 920ms ease forwards;
 }
 
+.mahjong-action {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgb(216 182 106 / 48%);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #fff8e8;
+  background: rgb(255 248 232 / 10%);
+  font-weight: 900;
+  cursor: pointer;
+  transition:
+    transform 150ms ease,
+    background 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.mahjong-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgb(255 248 232 / 16%);
+  box-shadow: 0 14px 30px rgb(0 0 0 / 22%);
+}
+
+.mahjong-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.mahjong-action-primary {
+  border-color: #ffd166;
+  color: #143128;
+  background: #ffd166;
+}
+
+.mahjong-action-primary:hover:not(:disabled) {
+  background: #ffe09a;
+}
+
+.mahjong-tile {
+  display: grid;
+  width: clamp(38px, 5.4vw, 54px);
+  min-width: 38px;
+  aspect-ratio: 5 / 7;
+  place-items: center;
+  border: 1px solid rgb(20 49 40 / 18%);
+  border-bottom-width: 5px;
+  border-radius: 7px;
+  color: #143128;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 76%), transparent 34%),
+    #fff8e8;
+  box-shadow:
+    inset 0 -5px 0 rgb(216 182 106 / 34%),
+    0 13px 22px rgb(0 0 0 / 22%);
+}
+
 @keyframes uno-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes xiangqi-capture-burst {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    box-shadow: 0 0 0 0 rgb(207 48 39 / 42%);
+  }
+
+  48% {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(1.18) rotate(-5deg);
+    box-shadow: 0 0 0 12px rgb(207 48 39 / 0%);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.58) rotate(10deg);
+    box-shadow: 0 0 0 18px rgb(207 48 39 / 0%);
+  }
+}
+
+@keyframes xiangqi-check-banner {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.84);
+  }
+
+  16%,
+  72% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
   }
 }
 
@@ -259,8 +507,10 @@ a {
 
 @keyframes uno-fly-to-discard {
   0% {
+    left: var(--from-x, 50%);
+    top: var(--from-y, 62%);
     opacity: 0;
-    transform: translate(-50%, 42%) scale(0.62) rotate(-14deg);
+    transform: translate(-50%, -50%) scale(0.62) rotate(-14deg);
   }
 
   35% {
@@ -268,6 +518,8 @@ a {
   }
 
   100% {
+    left: var(--to-x, 55%);
+    top: var(--to-y, 50%);
     opacity: 0;
     transform: translate(-50%, -50%) scale(1) rotate(0deg);
   }
@@ -275,6 +527,8 @@ a {
 
 @keyframes uno-fly-to-seat {
   0% {
+    left: var(--from-x, 45%);
+    top: var(--from-y, 50%);
     opacity: 0;
     transform: translate(-50%, -50%) scale(0.82) rotate(8deg);
   }
@@ -284,8 +538,10 @@ a {
   }
 
   100% {
+    left: var(--to-x, 50%);
+    top: var(--to-y, 84%);
     opacity: 0;
-    transform: translate(-50%, 160%) scale(0.62) rotate(-8deg);
+    transform: translate(-50%, -50%) scale(0.62) rotate(-8deg);
   }
 }
 

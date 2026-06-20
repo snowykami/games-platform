@@ -9,13 +9,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/snowykami/games-platform/server/internal/aiplayer"
 	"github.com/snowykami/games-platform/server/internal/auth"
 	"github.com/snowykami/games-platform/server/internal/config"
 	"github.com/snowykami/games-platform/server/internal/games"
+	"github.com/snowykami/games-platform/server/internal/gomoku"
 	"github.com/snowykami/games-platform/server/internal/httpx"
+	"github.com/snowykami/games-platform/server/internal/i18n"
+	"github.com/snowykami/games-platform/server/internal/mahjong"
 	"github.com/snowykami/games-platform/server/internal/runtimecheck"
 	"github.com/snowykami/games-platform/server/internal/uno"
 	frontend "github.com/snowykami/games-platform/server/internal/web"
+	"github.com/snowykami/games-platform/server/internal/xiangqi"
 )
 
 type gamesResponse struct {
@@ -49,7 +54,12 @@ func main() {
 func routes(cfg config.Config) http.Handler {
 	authStore := auth.NewStore()
 	authHandler := auth.NewHandler(authStore, cfg.OIDC)
-	unoHandler := uno.NewHandler(uno.NewManager())
+	aiProvider := aiplayer.NewOpenAIProvider(cfg.AI)
+	aiHandler := aiplayer.NewHandler(aiProvider)
+	gomokuHandler := gomoku.NewHandler(gomoku.NewManager(aiProvider))
+	mahjongHandler := mahjong.NewHandler(mahjong.NewManager(aiProvider))
+	unoHandler := uno.NewHandler(uno.NewManager(aiProvider))
+	xiangqiHandler := xiangqi.NewHandler(xiangqi.NewManager(aiProvider))
 
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
@@ -65,11 +75,15 @@ func routes(cfg config.Config) http.Handler {
 	router.Route("/api", func(api chi.Router) {
 		api.Mount("/auth", authHandler.Routes())
 		api.Get("/games", func(w http.ResponseWriter, r *http.Request) {
-			httpx.WriteJSON(w, http.StatusOK, gamesResponse{Games: games.List()})
+			httpx.WriteJSON(w, http.StatusOK, gamesResponse{Games: games.ListForLocale(i18n.FromRequest(r))})
 		})
 		api.Group(func(protected chi.Router) {
 			protected.Use(auth.RequireUser)
+			protected.Mount("/ai", aiHandler.Routes())
+			protected.Mount("/gomoku", gomokuHandler.Routes())
+			protected.Mount("/mahjong", mahjongHandler.Routes())
 			protected.Mount("/uno", unoHandler.Routes())
+			protected.Mount("/xiangqi", xiangqiHandler.Routes())
 		})
 		api.Group(func(admin chi.Router) {
 			admin.Use(auth.RequireAdmin)
@@ -77,7 +91,10 @@ func routes(cfg config.Config) http.Handler {
 		})
 	})
 
+	router.With(auth.RequireUser).Get("/ws/gomoku", gomokuHandler.WebSocket)
+	router.With(auth.RequireUser).Get("/ws/mahjong", mahjongHandler.WebSocket)
 	router.With(auth.RequireUser).Get("/ws/uno", unoHandler.WebSocket)
+	router.With(auth.RequireUser).Get("/ws/xiangqi", xiangqiHandler.WebSocket)
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api" || r.URL.Path == "/ws" || strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {
 			http.NotFound(w, r)

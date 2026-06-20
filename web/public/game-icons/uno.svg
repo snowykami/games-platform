@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Uno">
+  <rect width="64" height="64" rx="16" fill="#191611"/>
+  <rect x="19" y="10" width="30" height="44" rx="7" fill="#fff8e8" transform="rotate(10 34 32)"/>
+  <path d="M25 16h18v12H23z" fill="#d72f2f" transform="rotate(10 34 32)"/>
+  <path d="M23 28h22v10H22z" fill="#f3c33c" transform="rotate(10 34 32)"/>
+  <path d="M22 38h22v12H20z" fill="#1f9b55" transform="rotate(10 34 32)"/>
+  <ellipse cx="34" cy="33" rx="10" ry="16" fill="none" stroke="#191611" stroke-width="4" transform="rotate(10 34 32)"/>
+</svg>

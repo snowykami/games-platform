@@ -1,15 +1,17 @@
 import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router'
+import { useI18n } from '@/i18n/context'
 import { useAuth } from './AuthContext'
 
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { isLoading, user } = useAuth()
+  const { t } = useI18n()
   const location = useLocation()
 
   if (isLoading) {
     return (
       <main className="grid min-h-svh place-items-center bg-background px-4 text-foreground">
-        <p className="text-sm font-semibold text-muted-foreground">正在确认登录状态...</p>
+        <p className="text-sm font-semibold text-muted-foreground">{t('auth.checking')}</p>
       </main>
     )
   }
@@ -23,8 +25,8 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     return (
       <main className="grid min-h-svh place-items-center bg-background px-4 text-foreground">
         <section className="w-full max-w-md rounded-lg border bg-card p-6 text-card-foreground shadow-sm">
-          <h1 className="text-2xl font-bold">账号已被封禁</h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">平台管理员已限制此身份进入联机对局。</p>
+          <h1 className="text-2xl font-bold">{t('auth.bannedTitle')}</h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">{t('auth.bannedDescription')}</p>
         </section>
       </main>
     )

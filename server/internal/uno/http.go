@@ -29,6 +29,23 @@ type createRoomRequest struct {
 	ThemeKey   string `json:"themeKey"`
 }
 
+type addAIRequest struct {
+	Level string `json:"level"`
+}
+
+type updateAIRequest struct {
+	Level    string `json:"level"`
+	PlayerID string `json:"playerId,omitempty"`
+}
+
+type speechRequest struct {
+	Text string `json:"text"`
+}
+
+type catchUNORequest struct {
+	TargetID string `json:"targetId"`
+}
+
 type wsMessage struct {
 	Type    string          `json:"type"`
 	Payload json.RawMessage `json:"payload,omitempty"`
@@ -44,26 +61,30 @@ func (h *Handler) Routes() http.Handler {
 	router.Get("/rooms/{roomID}", h.getRoom)
 	router.Post("/rooms/{roomID}/join", h.joinRoom)
 	router.Post("/rooms/{roomID}/ai", h.addAI)
+	router.Patch("/rooms/{roomID}/ai/{playerID}", h.updateAI)
+	router.Post("/rooms/{roomID}/speech", h.speech)
 	router.Post("/rooms/{roomID}/start", h.start)
 	router.Post("/rooms/{roomID}/play", h.play)
 	router.Post("/rooms/{roomID}/draw", h.draw)
+	router.Post("/rooms/{roomID}/uno", h.callUNO)
+	router.Post("/rooms/{roomID}/catch-uno", h.catchUNO)
 	return router
 }
 
 func (h *Handler) WebSocket(w http.ResponseWriter, r *http.Request) {
 	user, ok := auth.UserFromContext(r.Context())
 	if !ok {
-		httpx.WriteError(w, http.StatusUnauthorized, "login required")
+		httpx.WriteErrorKey(w, r, http.StatusUnauthorized, "login_required")
 		return
 	}
 	if user.Banned {
-		httpx.WriteError(w, http.StatusForbidden, "user is banned")
+		httpx.WriteErrorKey(w, r, http.StatusForbidden, "user_banned")
 		return
 	}
 
 	roomID := r.URL.Query().Get("room")
 	if _, err := h.manager.JoinRoom(roomID, toUserView(user)); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -79,7 +100,7 @@ func (h *Handler) createRoom(w http.ResponseWriter, r *http.Request) {
 	var request createRoomRequest
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := httpx.DecodeJSON(r, &request); err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "invalid json body")
+			httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
 			return
 		}
 	}
@@ -95,7 +116,7 @@ func (h *Handler) getRoom(w http.ResponseWriter, r *http.Request) {
 	user := mustUser(r)
 	room, err := h.manager.Public(chi.URLParam(r, "roomID"), user.ID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusNotFound, err.Error())
+		httpx.WriteErrorKey(w, r, http.StatusNotFound, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
@@ -105,7 +126,7 @@ func (h *Handler) joinRoom(w http.ResponseWriter, r *http.Request) {
 	user := mustUser(r)
 	room, err := h.manager.JoinRoom(chi.URLParam(r, "roomID"), toUserView(user))
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	h.hub.Broadcast(room.ID)
@@ -114,8 +135,39 @@ func (h *Handler) joinRoom(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) addAI(w http.ResponseWriter, r *http.Request) {
+	var request addAIRequest
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := httpx.DecodeJSON(r, &request); err != nil {
+			httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
+			return
+		}
+	}
+
 	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
-		return h.manager.AddAI(roomID, userID)
+		return h.manager.AddAI(roomID, userID, AIOptions{Level: request.Level})
+	})
+}
+
+func (h *Handler) updateAI(w http.ResponseWriter, r *http.Request) {
+	var request updateAIRequest
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
+		return
+	}
+
+	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
+		return h.manager.UpdateAI(roomID, userID, chi.URLParam(r, "playerID"), AIOptions{Level: request.Level})
+	})
+}
+
+func (h *Handler) speech(w http.ResponseWriter, r *http.Request) {
+	var request speechRequest
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
+		return
+	}
+	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
+		return h.manager.Say(roomID, userID, request.Text)
 	})
 }
 
@@ -134,7 +186,7 @@ func (h *Handler) draw(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) play(w http.ResponseWriter, r *http.Request) {
 	var request playRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "invalid json body")
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
 		return
 	}
 
@@ -143,11 +195,29 @@ func (h *Handler) play(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) callUNO(w http.ResponseWriter, r *http.Request) {
+	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
+		return h.manager.CallUNO(roomID, userID)
+	})
+}
+
+func (h *Handler) catchUNO(w http.ResponseWriter, r *http.Request) {
+	var request catchUNORequest
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
+		return
+	}
+
+	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
+		return h.manager.CatchUNO(roomID, userID, request.TargetID)
+	})
+}
+
 func (h *Handler) mutateRoom(w http.ResponseWriter, r *http.Request, mutate func(roomID string, userID string) (PublicRoom, error)) {
 	user := mustUser(r)
 	room, err := mutate(chi.URLParam(r, "roomID"), user.ID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	h.hub.Broadcast(room.ID)
@@ -248,7 +318,27 @@ func (h *Hub) Broadcast(roomID string) {
 func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) error {
 	switch message.Type {
 	case "room.add_ai":
-		_, err := h.manager.AddAI(roomID, userID)
+		var request addAIRequest
+		if len(message.Payload) > 0 {
+			if err := json.Unmarshal(message.Payload, &request); err != nil {
+				return errors.New("invalid_ai_payload")
+			}
+		}
+		_, err := h.manager.AddAI(roomID, userID, AIOptions{Level: request.Level})
+		return err
+	case "room.update_ai":
+		var request updateAIRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_ai_payload")
+		}
+		_, err := h.manager.UpdateAI(roomID, userID, request.PlayerID, AIOptions{Level: request.Level})
+		return err
+	case "room.speech":
+		var request speechRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_speech_payload")
+		}
+		_, err := h.manager.Say(roomID, userID, request.Text)
 		return err
 	case "room.start":
 		_, err := h.manager.Start(roomID, userID)
@@ -259,12 +349,22 @@ func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) err
 	case "room.play":
 		var request playRequest
 		if err := json.Unmarshal(message.Payload, &request); err != nil {
-			return errors.New("invalid play payload")
+			return errors.New("invalid_play_payload")
 		}
 		_, err := h.manager.Play(roomID, userID, request.CardID, request.Color)
 		return err
+	case "room.call_uno":
+		_, err := h.manager.CallUNO(roomID, userID)
+		return err
+	case "room.catch_uno":
+		var request catchUNORequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_catch_uno_payload")
+		}
+		_, err := h.manager.CatchUNO(roomID, userID, request.TargetID)
+		return err
 	default:
-		return errors.New("unknown message type")
+		return errors.New("unknown_message_type")
 	}
 }
 

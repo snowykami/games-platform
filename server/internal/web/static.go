@@ -7,6 +7,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/snowykami/games-platform/server/internal/httpx"
 )
 
 //go:embed dist
@@ -46,7 +48,7 @@ func Handler() http.Handler {
 func serveIndex(w http.ResponseWriter, r *http.Request, assets fs.FS) {
 	index, err := fs.ReadFile(assets, "index.html")
 	if err != nil {
-		http.Error(w, "frontend index.html not found", http.StatusInternalServerError)
+		httpx.WriteErrorKey(w, r, http.StatusInternalServerError, "frontend_index_missing")
 		return
 	}
 

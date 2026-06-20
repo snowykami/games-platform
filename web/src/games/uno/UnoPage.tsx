@@ -5,6 +5,9 @@ import { ArrowLeft, Ban, Copy, Palette, Plus, RefreshCw, RotateCcw, RotateCw, Sk
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
+import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
+import { latestSpeechForPlayer } from '@/games/speech'
+import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { useUnoRoom } from './useUnoRoom'
 
@@ -27,8 +30,9 @@ const COLOR_SWATCHES: Record<UnoColor, string> = {
 
 export function UnoPage({ roomId }: { roomId: string }) {
   const { user } = useAuth()
+  const { t } = useI18n()
   const { actions, error, isLoading, room } = useUnoRoom(roomId)
-  const [message, setMessage] = useState('服务端联机房间已接入。')
+  const [message, setMessage] = useState(() => t('uno.tableReady'))
   const [activeAction, setActiveAction] = useState<UnoPublicAction>()
   const [singleClickPlay, setSingleClickPlay] = useState(() => window.localStorage.getItem('uno-single-click-play') === 'true')
   const [pendingCardId, setPendingCardId] = useState<string>()
@@ -36,6 +40,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
   const lastActionSeqRef = useRef(0)
 
   const human = useMemo(() => room?.players.find(player => player.userId === user?.id), [room?.players, user?.id])
+  const seatedPlayers = useMemo(() => room && human ? orderPlayersFromViewer(room.players, human.id) : [], [human, room])
   const currentPlayer = room?.players.find(player => player.id === room.currentPlayerId)
   const winner = room?.players.find(player => player.id === room.winnerId)
   const hand = useMemo(() => human?.hand ?? [], [human?.hand])
@@ -43,6 +48,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
   const playableCardIds = useMemo(() => new Set(room?.playableCardIds ?? []), [room?.playableCardIds])
   const playableCards = useMemo(() => hand.filter(card => playableCardIds.has(card.id)), [hand, playableCardIds])
   const aiPlayerCount = room?.players.filter(player => player.isAI).length ?? 0
+  const catchableUnoPlayers = room?.players.filter(player => player.userId !== user?.id && player.needsUno) ?? []
   const lastLog = room?.log.at(-1)?.text
   const selectedCardId = isHumanTurn && hand.some(card => card.id === pendingCardId) ? pendingCardId : undefined
   const activeWildPicker = wildPicker && isHumanTurn && hand.some(card => card.id === wildPicker.card.id) ? wildPicker : undefined
@@ -84,7 +90,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
 
   async function handleCopyRoom() {
     await navigator.clipboard?.writeText(window.location.href)
-    setMessage('链接已复制。')
+    setMessage(t('room.copied'))
   }
 
   async function handlePlay(card: UnoCard) {
@@ -94,12 +100,12 @@ export function UnoPage({ roomId }: { roomId: string }) {
     if (card.color === 'wild') {
       setPendingCardId(card.id)
       setWildPicker({ card, color: chooseBestWildColor(hand, card.id, room.activeColor) })
-      setMessage('选择万能牌颜色后确认出牌。')
+      setMessage(t('uno.chooseColorFirst'))
       return
     }
     if (!singleClickPlay && selectedCardId !== card.id) {
       setPendingCardId(card.id)
-      setMessage('再次点击这张牌确认出牌。')
+      setMessage(t('uno.confirmCard'))
       return
     }
 
@@ -110,12 +116,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
     await actions.play(card.id, color)
     setPendingCardId(undefined)
     setWildPicker(undefined)
-    setMessage(`你打出了 ${formatCard(card)}。`)
-  }
-
-  function cancelWildPicker() {
-    setPendingCardId(undefined)
-    setWildPicker(undefined)
+    setMessage(t('uno.playedCard', { card: formatCard(card) }))
   }
 
   async function handleDraw() {
@@ -124,18 +125,28 @@ export function UnoPage({ roomId }: { roomId: string }) {
     }
 
     await actions.draw()
-    setMessage('你摸牌并结束回合。')
+    setMessage(t('uno.drewCard'))
   }
 
   async function handleRestart() {
     await actions.start()
-    setMessage('新的一局开始。')
+    setMessage(t('uno.restarted'))
+  }
+
+  async function handleCallUno() {
+    await actions.callUno()
+    setMessage('UNO!')
+  }
+
+  async function handleCatchUno(targetId: string) {
+    await actions.catchUno(targetId)
+    setMessage(t('uno.caughtUno'))
   }
 
   if (isLoading || !room || !human || !room.topCard) {
     return (
       <main className="grid h-svh place-items-center overflow-hidden bg-[#15110e] px-4 text-[#fff8e8]">
-        <p className="text-sm font-black">{error ?? '正在进入 UNO 房间...'}</p>
+        <p className="text-sm font-black">{error ?? t('uno.loading')}</p>
       </main>
     )
   }
@@ -155,7 +166,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
             to="/"
           >
             <ArrowLeft className="mr-2 inline size-4" />
-            游戏大厅
+            {t('common.backToLobby')}
           </Link>
         </header>
 
@@ -163,44 +174,51 @@ export function UnoPage({ roomId }: { roomId: string }) {
           <div className="flex min-h-0 flex-wrap items-center gap-1.5 rounded-lg border border-white/20 bg-[#100d0b]/50 p-1.5 shadow-[0_18px_46px_rgba(0,0,0,0.22)] backdrop-blur-md sm:gap-2 sm:p-2">
             <button className="uno-button uno-button-primary" type="button" onClick={handleCopyRoom}>
               <Copy className="size-4" />
-              复制链接
+              {t('common.copyLink')}
             </button>
-            <StatusPill>{room.phase === 'finished' ? '已结束' : '进行中'}</StatusPill>
+            <StatusPill>{room.phase === 'finished' ? t('uno.finished') : t('uno.playing')}</StatusPill>
             <StatusPill>
-              回合：
+              {t('uno.turn')}
               {currentPlayer?.name ?? '-'}
             </StatusPill>
             <StatusPill>
-              <span>当前颜色</span>
+              <span>{t('uno.currentColor')}</span>
               {room.activeColor ? <ColorDot color={room.activeColor} /> : <span>-</span>}
             </StatusPill>
             <StatusPill>
               {room.direction === 1 ? <RotateCw className="size-4" /> : <RotateCcw className="size-4" />}
-              <span>{room.direction === 1 ? '顺时针' : '逆时针'}</span>
+              <span>{room.direction === 1 ? t('uno.clockwise') : t('uno.counterClockwise')}</span>
             </StatusPill>
             <StatusPill>
               AI：
               {aiPlayerCount}
             </StatusPill>
             <StatusPill>
-              房间：
+              {t('common.room')}
               {room.id}
             </StatusPill>
+            {room.pendingDrawCount > 0 && (
+              <StatusPill>
+                {t('uno.penalty')}
+                {room.pendingDrawCount}
+              </StatusPill>
+            )}
+            {(room.rules.flip || room.flipSide) && <StatusPill>{room.flipSide ? t('uno.darkSide') : t('uno.lightSide')}</StatusPill>}
             <button className="uno-button ml-auto" disabled={room.hostUserId !== user?.id} type="button" onClick={handleRestart}>
               <RotateCcw className="size-4" />
-              重开
+              {t('uno.restart')}
             </button>
           </div>
 
           <section
-            aria-label="UNO 圆桌"
+            aria-label={t('uno.tableLabel')}
             className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] overflow-hidden rounded-lg border border-white/25 bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.08),transparent_58%),rgba(11,10,9,0.42)] shadow-[inset_0_0_90px_rgba(0,0,0,0.42),0_24px_70px_rgba(0,0,0,0.3)]"
           >
             <div className="relative min-h-[300px] overflow-hidden sm:min-h-[360px]">
               <div className="absolute inset-3 rounded-full border-[12px] border-[#49331d] bg-[radial-gradient(ellipse_at_center,rgba(255,248,232,0.08),transparent_52%),repeating-linear-gradient(90deg,rgba(255,255,255,0.025)_0_1px,transparent_1px_22px),#16533e] shadow-[inset_0_0_0_3px_rgba(255,248,232,0.18),inset_0_0_90px_rgba(0,0,0,0.32),0_24px_80px_rgba(0,0,0,0.36)] sm:inset-5 sm:border-[16px]">
                 <div className="absolute left-1/2 top-1/2 z-20 grid w-[min(230px,48vw)] -translate-x-1/2 -translate-y-1/2 grid-cols-[64px_76px] items-center justify-center gap-2 text-center sm:w-[min(290px,44vw)] sm:grid-cols-[82px_96px] sm:gap-3.5">
                   <button
-                    aria-label="摸牌"
+                    aria-label={t('uno.drawPile')}
                     className="uno-card-back aspect-[2/3] w-16 rounded-xl p-0 transition hover:-translate-y-1 disabled:cursor-not-allowed disabled:opacity-45 sm:w-[82px]"
                     disabled={!isHumanTurn}
                     type="button"
@@ -210,55 +228,72 @@ export function UnoPage({ roomId }: { roomId: string }) {
                     <UnoCardView card={room.topCard} className="table-card w-[68px] sm:w-[86px]" />
                   </div>
                   <div className="col-span-full grid gap-0.5 rounded-lg bg-[#090807]/60 px-2 py-1.5 text-xs sm:gap-1 sm:px-3 sm:py-2 sm:text-sm">
-                    <strong>{room.phase === 'finished' ? `${winner?.name ?? '玩家'} 获胜` : `${currentPlayer?.name ?? '-'} 的回合`}</strong>
+                    <strong>{room.phase === 'finished' ? t('uno.winner', { name: winner?.name ?? t('common.player') }) : t('uno.playerTurn', { name: currentPlayer?.name ?? '-' })}</strong>
                     <span>
-                      当前颜色：
-                      {room.activeColor ? formatColor(room.activeColor) : '-'}
+                      {t('uno.currentColor')}
+                      {room.activeColor ? formatColor(room.activeColor, t) : '-'}
                     </span>
                     <span>
-                      牌堆
+                      {t('uno.discardPile')}
                       {' '}
                       {room.drawPileCount}
                     </span>
                   </div>
                 </div>
 
-                {room.players.map((player, index) => (
+                {seatedPlayers.map((player, index) => (
                   <PlayerSeat
                     key={player.id}
                     activeAction={activeAction}
                     currentPlayerId={room.currentPlayerId}
                     index={index}
                     isSelf={player.userId === user?.id}
+                    onSpeak={actions.say}
                     player={player}
-                    total={room.players.length}
+                    speech={latestSpeechForPlayer(room.speeches, player.id)?.text}
+                    total={seatedPlayers.length}
                   />
                 ))}
-                <ActionLayer action={activeAction} />
+                <ActionLayer action={activeAction} players={seatedPlayers} />
               </div>
             </div>
 
-            <div className="min-h-0 border-t border-white/15 bg-[#100d0b]/62 px-2 pb-2 pt-4 backdrop-blur-md sm:px-3 sm:pb-3 sm:pt-5">
+            <div className="min-h-0 bg-[#100d0b]/62 px-2 pb-2 pt-5 shadow-[inset_0_24px_36px_rgba(0,0,0,0.18)] backdrop-blur-md sm:px-3 sm:pb-3 sm:pt-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <strong>
-                    你的手牌
+                    {t('uno.yourHand')}
                     {' '}
                     {hand.length}
                   </strong>
                   <p className="mt-0.5 text-xs font-semibold text-[#fff8e8]/75 sm:text-sm">
-                    {isHumanTurn ? '选择发光的牌出牌。' : `等待 ${currentPlayer?.name ?? '玩家'} 行动。`}
+                    {isHumanTurn ? t('uno.playableHint') : t('uno.waiting', { name: currentPlayer?.name ?? t('common.player') })}
                   </p>
                 </div>
-                <label className="inline-flex min-h-9 items-center gap-2 rounded-full border border-white/25 bg-[#141310]/44 px-3 text-xs font-black text-[#fff8e8] sm:text-sm">
-                  <input
-                    checked={singleClickPlay}
-                    className="size-4 accent-[#33f3ff]"
-                    type="checkbox"
-                    onChange={event => setSingleClickPlay(event.currentTarget.checked)}
-                  />
-                  单击出牌
-                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <SpeechButton onSend={actions.say} />
+                  {human.needsUno && (
+                    <button className="uno-button uno-button-primary" type="button" onClick={handleCallUno}>
+                      UNO
+                    </button>
+                  )}
+                  {catchableUnoPlayers.map(player => (
+                    <button key={player.id} className="uno-button" type="button" onClick={() => handleCatchUno(player.id)}>
+                      {t('uno.catchUno')}
+                      {' '}
+                      {player.name}
+                    </button>
+                  ))}
+                  <label className="inline-flex min-h-9 items-center gap-2 rounded-full border border-white/25 bg-[#141310]/44 px-3 text-xs font-black text-[#fff8e8] sm:text-sm">
+                    <input
+                      checked={singleClickPlay}
+                      className="size-4 accent-[#33f3ff]"
+                      type="checkbox"
+                      onChange={event => setSingleClickPlay(event.currentTarget.checked)}
+                    />
+                    {t('uno.clickToPlay')}
+                  </label>
+                </div>
               </div>
 
               <div className="mt-3 flex max-h-[18svh] min-h-0 flex-wrap items-end gap-2 overflow-y-auto overflow-x-hidden pb-1 pt-3 sm:max-h-36 sm:gap-2.5 sm:pt-4">
@@ -285,46 +320,38 @@ export function UnoPage({ roomId }: { roomId: string }) {
               <p className="mt-1 min-h-5 text-xs font-black text-[#fff8e8] [overflow-wrap:anywhere] sm:mt-2 sm:text-sm">
                 {error ?? lastLog ?? message}
                 {' '}
-                可出牌：
+                {t('uno.playableCards')}
                 {playableCards.length}
                 {' '}
-                张
+                {t('uno.cards')}
               </p>
             </div>
           </section>
         </section>
       </div>
       {activeWildPicker && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-[#090807]/58 px-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="选择万能牌颜色">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#090807]/58 px-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t('uno.chooseWildColor')}>
           <div className="w-[min(360px,calc(100vw-32px))] rounded-lg border border-white/25 bg-[#14110e] p-4 text-[#fff8e8] shadow-[0_28px_80px_rgba(0,0,0,0.45)]">
             <div className="flex items-center justify-between gap-3">
-              <strong>选择颜色</strong>
+              <strong>{t('uno.chooseColor')}</strong>
               <span className="text-xs font-black text-[#fff8e8]/65">{formatCard(activeWildPicker.card)}</span>
             </div>
             <div className="mt-4 grid grid-cols-4 gap-2">
               {UNO_COLORS.map(color => (
                 <button
                   key={color}
-                  aria-label={`选择${formatColor(color)}`}
+                  aria-label={t('uno.chooseNamedColor', { color: formatColor(color, t) })}
                   className={cn(
                     'grid min-h-16 place-items-center rounded-lg border-2 border-[#fff8e8]/70 transition hover:-translate-y-0.5',
                     COLOR_SWATCHES[color],
                     activeWildPicker.color === color && 'outline outline-4 outline-[#33f3ff]',
                   )}
                   type="button"
-                  onClick={() => setWildPicker(current => current && { ...current, color })}
+                  onClick={() => playConfirmedCard(activeWildPicker.card, color)}
                 >
-                  <span className="sr-only">{formatColor(color)}</span>
+                  <span className="sr-only">{formatColor(color, t)}</span>
                 </button>
               ))}
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="uno-button" type="button" onClick={cancelWildPicker}>
-                取消
-              </button>
-              <button className="uno-button uno-button-primary" type="button" onClick={() => playConfirmedCard(activeWildPicker.card, activeWildPicker.color)}>
-                出牌
-              </button>
             </div>
           </div>
         </div>
@@ -342,7 +369,8 @@ function StatusPill({ children }: { children: ReactNode }) {
 }
 
 function ColorDot({ color }: { color: UnoColor }) {
-  return <span aria-label={formatColor(color)} className={cn('size-4 rounded-full border-2 border-[#fff8e8]', COLOR_SWATCHES[color])} />
+  const { t } = useI18n()
+  return <span aria-label={formatColor(color, t)} className={cn('size-4 rounded-full border-2 border-[#fff8e8]', COLOR_SWATCHES[color])} />
 }
 
 function PlayerSeat({
@@ -350,14 +378,18 @@ function PlayerSeat({
   currentPlayerId,
   index,
   isSelf,
+  onSpeak,
   player,
+  speech,
   total,
 }: {
   activeAction?: UnoPublicAction
   currentPlayerId?: string
   index: number
   isSelf: boolean
+  onSpeak: (text: string) => Promise<void>
   player: UnoOnlinePlayer
+  speech?: string
   total: number
 }) {
   const shouldPulseSeat = activeAction && activeAction.type !== 'play'
@@ -374,42 +406,95 @@ function PlayerSeat({
       )}
       style={seatStyle(index, total)}
     >
-      <div className="flex max-w-full items-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-black text-[#fff8e8] max-[560px]:text-xs">
-        {player.name}
-        {player.role === 'host' && <span className="rounded-full bg-[#fff8e8] px-1.5 text-[11px] text-[#171411]">房主</span>}
-        {player.isAI && <span className="rounded-full bg-[#fff8e8] px-1.5 text-[11px] text-[#171411]">AI</span>}
+      <div className="flex max-w-full items-center gap-1 text-sm font-black text-[#fff8e8] max-[560px]:text-xs">
+        <span className="min-w-0 truncate">{player.name}</span>
+        {player.role === 'host' && <HostBadge />}
+        {player.isAI && <span className="shrink-0 rounded-full bg-[#fff8e8] px-1.5 text-[11px] text-[#171411]">AI</span>}
+        {isSelf && <SpeechButton className="ml-1" onSend={onSpeak} />}
       </div>
+      <SpeechBubble className="max-w-[130px] sm:max-w-[170px]" text={speech} />
       {!isSelf && <MiniBackHand count={player.handCount} />}
     </article>
   )
 }
 
-function ActionLayer({ action }: { action?: UnoPublicAction }) {
+interface ActionPoint {
+  x: string
+  y: string
+}
+
+interface FlightStyle extends CSSProperties {
+  '--from-x': string
+  '--from-y': string
+  '--to-x': string
+  '--to-y': string
+}
+
+const DRAW_PILE_POINT: ActionPoint = { x: '45%', y: '50%' }
+const DISCARD_POINT: ActionPoint = { x: '55%', y: '50%' }
+
+function ActionLayer({ action, players }: { action?: UnoPublicAction, players: UnoOnlinePlayer[] }) {
   if (!action) {
     return null
   }
 
   const isPlay = action.type === 'play' && action.card
   const isDraw = action.type === 'draw'
+  const actorPoint = pointForPlayer(players, action.actorId)
+  const drawTargetPoint = pointForPlayer(players, action.targetId ?? action.actorId)
+  const playStyle = flightStyle(actorPoint, DISCARD_POINT)
 
   return (
     <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
       {isPlay && action.card && (
-        <div className="uno-flying-card uno-fly-to-discard">
+        <div className="uno-flying-card uno-fly-to-discard" style={playStyle}>
           <UnoCardView card={action.card} className="w-[68px] sm:w-[78px]" />
         </div>
       )}
       {isDraw && Array.from({ length: Math.min(action.count ?? 1, 4) }, (_, index) => (
-        <span key={`${action.seq}-${index}`} className="uno-flying-back uno-fly-to-seat" style={{ animationDelay: `${index * 90}ms` }} />
+        <span
+          key={`${action.seq}-${index}`}
+          className="uno-flying-back uno-fly-to-seat"
+          style={flightStyle(DRAW_PILE_POINT, drawTargetPoint, index * 90)}
+        />
       ))}
       <div className="uno-action-toast">{action.message}</div>
     </div>
   )
 }
 
+function pointForPlayer(players: UnoOnlinePlayer[], playerId: string): ActionPoint {
+  const index = players.findIndex(player => player.id === playerId)
+  const style = seatStyle(index < 0 ? 0 : index, players.length || 1)
+
+  return {
+    x: String(style.left ?? '50%'),
+    y: String(style.top ?? '84%'),
+  }
+}
+
+function flightStyle(from: ActionPoint, to: ActionPoint, delayMs = 0): FlightStyle {
+  return {
+    '--from-x': from.x,
+    '--from-y': from.y,
+    '--to-x': to.x,
+    '--to-y': to.y,
+    'animationDelay': `${delayMs}ms`,
+  }
+}
+
+function orderPlayersFromViewer(players: UnoOnlinePlayer[], viewerPlayerId: string) {
+  const viewerIndex = players.findIndex(player => player.id === viewerPlayerId)
+  if (viewerIndex < 0) {
+    return players
+  }
+
+  return [...players.slice(viewerIndex), ...players.slice(0, viewerIndex)]
+}
+
 function seatStyle(index: number, total: number): CSSProperties {
   if (index === 0) {
-    return { left: '50%', top: '88%' }
+    return { left: '50%', top: '84%' }
   }
 
   const opponents = Math.max(total - 1, 1)
@@ -458,15 +543,13 @@ function UnoCardView({ card, className }: { card: UnoCard, className?: string })
   )
 }
 
-function formatColor(color: UnoColor) {
-  const labels: Record<UnoColor, string> = {
-    blue: '蓝色',
-    green: '绿色',
-    red: '红色',
-    yellow: '黄色',
-  }
+function HostBadge() {
+  const { t } = useI18n()
+  return <span className="rounded-full bg-[#fff8e8] px-1.5 text-[11px] text-[#171411]">{t('uno.host')}</span>
+}
 
-  return labels[color]
+function formatColor(color: UnoColor, t: (key: string) => string) {
+  return t(`uno.colors.${color}`)
 }
 
 function chooseBestWildColor(hand: UnoCard[], playedCardId: string, activeColor?: UnoColor): UnoColor {
@@ -526,6 +609,19 @@ function CardFaceSymbol({ card, compact = false }: { card: UnoCard, compact?: bo
         <span>4</span>
       </span>
     ),
+    'wild-draw-six': (
+      <span className="inline-flex items-center gap-0.5">
+        <Plus size={iconSize} strokeWidth={iconStroke} />
+        <span>6</span>
+      </span>
+    ),
+    'wild-draw-ten': (
+      <span className="inline-flex items-center gap-0.5">
+        <Plus size={iconSize} strokeWidth={iconStroke} />
+        <span>10</span>
+      </span>
+    ),
+    'flip': <RotateCw size={iconSize} strokeWidth={iconStroke} />,
   }
 
   if (card.kind === 'skip' && compact) {

@@ -38,12 +38,12 @@ export async function loginAsGuest(guestUuid: string): Promise<AuthUser> {
     body: JSON.stringify({ guestUuid }),
   })
   if (!response.ok) {
-    throw new Error('游客登录失败')
+    throw new Error('Guest login failed')
   }
 
   const data = meSchema.parse(await response.json())
   if (!data.user) {
-    throw new Error('游客登录没有返回用户')
+    throw new Error('Guest login did not return a user')
   }
 
   return data.user

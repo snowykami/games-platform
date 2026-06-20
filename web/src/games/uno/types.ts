@@ -1,7 +1,7 @@
 export type UnoColor = 'red' | 'yellow' | 'green' | 'blue'
 export type WildColor = 'wild'
 export type CardColor = UnoColor | WildColor
-export type CardKind = 'number' | 'skip' | 'reverse' | 'draw-two' | 'wild' | 'wild-draw-four'
+export type CardKind = 'number' | 'skip' | 'reverse' | 'draw-two' | 'wild' | 'wild-draw-four' | 'wild-draw-six' | 'wild-draw-ten' | 'flip'
 
 export interface UnoCard {
   id: string

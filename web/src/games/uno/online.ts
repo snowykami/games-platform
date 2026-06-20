@@ -1,4 +1,5 @@
 import type { UnoCard, UnoColor } from './types'
+import type { GameSpeechEntry } from '@/games/speech'
 import { z } from 'zod'
 
 export type UnoPhase = 'lobby' | 'playing' | 'finished'
@@ -14,9 +15,11 @@ export interface UnoOnlinePlayer {
   ai?: {
     name: string
     personality: string
+    level: string
   }
   hand?: UnoCard[]
   handCount: number
+  needsUno: boolean
 }
 
 export interface UnoPublicAction {
@@ -42,9 +45,20 @@ export interface UnoOnlineRoom {
   currentPlayerId?: string
   direction: 1 | -1
   activeColor?: UnoColor
+  pendingDrawCount: number
+  flipSide: boolean
+  rules: {
+    stacking: boolean
+    sevenZero: boolean
+    jumpIn: boolean
+    allWild: boolean
+    flip: boolean
+    noMercy: boolean
+  }
   playableCardIds: string[]
   winnerId?: string
   log: Array<{ id: string, text: string }>
+  speeches: GameSpeechEntry[]
   actionSeq: number
   recentActions: UnoPublicAction[]
 }
@@ -52,8 +66,25 @@ export interface UnoOnlineRoom {
 const cardSchema = z.object({
   id: z.string(),
   color: z.enum(['red', 'yellow', 'green', 'blue', 'wild']),
-  kind: z.enum(['number', 'skip', 'reverse', 'draw-two', 'wild', 'wild-draw-four']),
+  kind: z.enum(['number', 'skip', 'reverse', 'draw-two', 'wild', 'wild-draw-four', 'wild-draw-six', 'wild-draw-ten', 'flip']),
   value: z.number().optional(),
+})
+
+const rulesSchema = z.object({
+  stacking: z.boolean(),
+  sevenZero: z.boolean(),
+  jumpIn: z.boolean(),
+  allWild: z.boolean(),
+  flip: z.boolean(),
+  noMercy: z.boolean(),
+})
+
+const speechSchema = z.object({
+  id: z.string(),
+  playerId: z.string(),
+  playerName: z.string(),
+  text: z.string(),
+  spokenAt: z.string(),
 })
 
 const roomSchema: z.ZodType<UnoOnlineRoom> = z.object({
@@ -73,18 +104,24 @@ const roomSchema: z.ZodType<UnoOnlineRoom> = z.object({
     ai: z.object({
       name: z.string(),
       personality: z.string(),
+      level: z.string(),
     }).optional(),
     hand: z.array(cardSchema).optional(),
     handCount: z.number(),
+    needsUno: z.boolean(),
   })),
   topCard: cardSchema.optional(),
   drawPileCount: z.number(),
   currentPlayerId: z.string().optional(),
   direction: z.union([z.literal(1), z.literal(-1)]),
   activeColor: z.enum(['red', 'yellow', 'green', 'blue']).optional(),
+  pendingDrawCount: z.number(),
+  flipSide: z.boolean(),
+  rules: rulesSchema,
   playableCardIds: z.array(z.string()),
   winnerId: z.string().optional(),
   log: z.array(z.object({ id: z.string(), text: z.string() })),
+  speeches: z.array(speechSchema),
   actionSeq: z.number(),
   recentActions: z.array(z.object({
     seq: z.number(),
@@ -116,8 +153,28 @@ export async function getUnoRoom(roomId: string) {
   return requestRoom(`/api/uno/rooms/${encodeURIComponent(roomId)}`)
 }
 
-export async function addUnoAI(roomId: string) {
-  return requestRoom(`/api/uno/rooms/${encodeURIComponent(roomId)}/ai`, { method: 'POST' })
+export async function addUnoAI(roomId: string, level: string) {
+  return requestRoom(`/api/uno/rooms/${encodeURIComponent(roomId)}/ai`, {
+    body: JSON.stringify({ level }),
+    headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+  })
+}
+
+export async function updateUnoAI(roomId: string, playerId: string, level: string) {
+  return requestRoom(`/api/uno/rooms/${encodeURIComponent(roomId)}/ai/${encodeURIComponent(playerId)}`, {
+    body: JSON.stringify({ level }),
+    headers: { 'Content-Type': 'application/json' },
+    method: 'PATCH',
+  })
+}
+
+export async function sayUno(roomId: string, text: string) {
+  return requestRoom(`/api/uno/rooms/${encodeURIComponent(roomId)}/speech`, {
+    body: JSON.stringify({ text }),
+    headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+  })
 }
 
 export async function startUnoRoom(roomId: string) {
@@ -136,11 +193,23 @@ export async function playUnoCard(roomId: string, cardId: string, color: UnoColo
   })
 }
 
+export async function callUno(roomId: string) {
+  return requestRoom(`/api/uno/rooms/${encodeURIComponent(roomId)}/uno`, { method: 'POST' })
+}
+
+export async function catchUno(roomId: string, targetId: string) {
+  return requestRoom(`/api/uno/rooms/${encodeURIComponent(roomId)}/catch-uno`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targetId }),
+  })
+}
+
 async function requestRoom(input: RequestInfo | URL, init?: RequestInit) {
   const response = await fetch(input, init)
   if (!response.ok) {
     const error = await response.json().catch(() => undefined)
-    throw new Error(error?.error ?? `请求失败：${response.status}`)
+    throw new Error(error?.error ?? `Request failed: ${response.status}`)
   }
 
   return roomResponseSchema.parse(await response.json()).room

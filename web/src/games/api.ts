@@ -1,6 +1,8 @@
 import type { GameDefinition } from '@/games/registry'
 import { z } from 'zod'
 import { localGames } from '@/games/registry'
+import { localizeGames } from '@/i18n/gameText'
+import { getCurrentLocale } from '@/i18n/locale'
 
 const gameDefinitionSchema = z.object({
   slug: z.string(),
@@ -20,16 +22,16 @@ const gamesResponseSchema = z.object({
 
 export async function getGames(): Promise<GameDefinition[]> {
   try {
-    const response = await fetch('/api/games')
+    const response = await fetch('/api/games', { headers: { 'Accept-Language': getCurrentLocale() } })
 
     if (!response.ok) {
       throw new Error(`Failed to load games: ${response.status}`)
     }
 
     const data = gamesResponseSchema.parse(await response.json())
-    return data.games
+    return localizeGames(data.games, getCurrentLocale())
   }
   catch {
-    return localGames
+    return localizeGames(localGames, getCurrentLocale())
   }
 }

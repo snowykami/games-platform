@@ -1,6 +1,12 @@
 package uno
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/snowykami/games-platform/server/internal/aiplayer"
+)
 
 func TestIsPlayableRejectsDifferentNumberValue(t *testing.T) {
 	room := &Room{
@@ -70,6 +76,174 @@ func TestPublicRoomReturnsPlayableCardIDsForCurrentViewerOnly(t *testing.T) {
 	otherViewer := publicRoom(room, "user-2")
 	if len(otherViewer.PlayableCardIDs) != 0 {
 		t.Fatalf("non-current viewer playable card ids = %v, want empty", otherViewer.PlayableCardIDs)
+	}
+}
+
+func TestStackingAccumulatesDrawPenalty(t *testing.T) {
+	room := &Room{
+		Rules:              RuleSet{Stacking: true},
+		Phase:              PhasePlaying,
+		Players:            []*Player{{ID: "player-1", UserID: "user-1", Name: "一号", Hand: []Card{{ID: "green-draw-two", Color: ColorGreen, Kind: KindDrawTwo}, numberCard("red-1", ColorRed, 1)}}, {ID: "player-2", UserID: "user-2", Name: "二号"}},
+		CurrentPlayerIndex: 0,
+		Direction:          1,
+		ActiveColor:        ColorGreen,
+		DiscardPile:        []Card{{ID: "green-2", Color: ColorGreen, Kind: KindDrawTwo}},
+	}
+
+	playCard(room, room.Players[0], 0, ColorGreen)
+
+	if room.PendingDrawCount != 2 {
+		t.Fatalf("pending draw count = %d, want 2", room.PendingDrawCount)
+	}
+	if room.CurrentPlayerIndex != 1 {
+		t.Fatalf("current player index = %d, want next player to answer stack", room.CurrentPlayerIndex)
+	}
+}
+
+func TestSevenZeroSwapsHandsOnSeven(t *testing.T) {
+	currentHand := []Card{numberCard("green-7", ColorGreen, 7), numberCard("red-1", ColorRed, 1)}
+	targetHand := []Card{numberCard("blue-3", ColorBlue, 3)}
+	room := &Room{
+		Rules:              RuleSet{SevenZero: true},
+		Phase:              PhasePlaying,
+		Players:            []*Player{{ID: "player-1", UserID: "user-1", Name: "一号", Hand: currentHand}, {ID: "player-2", UserID: "user-2", Name: "二号", Hand: targetHand}},
+		CurrentPlayerIndex: 0,
+		Direction:          1,
+		ActiveColor:        ColorGreen,
+		DiscardPile:        []Card{numberCard("green-1", ColorGreen, 1)},
+	}
+
+	playCard(room, room.Players[0], 0, ColorGreen)
+
+	if room.Players[0].Hand[0].ID != "blue-3" {
+		t.Fatalf("current player hand = %v, want swapped target hand", room.Players[0].Hand)
+	}
+	if room.Players[1].Hand[0].ID != "red-1" {
+		t.Fatalf("target player hand = %v, want remaining current hand", room.Players[1].Hand)
+	}
+}
+
+func TestJumpInOnlyAllowsExactSameFace(t *testing.T) {
+	player := &Player{
+		ID:     "player-2",
+		UserID: "user-2",
+		Name:   "二号",
+		Hand: []Card{
+			numberCard("green-1-copy", ColorGreen, 1),
+			numberCard("green-2", ColorGreen, 2),
+		},
+	}
+	room := &Room{
+		Rules:              RuleSet{JumpIn: true},
+		Phase:              PhasePlaying,
+		Players:            []*Player{{ID: "player-1", UserID: "user-1", Name: "一号"}, player},
+		CurrentPlayerIndex: 0,
+		Direction:          1,
+		ActiveColor:        ColorGreen,
+		DiscardPile:        []Card{numberCard("green-1", ColorGreen, 1)},
+	}
+
+	if !canJumpIn(player.Hand[0], player, room) {
+		t.Fatal("exact same face should be allowed to jump in")
+	}
+	if canJumpIn(player.Hand[1], player, room) {
+		t.Fatal("matching color with different value must not jump in")
+	}
+}
+
+func TestLLMAITurnDoesNotBlockOtherRooms(t *testing.T) {
+	provider := &blockingProvider{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	manager := NewManager(provider)
+	manager.rooms["ROOMA"] = &Room{
+		ID:    "ROOMA",
+		Phase: PhasePlaying,
+		Players: []*Player{
+			{
+				ID:     "ai-1",
+				UserID: "ai-user-1",
+				Name:   "AI 一号",
+				IsAI:   true,
+				AI:     &AIProfile{Level: string(aiplayer.LevelLLM)},
+				Hand:   []Card{numberCard("ai-green-1", ColorGreen, 1)},
+			},
+			{ID: "human-1", UserID: "human-user-1", Name: "玩家一号"},
+		},
+		CurrentPlayerIndex: 0,
+		Direction:          1,
+		ActiveColor:        ColorGreen,
+		DiscardPile:        []Card{numberCard("top-green-2", ColorGreen, 2)},
+		DrawPile:           []Card{numberCard("draw-red-1", ColorRed, 1)},
+	}
+	manager.rooms["ROOMB"] = &Room{
+		ID:    "ROOMB",
+		Phase: PhasePlaying,
+		Players: []*Player{
+			{ID: "human-2", UserID: "human-user-2", Name: "玩家二号"},
+			{ID: "human-3", UserID: "human-user-3", Name: "玩家三号"},
+		},
+		CurrentPlayerIndex: 0,
+		Direction:          1,
+		ActiveColor:        ColorBlue,
+		DiscardPile:        []Card{numberCard("top-blue-3", ColorBlue, 3)},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := manager.RunNextAI("ROOMA")
+		done <- err
+	}()
+
+	select {
+	case <-provider.started:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("llm provider was not called")
+	}
+
+	publicDone := make(chan error, 1)
+	go func() {
+		_, err := manager.Public("ROOMB", "human-user-2")
+		publicDone <- err
+	}()
+
+	select {
+	case err := <-publicDone:
+		if err != nil {
+			t.Fatalf("public room: %v", err)
+		}
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("room B public view was blocked by room A llm turn")
+	}
+
+	close(provider.release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run ai: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ai turn did not finish")
+	}
+}
+
+type blockingProvider struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingProvider) Enabled() bool {
+	return true
+}
+
+func (p *blockingProvider) Decide(ctx context.Context, input aiplayer.DecisionInput) (aiplayer.Decision, error) {
+	p.started <- struct{}{}
+	select {
+	case <-p.release:
+		return aiplayer.Decision{ActionID: input.Actions[0].ID, Source: "test"}, nil
+	case <-ctx.Done():
+		return aiplayer.Decision{}, ctx.Err()
 	}
 }
 

@@ -309,6 +309,9 @@ function formatKind(kind: CardKind) {
     'draw-two': '+2',
     'wild': '变色',
     'wild-draw-four': '+4',
+    'wild-draw-six': '+6',
+    'wild-draw-ten': '+10',
+    'flip': '翻面',
   }
 
   return labels[kind]

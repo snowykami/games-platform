@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/snowykami/games-platform/server/internal/i18n"
 )
 
 type ErrorResponse struct {
@@ -21,6 +23,10 @@ func WriteJSON(w http.ResponseWriter, status int, value any) {
 
 func WriteError(w http.ResponseWriter, status int, message string) {
 	WriteJSON(w, status, ErrorResponse{Error: message})
+}
+
+func WriteErrorKey(w http.ResponseWriter, r *http.Request, status int, key string) {
+	WriteJSON(w, status, ErrorResponse{Error: i18n.T(i18n.FromRequest(r), key)})
 }
 
 func DecodeJSON(r *http.Request, value any) error {

@@ -1,6 +1,9 @@
 package uno
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 type Color string
 
@@ -21,6 +24,9 @@ const (
 	KindDrawTwo      Kind = "draw-two"
 	KindWild         Kind = "wild"
 	KindWildDrawFour Kind = "wild-draw-four"
+	KindWildDrawSix  Kind = "wild-draw-six"
+	KindWildDrawTen  Kind = "wild-draw-ten"
+	KindFlip         Kind = "flip"
 )
 
 type Phase string
@@ -41,6 +47,7 @@ type Card struct {
 type AIProfile struct {
 	Name        string `json:"name"`
 	Personality string `json:"personality"`
+	Level       string `json:"level"`
 }
 
 type Player struct {
@@ -54,12 +61,21 @@ type Player struct {
 	AI        *AIProfile `json:"ai,omitempty"`
 	Hand      []Card     `json:"hand,omitempty"`
 	HandCount int        `json:"handCount"`
+	NeedsUNO  bool       `json:"needsUno"`
 	JoinedAt  time.Time  `json:"joinedAt"`
 }
 
 type LogEntry struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
+}
+
+type SpeechEntry struct {
+	ID         string    `json:"id"`
+	PlayerID   string    `json:"playerId"`
+	PlayerName string    `json:"playerName"`
+	Text       string    `json:"text"`
+	SpokenAt   time.Time `json:"spokenAt"`
 }
 
 type ActionType string
@@ -83,6 +99,7 @@ type PublicAction struct {
 }
 
 type Room struct {
+	mu                 sync.Mutex
 	ID                 string
 	HostUserID         string
 	VariantKey         string
@@ -94,8 +111,13 @@ type Room struct {
 	CurrentPlayerIndex int
 	Direction          int
 	ActiveColor        Color
+	PendingDrawCount   int
+	PendingDrawKind    Kind
+	FlipSide           bool
+	Rules              RuleSet
 	WinnerID           string
 	Log                []LogEntry
+	Speeches           []SpeechEntry
 	ActionSeq          int
 	RecentActions      []PublicAction
 	CreatedAt          time.Time
@@ -103,22 +125,26 @@ type Room struct {
 }
 
 type PublicRoom struct {
-	ID              string         `json:"id"`
-	HostUserID      string         `json:"hostUserId"`
-	VariantKey      string         `json:"variantKey"`
-	ThemeKey        string         `json:"themeKey"`
-	Phase           Phase          `json:"phase"`
-	Players         []Player       `json:"players"`
-	TopCard         *Card          `json:"topCard,omitempty"`
-	DrawPileCount   int            `json:"drawPileCount"`
-	CurrentPlayerID string         `json:"currentPlayerId,omitempty"`
-	Direction       int            `json:"direction"`
-	ActiveColor     Color          `json:"activeColor,omitempty"`
-	PlayableCardIDs []string       `json:"playableCardIds"`
-	WinnerID        string         `json:"winnerId,omitempty"`
-	Log             []LogEntry     `json:"log"`
-	ActionSeq       int            `json:"actionSeq"`
-	RecentActions   []PublicAction `json:"recentActions"`
+	ID               string         `json:"id"`
+	HostUserID       string         `json:"hostUserId"`
+	VariantKey       string         `json:"variantKey"`
+	ThemeKey         string         `json:"themeKey"`
+	Phase            Phase          `json:"phase"`
+	Players          []Player       `json:"players"`
+	TopCard          *Card          `json:"topCard,omitempty"`
+	DrawPileCount    int            `json:"drawPileCount"`
+	CurrentPlayerID  string         `json:"currentPlayerId,omitempty"`
+	Direction        int            `json:"direction"`
+	ActiveColor      Color          `json:"activeColor,omitempty"`
+	PendingDrawCount int            `json:"pendingDrawCount"`
+	FlipSide         bool           `json:"flipSide"`
+	Rules            RuleSet        `json:"rules"`
+	PlayableCardIDs  []string       `json:"playableCardIds"`
+	WinnerID         string         `json:"winnerId,omitempty"`
+	Log              []LogEntry     `json:"log"`
+	Speeches         []SpeechEntry  `json:"speeches"`
+	ActionSeq        int            `json:"actionSeq"`
+	RecentActions    []PublicAction `json:"recentActions"`
 }
 
 type UserView struct {
@@ -131,4 +157,17 @@ type UserView struct {
 type RoomOptions struct {
 	VariantKey string `json:"variantKey"`
 	ThemeKey   string `json:"themeKey"`
+}
+
+type AIOptions struct {
+	Level string `json:"level"`
+}
+
+type RuleSet struct {
+	Stacking  bool `json:"stacking"`
+	SevenZero bool `json:"sevenZero"`
+	JumpIn    bool `json:"jumpIn"`
+	AllWild   bool `json:"allWild"`
+	Flip      bool `json:"flip"`
+	NoMercy   bool `json:"noMercy"`
 }

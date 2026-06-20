@@ -88,13 +88,13 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) guest(w http.ResponseWriter, r *http.Request) {
 	var request guestLoginRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "invalid json body")
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
 		return
 	}
 
 	user, session, err := h.store.CreateGuestSession(request.GuestUUID)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -123,7 +123,7 @@ func (h *Handler) oidcProviders(w http.ResponseWriter, _ *http.Request) {
 func (h *Handler) oidcLogin(w http.ResponseWriter, r *http.Request) {
 	provider := h.oidc[chi.URLParam(r, "providerKey")]
 	if provider == nil {
-		httpx.WriteError(w, http.StatusNotFound, "oidc provider not found")
+		httpx.WriteErrorKey(w, r, http.StatusNotFound, "oidc_provider_not_found")
 		return
 	}
 
@@ -140,43 +140,43 @@ func (h *Handler) oidcLogin(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	provider := h.oidc[chi.URLParam(r, "providerKey")]
 	if provider == nil {
-		httpx.WriteError(w, http.StatusNotFound, "oidc provider not found")
+		httpx.WriteErrorKey(w, r, http.StatusNotFound, "oidc_provider_not_found")
 		return
 	}
 
 	returnTo, ok := h.takeOIDCState(r.URL.Query().Get("state"))
 	if !ok {
-		httpx.WriteError(w, http.StatusBadRequest, "invalid oidc state")
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_oidc_state")
 		return
 	}
 
 	oauthToken, err := provider.oauth.Exchange(r.Context(), r.URL.Query().Get("code"))
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "oidc code exchange failed")
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_code_exchange")
 		return
 	}
 
 	rawIDToken, ok := oauthToken.Extra("id_token").(string)
 	if !ok {
-		httpx.WriteError(w, http.StatusBadRequest, "oidc id_token missing")
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "oidc_id_token_missing")
 		return
 	}
 
 	idToken, err := provider.verifier.Verify(r.Context(), rawIDToken)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "oidc id_token invalid")
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_id_token")
 		return
 	}
 
 	var claims oidcClaims
 	if err := idToken.Claims(&claims); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "oidc claims invalid")
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_claims")
 		return
 	}
 
 	user, session, err := h.store.CreateOIDCSession(provider.key, claims.Subject, displayNameFromClaims(claims))
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -209,7 +209,7 @@ func (h *Handler) unbanUser(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) setBanned(w http.ResponseWriter, r *http.Request, banned bool) {
 	user, err := h.store.SetBanned(chi.URLParam(r, "userID"), banned)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -240,11 +240,11 @@ func RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := UserFromContext(r.Context())
 		if !ok {
-			httpx.WriteError(w, http.StatusUnauthorized, "login required")
+			httpx.WriteErrorKey(w, r, http.StatusUnauthorized, "login_required")
 			return
 		}
 		if user.Banned {
-			httpx.WriteError(w, http.StatusForbidden, "user is banned")
+			httpx.WriteErrorKey(w, r, http.StatusForbidden, "user_banned")
 			return
 		}
 
@@ -256,7 +256,7 @@ func RequireAdmin(next http.Handler) http.Handler {
 	return RequireUser(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, _ := UserFromContext(r.Context())
 		if user.Role != RoleAdmin {
-			httpx.WriteError(w, http.StatusForbidden, "admin required")
+			httpx.WriteErrorKey(w, r, http.StatusForbidden, "admin_required")
 			return
 		}
 
@@ -308,5 +308,5 @@ func displayNameFromClaims(claims oidcClaims) string {
 			return candidate
 		}
 	}
-	return "OIDC 玩家"
+	return "OIDC Player"
 }

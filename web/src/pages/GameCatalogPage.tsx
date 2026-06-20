@@ -1,7 +1,9 @@
 import type { GameDefinition } from '@/games/registry'
-import { DoorOpen, Gamepad2, LogIn, ShieldCheck, Sparkles, UserRound, Users } from 'lucide-react'
+import { DoorOpen, LogIn, ShieldCheck, UserRound, Users } from 'lucide-react'
 import { Link } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
+import { useI18n } from '@/i18n/context'
+import { gameIconHref, useDocumentMeta } from '@/shared/brand/meta'
 import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
 
@@ -19,7 +21,9 @@ const GAME_COVERS: Record<string, string> = {
 
 export function GameCatalogPage({ games, isLoading }: GameCatalogPageProps) {
   const { isLoading: isAuthLoading, user } = useAuth()
+  const { t } = useI18n()
   const availableCount = games.filter(game => game.status === 'available').length
+  useDocumentMeta()
 
   return (
     <main className="min-h-svh bg-[#f7f4ee] text-[#191611]">
@@ -29,21 +33,21 @@ export function GameCatalogPage({ games, isLoading }: GameCatalogPageProps) {
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
               <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-[#191611] px-3 py-1.5 text-sm font-bold text-[#fff8e8] shadow-[0_10px_28px_rgba(25,22,17,0.12)]">
-                <Gamepad2 className="size-4" />
+                <img alt="" className="size-4" src="/favicon.svg" />
                 Liteyuki Games
               </div>
               <h1 className="text-4xl font-black tracking-normal text-[#191611] sm:text-5xl">
-                小游戏总览
+                {t('catalog.title')}
               </h1>
               <p className="mt-3 max-w-2xl text-base font-medium leading-7 text-[#62594d]">
-                先从一个清晰的大厅开始，逐步接入本地与联机游戏。当前页面由统一游戏注册表驱动。
+                {t('catalog.subtitle')}
               </p>
             </div>
             <div className="grid gap-3 sm:w-[420px]">
               <UserPanel isLoading={isAuthLoading} user={user} />
               <div className="grid grid-cols-2 gap-3">
-                <Metric label="已开放" value={availableCount} />
-                <Metric label="规划中" value={games.length - availableCount} />
+                <Metric label={t('catalog.availableCount')} value={availableCount} />
+                <Metric label={t('catalog.plannedCount')} value={games.length - availableCount} />
               </div>
             </div>
           </div>
@@ -53,7 +57,7 @@ export function GameCatalogPage({ games, isLoading }: GameCatalogPageProps) {
       <section className="mx-auto max-w-7xl px-4 py-7 sm:px-6 lg:px-8">
         {isLoading && (
           <div className="mb-4 rounded-lg bg-[#fffaf0] px-4 py-3 text-sm font-semibold text-[#62594d] shadow-[0_10px_30px_rgba(25,22,17,0.08)]">
-            正在同步后端游戏列表，若后端未启动会使用本地注册表。
+            {t('catalog.loading')}
           </div>
         )}
 
@@ -78,6 +82,7 @@ function UserPanel({
     role: 'admin' | 'player'
   }
 }) {
+  const { t } = useI18n()
   const shouldShowLogin = !user || user.kind === 'guest'
 
   return (
@@ -87,13 +92,13 @@ function UserPanel({
           {user?.role === 'admin' ? <ShieldCheck className="size-5" /> : <UserRound className="size-5" />}
         </span>
         <div className="min-w-0">
-          <p className="text-xs font-bold text-[#756b5e]">当前用户</p>
+          <p className="text-xs font-bold text-[#756b5e]">{t('auth.currentUser')}</p>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
             <strong className="truncate text-sm text-[#191611]">
-              {isLoading ? '同步中...' : user?.displayName ?? '未登录'}
+              {isLoading ? t('common.syncing') : user?.displayName ?? t('auth.notLoggedIn')}
             </strong>
-            {user && <Badge variant={user.kind === 'guest' ? 'secondary' : 'success'}>{user.kind === 'guest' ? '游客' : 'OIDC'}</Badge>}
-            {user?.role === 'admin' && <Badge variant="outline">管理员</Badge>}
+            {user && <Badge variant={user.kind === 'guest' ? 'secondary' : 'success'}>{user.kind === 'guest' ? t('common.guest') : t('common.oidc')}</Badge>}
+            {user?.role === 'admin' && <Badge variant="outline">{t('auth.admin')}</Badge>}
           </div>
         </div>
       </div>
@@ -102,7 +107,7 @@ function UserPanel({
         <Button asChild className="min-h-10 shrink-0" size="sm" variant="secondary">
           <Link to="/login?next=/">
             <LogIn className="size-4" />
-            登录
+            {t('common.login')}
           </Link>
         </Button>
       )}
@@ -111,6 +116,7 @@ function UserPanel({
 }
 
 function GameCard({ game }: { game: GameDefinition }) {
+  const { t } = useI18n()
   const isAvailable = game.status === 'available'
   const cover = GAME_COVERS[game.slug] ?? GAME_COVERS.uno
 
@@ -124,11 +130,11 @@ function GameCard({ game }: { game: GameDefinition }) {
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,8,6,0.05)_0%,rgba(10,8,6,0.35)_34%,rgba(10,8,6,0.9)_100%)]" />
       <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
         <span className="inline-flex items-center gap-2 rounded-full bg-[#fff8e8]/92 px-3 py-1.5 text-xs font-black text-[#191611] shadow-[0_10px_24px_rgba(0,0,0,0.16)]">
-          <Sparkles className="size-3.5 text-[#c43d28]" />
-          {isAvailable ? '可玩' : '规划中'}
+          <img alt="" className="size-3.5" src={gameIconHref(game.slug)} />
+          {isAvailable ? t('common.available') : t('common.planning')}
         </span>
         <span className="rounded-full bg-[#191611]/55 px-3 py-1.5 text-xs font-black text-[#fff8e8] backdrop-blur">
-          {game.supportsOnline ? '联机' : '本地'}
+          {game.supportsOnline ? t('common.online') : t('common.local')}
         </span>
       </div>
 
@@ -152,23 +158,23 @@ function GameCard({ game }: { game: GameDefinition }) {
             {game.minPlayers}
             -
             {game.maxPlayers}
-            人
+            {t('catalog.playersSuffix')}
           </div>
           <div className="flex items-center gap-2 rounded-lg bg-[#fff8e8]/12 px-3 py-2 backdrop-blur">
             <DoorOpen className="size-4" />
-            {game.supportsOnline ? '联机' : '本地'}
+            {game.supportsOnline ? t('common.online') : t('common.local')}
           </div>
         </div>
 
         {isAvailable
           ? (
               <Button asChild className="mt-4 min-h-11" variant="secondary">
-                <Link to={`/games/${game.slug}`}>进入游戏</Link>
+                <Link to={`/games/${game.slug}`}>{t('common.enterGame')}</Link>
               </Button>
             )
           : (
               <span className="mt-4 inline-flex min-h-11 items-center justify-center rounded-lg bg-[#fff8e8]/18 px-4 text-sm font-black text-[#fff8e8]/76 ring-1 ring-[#fff8e8]/18 backdrop-blur">
-                即将开放
+                {t('common.comingSoon')}
               </span>
             )}
       </div>

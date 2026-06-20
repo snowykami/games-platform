@@ -71,7 +71,7 @@ func NewStore() *Store {
 func (s *Store) CreateGuestSession(guestUUID string) (*User, Session, error) {
 	guestUUID = strings.TrimSpace(guestUUID)
 	if !guestUUIDPattern.MatchString(guestUUID) {
-		return nil, Session{}, errors.New("invalid guest uuid")
+		return nil, Session{}, errors.New("invalid_guest_uuid")
 	}
 
 	s.mu.Lock()
@@ -93,7 +93,7 @@ func (s *Store) CreateGuestSession(guestUUID string) (*User, Session, error) {
 			ID:          "usr_" + randomHex(12),
 			Kind:        IdentityGuest,
 			Role:        role,
-			DisplayName: "游客" + strings.ToUpper(randomHex(2)),
+			DisplayName: "Guest " + strings.ToUpper(randomHex(2)),
 			CreatedAt:   time.Now().UTC(),
 		}
 		s.users[user.ID] = user
@@ -109,10 +109,10 @@ func (s *Store) CreateOIDCSession(providerKey string, subject string, displayNam
 	subject = strings.TrimSpace(subject)
 	displayName = strings.TrimSpace(displayName)
 	if providerKey == "" || subject == "" {
-		return nil, Session{}, errors.New("invalid oidc identity")
+		return nil, Session{}, errors.New("invalid_oidc_identity")
 	}
 	if displayName == "" {
-		displayName = "OIDC 玩家"
+		displayName = "OIDC Player"
 	}
 
 	s.mu.Lock()
@@ -180,10 +180,10 @@ func (s *Store) SetBanned(userID string, banned bool) (*User, error) {
 
 	user := s.users[userID]
 	if user == nil {
-		return nil, errors.New("user not found")
+		return nil, errors.New("user_not_found")
 	}
 	if user.Role == RoleAdmin && banned {
-		return nil, errors.New("admin cannot be banned")
+		return nil, errors.New("admin_cannot_be_banned")
 	}
 
 	user.Banned = banned
