@@ -11,6 +11,7 @@ import { ContinueRoomEntry } from '@/games/ContinueRoomEntry'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
+import { RoomConnectionStatus } from '@/games/RoomConnectionStatus'
 import { useCurrentRoom } from '@/games/useCurrentRoom'
 import { usePendingAction } from '@/games/usePendingAction'
 import { cn } from '@/shared/lib/utils'
@@ -260,7 +261,7 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
 }
 
 function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: MahjongOnlineRoom, roomId: string }) {
-  const { actions } = useMahjongRoom(roomId)
+  const { actions, connection } = useMahjongRoom(roomId)
   const pending = usePendingAction()
   const human = room.players.find(player => player.id === room.youPlayerId)
   const currentPlayer = room.players.find(player => player.id === room.currentPlayerId)
@@ -337,6 +338,7 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
             房间：
             {room.id}
           </StatusPill>
+          <RoomConnectionStatus connection={connection} />
         </section>
 
         <section className="grid min-h-[560px] gap-3 overflow-hidden rounded-lg border border-[#d8b66a]/45 bg-[radial-gradient(circle_at_center,rgba(255,248,232,0.12),transparent_42%),linear-gradient(135deg,#173b31,#10251f)] p-3 shadow-[inset_0_0_80px_rgba(0,0,0,0.28),0_24px_70px_rgba(0,0,0,0.25)] lg:grid-cols-[240px_minmax(0,1fr)_240px] lg:grid-rows-[150px_minmax(0,1fr)_180px]">

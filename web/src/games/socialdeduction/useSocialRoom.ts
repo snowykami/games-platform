@@ -44,7 +44,7 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined, 
     }
   }, [])
 
-  const socketRef = useRoomSocket({
+  const { connection, socketRef } = useRoomSocket({
     enabled: Boolean(roomId),
     onMessage: handleSocketMessage,
     onReconnect: refresh,
@@ -87,7 +87,7 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined, 
     werewolfVote: (targetId: string, confirmed: boolean) => roomId ? send('room.werewolf_vote', { targetId, confirmed }) : Promise.resolve(),
   }), [refresh, roomId, send])
 
-  return { actions, error, isLoading, room, setRoom }
+  return { actions, connection, error, isLoading, room, setRoom }
 }
 
 function createWebSocketURL(game: SocialGameSlug, roomId: string, godView: boolean) {

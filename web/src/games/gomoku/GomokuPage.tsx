@@ -7,6 +7,7 @@ import { Link } from 'react-router'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
+import { RoomConnectionStatus } from '@/games/RoomConnectionStatus'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useAutoFollowScroll } from '@/games/useAutoFollowScroll'
 import { usePendingAction } from '@/games/usePendingAction'
@@ -16,7 +17,7 @@ import { useGomokuRoom } from './useGomokuRoom'
 
 export function GomokuPage({ roomId }: { roomId: string }) {
   const { t } = useI18n()
-  const { actions, error, isLoading, room } = useGomokuRoom(roomId)
+  const { actions, connection, error, isLoading, room } = useGomokuRoom(roomId)
   const [message, setMessage] = useState(() => t('gomoku.ready'))
   const pending = usePendingAction()
   const historyScroll = useAutoFollowScroll<HTMLDivElement>()
@@ -102,6 +103,7 @@ export function GomokuPage({ roomId }: { roomId: string }) {
             {t('common.room')}
             {room.id}
           </StatusPill>
+          <RoomConnectionStatus connection={connection} />
           <button className="gomoku-button ml-auto" disabled={!isHost || pending.isPending('restart')} type="button" onClick={handleRestart}>
             <RotateCcw className="size-4" />
             {pending.isPending('restart') ? t('common.syncing') : t('gomoku.restart')}

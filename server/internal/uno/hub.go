@@ -96,6 +96,10 @@ func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, conn 
 			writeWSError(ctx, conn, "invalid message")
 			continue
 		}
+		if message.Type == "ping" {
+			writeWSPong(ctx, conn, message.Payload)
+			continue
+		}
 
 		if err := h.handleMessage(message, roomID, userID); err != nil {
 			writeWSError(ctx, conn, err.Error())
@@ -318,6 +322,18 @@ func writeWSError(ctx context.Context, conn *websocket.Conn, message string) {
 	_ = conn.Write(ctx, websocket.MessageText, mustMarshal(map[string]string{
 		"type":  "error",
 		"error": message,
+	}))
+}
+
+func writeWSPong(ctx context.Context, conn *websocket.Conn, payload json.RawMessage) {
+	if len(payload) == 0 {
+		payload = mustMarshal(map[string]any{})
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_ = conn.Write(ctx, websocket.MessageText, mustMarshal(map[string]any{
+		"type":    "pong",
+		"payload": payload,
 	}))
 }
 

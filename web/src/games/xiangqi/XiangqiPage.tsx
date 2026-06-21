@@ -8,6 +8,7 @@ import { Link } from 'react-router'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
+import { RoomConnectionStatus } from '@/games/RoomConnectionStatus'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useAutoFollowScroll } from '@/games/useAutoFollowScroll'
 import { usePendingAction } from '@/games/usePendingAction'
@@ -22,7 +23,7 @@ const BOARD_RANKS = Array.from({ length: 10 }, (_, index) => index)
 
 export function XiangqiPage({ roomId }: { roomId: string }) {
   const { t } = useI18n()
-  const { actions, error, isLoading, room } = useXiangqiRoom(roomId)
+  const { actions, connection, error, isLoading, room } = useXiangqiRoom(roomId)
   const [selectedId, setSelectedId] = useState<string>()
   const [perspective, setPerspective] = useState<XiangqiSide>('red')
   const [message, setMessage] = useState(() => t('xiangqi.tableReady'))
@@ -136,6 +137,7 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
               <Copy className="size-4" />
               {t('common.copyLink')}
             </Button>
+            <RoomConnectionStatus connection={connection} className="self-center" />
             <Button className="bg-[#fff8e8] text-[#202018] hover:bg-[#f3deb3]" disabled={!isHost || isRestartPending} type="button" onClick={handleRestart}>
               <RefreshCw className="size-4" />
               {isRestartPending ? t('common.syncing') : t('xiangqi.restart')}

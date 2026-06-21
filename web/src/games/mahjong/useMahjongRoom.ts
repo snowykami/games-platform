@@ -42,7 +42,7 @@ export function useMahjongRoom(roomId: string | undefined) {
     }
   }, [])
 
-  const socketRef = useRoomSocket({
+  const { connection, socketRef } = useRoomSocket({
     enabled: Boolean(roomId),
     onMessage: handleSocketMessage,
     onReconnect: refresh,
@@ -76,7 +76,7 @@ export function useMahjongRoom(roomId: string | undefined) {
     updateAI: (playerId: string, level: string) => roomId ? send('room.update_ai', { playerId, level }) : Promise.resolve(),
   }), [refresh, roomId, send])
 
-  return { actions, error, isLoading, room, setRoom }
+  return { actions, connection, error, isLoading, room, setRoom }
 }
 
 function createWebSocketURL(roomId: string) {

@@ -1,10 +1,12 @@
 import type { FormEvent, ReactNode } from 'react'
 import type { AIDebugTrace, SocialGameSlug, SocialRoom } from './online'
+import type { RoomConnectionInfo } from '@/games/useRoomSocket'
 import { Bot, ClipboardList, Copy, DoorOpen, Eye, EyeOff, Plus, ScrollText, ShieldQuestion, Sparkles, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { getAICapabilities } from '@/games/ai'
 import { ContinueRoomEntry } from '@/games/ContinueRoomEntry'
+import { RoomConnectionStatus } from '@/games/RoomConnectionStatus'
 import { useAutoFollowScroll } from '@/games/useAutoFollowScroll'
 import { useCurrentRoom } from '@/games/useCurrentRoom'
 import { usePendingAction } from '@/games/usePendingAction'
@@ -30,7 +32,7 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
   const navigate = useNavigate()
   const { t, ta } = useI18n()
   const [godView, setGodView] = useState(false)
-  const { actions, error, isLoading, room } = useSocialRoom(game, roomId, godView)
+  const { actions, connection, error, isLoading, room } = useSocialRoom(game, roomId, godView)
   const [joinCode, setJoinCode] = useState(roomId ?? '')
   const [message, setMessage] = useState(() => t('room.defaultMessage'))
   const [pendingAI, setPendingAI] = useState(false)
@@ -169,7 +171,7 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
   }
 
   if (room.phase !== 'lobby') {
-    return <SocialGamePage actions={actions} config={config} error={error} game={game} godView={godView} room={room} setGodView={setGodView} />
+    return <SocialGamePage actions={actions} config={config} connection={connection} error={error} game={game} godView={godView} room={room} setGodView={setGodView} />
   }
 
   return (
@@ -275,6 +277,7 @@ function LobbyRulesContent({
 function SocialGamePage({
   actions,
   config,
+  connection,
   error,
   game,
   godView,
@@ -283,6 +286,7 @@ function SocialGamePage({
 }: {
   actions: ReturnType<typeof useSocialRoom>['actions']
   config: typeof GAME_COPY[SocialGameSlug]
+  connection: RoomConnectionInfo
   error?: string
   game: SocialGameSlug
   godView: boolean
@@ -353,6 +357,7 @@ function SocialGamePage({
               {' '}
               {room.id}
             </StatusPill>
+            <RoomConnectionStatus connection={connection} />
             {room.godViewAvailable && (
               <button
                 className={cn(socialButton(config, godView), 'shrink-0', godView && 'ring-2 ring-[#fff8e8]/70')}

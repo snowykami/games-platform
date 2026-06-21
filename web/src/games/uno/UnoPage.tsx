@@ -8,6 +8,7 @@ import { Link } from 'react-router'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
+import { RoomConnectionStatus } from '@/games/RoomConnectionStatus'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { usePendingAction } from '@/games/usePendingAction'
 import { useI18n } from '@/i18n/context'
@@ -34,7 +35,7 @@ const COLOR_SWATCHES: Record<UnoColor, string> = {
 
 export function UnoPage({ roomId }: { roomId: string }) {
   const { t } = useI18n()
-  const { actions, error, isLoading, room } = useUnoRoom(roomId)
+  const { actions, connection, error, isLoading, room } = useUnoRoom(roomId)
   const [message, setMessage] = useState(() => t('uno.tableReady'))
   const [activeAction, setActiveAction] = useState<UnoPublicAction>()
   const [singleClickPlay, setSingleClickPlay] = useState(() => window.localStorage.getItem('uno-single-click-play') === 'true')
@@ -218,6 +219,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
               </StatusPill>
             )}
             {(room.rules.flip || room.flipSide) && <StatusPill>{room.flipSide ? t('uno.darkSide') : t('uno.lightSide')}</StatusPill>}
+            <RoomConnectionStatus connection={connection} />
             <button className="uno-button ml-auto" disabled={pending.isPending('restart') || room.hostPlayerId !== room.youPlayerId} type="button" onClick={handleRestart}>
               <RotateCcw className="size-4" />
               {pending.isPending('restart') ? t('common.syncing') : t('uno.restart')}
