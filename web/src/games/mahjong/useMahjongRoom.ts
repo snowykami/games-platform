@@ -1,13 +1,13 @@
 import type { MahjongOnlineRoom } from './online'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { sendRoomSocketMessage } from '../roomSocket'
+import { useRoomSocket } from '../useRoomSocket'
 import { joinMahjongRoom } from './online'
 
 export function useMahjongRoom(roomId: string | undefined) {
   const [room, setRoom] = useState<MahjongOnlineRoom>()
   const [error, setError] = useState<string>()
   const [isLoading, setIsLoading] = useState(Boolean(roomId))
-  const socketRef = useRef<WebSocket | null>(null)
 
   const refresh = useCallback(async () => {
     if (!roomId) {
@@ -31,40 +31,23 @@ export function useMahjongRoom(roomId: string | undefined) {
     void refresh()
   }, [refresh])
 
-  useEffect(() => {
-    if (!roomId) {
-      return undefined
+  const handleSocketMessage = useCallback((event: MessageEvent) => {
+    const data = JSON.parse(String(event.data))
+    if (data.type === 'room.state') {
+      setRoom(data.room)
+      setError(undefined)
     }
-
-    const socket = new WebSocket(createWebSocketURL(roomId))
-    socketRef.current = socket
-    function handleMessage(event: MessageEvent) {
-      const data = JSON.parse(String(event.data))
-      if (data.type === 'room.state') {
-        setRoom(data.room)
-        setError(undefined)
-      }
-      if (data.type === 'error') {
-        setError(data.error)
-      }
+    if (data.type === 'error') {
+      setError(data.error)
     }
+  }, [])
 
-    function handleClose() {
-      if (socketRef.current === socket) {
-        socketRef.current = null
-      }
-    }
-
-    socket.addEventListener('message', handleMessage)
-    socket.addEventListener('close', handleClose)
-
-    return () => {
-      socketRef.current = null
-      socket.removeEventListener('message', handleMessage)
-      socket.removeEventListener('close', handleClose)
-      socket.close()
-    }
-  }, [roomId])
+  const socketRef = useRoomSocket({
+    enabled: Boolean(roomId),
+    onMessage: handleSocketMessage,
+    onReconnect: refresh,
+    url: roomId ? createWebSocketURL(roomId) : '',
+  })
 
   const send = useCallback(async (type: string, payload?: unknown) => {
     try {
@@ -76,7 +59,7 @@ export function useMahjongRoom(roomId: string | undefined) {
     catch (err) {
       setError(err instanceof Error ? err.message : '操作失败。')
     }
-  }, [])
+  }, [socketRef])
 
   const actions = useMemo(() => ({
     addAI: (level: string) => roomId ? send('room.add_ai', { level }) : Promise.resolve(),
