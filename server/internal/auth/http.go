@@ -112,7 +112,8 @@ func (h *Handler) guest(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, meResponse{User: user})
 }
 
-func (h *Handler) logout(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	h.store.DeleteSession(SessionTokenFromRequest(r))
 	h.clearSessionCookie(w)
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

@@ -197,6 +197,20 @@ func (s *Store) UserBySession(token string) (*User, bool) {
 	return cloneUser(user), true
 }
 
+func (s *Store) DeleteSession(token string) {
+	if token == "" {
+		return
+	}
+	if s.db != nil {
+		s.deleteSessionPostgres(token)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, token)
+}
+
 func (s *Store) ListUsers() []*User {
 	if s.db != nil {
 		return s.listUsersPostgres()
@@ -401,6 +415,15 @@ WHERE s.token = $1 AND s.expires_at > NOW()
 		return nil, false
 	}
 	return user, true
+}
+
+func (s *Store) deleteSessionPostgres(token string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if _, err := s.db.Exec(ctx, `DELETE FROM auth_sessions WHERE token = $1`, token); err != nil {
+		slog.Warn("auth session delete failed", "error", err)
+	}
 }
 
 func (s *Store) listUsersPostgres() []*User {

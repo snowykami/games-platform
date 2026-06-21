@@ -1,5 +1,5 @@
 import type { GameDefinition } from '@/games/registry'
-import { DoorOpen, LogIn, ShieldCheck, UserRound, Users } from 'lucide-react'
+import { DoorOpen, LogIn, LogOut, ShieldCheck, UserRound, Users } from 'lucide-react'
 import { Link } from 'react-router'
 import { useAuth } from '@/auth/AuthContext'
 import { useI18n } from '@/i18n/context'
@@ -85,8 +85,13 @@ function UserPanel({
     role: 'admin' | 'player'
   }
 }) {
+  const { logout } = useAuth()
   const { t } = useI18n()
   const shouldShowLogin = !user || user.kind === 'guest'
+
+  async function handleLogout() {
+    await logout()
+  }
 
   return (
     <div className="flex min-h-16 flex-col gap-3 rounded-xl bg-[#fffaf0]/86 p-3 shadow-[0_16px_40px_rgba(25,22,17,0.12)] ring-1 ring-[#191611]/10 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
@@ -106,14 +111,22 @@ function UserPanel({
         </div>
       </div>
 
-      {shouldShowLogin && (
-        <Button asChild className="min-h-10 shrink-0" size="sm" variant="secondary">
-          <Link to="/login?next=/">
-            <LogIn className="size-4" />
-            {t('common.login')}
-          </Link>
-        </Button>
-      )}
+      <div className="flex shrink-0 flex-wrap gap-2">
+        {shouldShowLogin && (
+          <Button asChild className="min-h-10" size="sm" variant="secondary">
+            <Link to="/login?next=/">
+              <LogIn className="size-4" />
+              {t('common.login')}
+            </Link>
+          </Button>
+        )}
+        {user && (
+          <Button className="min-h-10" size="sm" type="button" variant="outline" onClick={handleLogout}>
+            <LogOut className="size-4" />
+            {t('common.logout')}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

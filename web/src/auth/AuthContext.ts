@@ -4,6 +4,7 @@ import { createContext, use } from 'react'
 export interface AuthContextValue {
   isLoading: boolean
   loginGuest: () => Promise<AuthUser>
+  logout: () => Promise<void>
   refresh: () => Promise<void>
   user?: AuthUser
 }

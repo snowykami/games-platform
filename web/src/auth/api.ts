@@ -49,6 +49,13 @@ export async function loginAsGuest(guestUuid: string): Promise<AuthUser> {
   return data.user
 }
 
+export async function logoutSession(): Promise<void> {
+  const response = await fetch('/api/auth/logout', { method: 'POST' })
+  if (!response.ok) {
+    throw new Error('Logout failed')
+  }
+}
+
 export async function getOIDCProviders(): Promise<OIDCProvider[]> {
   const response = await fetch('/api/auth/oidc/providers')
   if (!response.ok) {

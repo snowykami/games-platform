@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { AuthUser } from './types'
 import { useEffect, useMemo, useState } from 'react'
-import { getMe, loginAsGuest } from './api'
+import { getMe, loginAsGuest, logoutSession } from './api'
 import { AuthContext } from './AuthContext'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -25,11 +25,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return nextUser
   }
 
+  async function logout() {
+    await logoutSession()
+    setUser(undefined)
+  }
+
   useEffect(() => {
     void refresh()
   }, [])
 
-  const value = useMemo(() => ({ isLoading, loginGuest, refresh, user }), [isLoading, user])
+  const value = useMemo(() => ({ isLoading, loginGuest, logout, refresh, user }), [isLoading, user])
 
   return <AuthContext value={value}>{children}</AuthContext>
 }
