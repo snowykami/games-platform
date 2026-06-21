@@ -11,8 +11,9 @@ type AIActionResult struct {
 }
 
 type AIOptionalSpeechResult struct {
-	RoomID  string
-	Changed bool
+	RoomID   string
+	Changed  bool
+	Continue bool
 }
 
 type RoomAIScheduler struct {
@@ -95,10 +96,14 @@ func (s *RoomAIScheduler) ScheduleSpeech(roomID string) {
 	s.mu.Unlock()
 
 	go func() {
+		continueRoomID := ""
 		defer func() {
 			s.mu.Lock()
 			delete(s.speechRunning, roomID)
 			s.mu.Unlock()
+			if continueRoomID != "" {
+				s.ScheduleSpeech(continueRoomID)
+			}
 		}()
 
 		time.Sleep(s.speechDelay)
@@ -107,6 +112,9 @@ func (s *RoomAIScheduler) ScheduleSpeech(roomID string) {
 			return
 		}
 		s.broadcastRoom(result.RoomID)
+		if result.Continue {
+			continueRoomID = result.RoomID
+		}
 	}()
 }
 

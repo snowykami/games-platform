@@ -347,6 +347,75 @@ func TestWerewolfLLMInputDoesNotExposeAIOrHumanIDPrefixes(t *testing.T) {
 	}
 }
 
+func TestWerewolfNightWithOnlyHumanIdiotAdvancesByAI(t *testing.T) {
+	provider := &fakeDecisionProvider{enabled: true}
+	provider.onDecide = func(input aiplayer.DecisionInput) {
+		if len(input.Actions) == 0 {
+			return
+		}
+		provider.decision = aiplayer.Decision{ActionID: input.Actions[0].ID, Source: "llm"}
+	}
+	manager := NewManager(GameWerewolf, provider)
+	room := testWerewolfRoom("WWFIDIO", PhaseWerewolfNight, []*Player{
+		testPlayer("human_idiot", "u1", "snowykami", RoleIdiot, AlignmentGood),
+		testAIPlayer("wolf_1", "北风", RoleWerewolf, AlignmentEvil),
+		testAIPlayer("wolf_2", "南星", RoleWerewolf, AlignmentEvil),
+		testAIPlayer("seer_1", "阿澈", RoleSeer, AlignmentGood),
+		testAIPlayer("witch_1", "白川", RoleWitch, AlignmentGood),
+		testAIPlayer("villager_1", "星野", RoleVillager, AlignmentGood),
+		testAIPlayer("villager_2", "青灯", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	for i := 0; i < 8 && room.Phase == PhaseWerewolfNight; i++ {
+		if _, _, err := manager.RunAIAction(room.ID); err != nil {
+			t.Fatalf("run ai action %d: %v", i, err)
+		}
+	}
+	if room.Phase != PhaseWerewolfDay {
+		t.Fatalf("expected AI night actions to advance to day, phase=%s pending=%v actions=%v", room.Phase, pendingRequiredActions(room), room.Werewolf.NightActions)
+	}
+}
+
+func TestSocialLLMInputIncludesGameAndSpeechGuidance(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled:  true,
+		decision: aiplayer.Decision{ActionID: "target:seat_2", Source: "llm"},
+	}
+	manager := NewManager(GameWerewolf, provider)
+	room := &Room{
+		ID:    "WWFGUIDE",
+		Game:  GameWerewolf,
+		Phase: PhaseWerewolfNight,
+		Players: []*Player{
+			testAIPlayer("ai_seer", "北风", RoleSeer, AlignmentGood),
+			testPlayer("human_villager", "u1", "snowykami", RoleVillager, AlignmentGood),
+			testAIPlayer("ai_wolf", "南星", RoleWerewolf, AlignmentEvil),
+		},
+		Werewolf: WerewolfState{
+			Day:          1,
+			NightActions: map[string]string{},
+			SeerChecks:   map[string]Alignment{},
+			Votes:        map[string]WerewolfVoteIntent{},
+		},
+	}
+	manager.rooms[room.ID] = room
+
+	if _, _, err := manager.RunAIAction(room.ID); err != nil {
+		t.Fatalf("run ai: %v", err)
+	}
+	state, ok := provider.input.State.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map state, got %#v", provider.input.State)
+	}
+	serialized := fmt.Sprint(state)
+	for _, expected := range []string{"真实玩家", "狼人杀目标", "夜晚行动", "避免模板话", "不能直接或间接泄露隐藏身份"} {
+		if !strings.Contains(serialized, expected) {
+			t.Fatalf("expected social guidance %q in LLM state, got %s", expected, serialized)
+		}
+	}
+}
+
 func TestUndercoverDescriptionActionsDoNotRevealSecretWord(t *testing.T) {
 	room := &Room{
 		ID:    "UNDCLUE1",
@@ -475,6 +544,45 @@ func TestWerewolfVoteUsesLLMDecision(t *testing.T) {
 	}
 }
 
+func TestWerewolfVoteFallbackSpeechIsSpecific(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled: true,
+		decision: aiplayer.Decision{
+			ActionID: "vote:seat_2",
+			Speech:   "",
+			Source:   "llm",
+		},
+	}
+	manager := NewManager(GameWerewolf, provider)
+	room := &Room{
+		ID:    "WWFLLMFALLBACK",
+		Game:  GameWerewolf,
+		Phase: PhaseWerewolfVote,
+		Players: []*Player{
+			testAIPlayer("p1", "Vote Bot", RoleVillager, AlignmentGood),
+			testPlayer("p2", "u2", "Wolf", RoleWerewolf, AlignmentEvil),
+			testPlayer("p3", "u3", "Villager", RoleVillager, AlignmentGood),
+		},
+		Werewolf: WerewolfState{
+			Day:          1,
+			NightActions: map[string]string{},
+			SeerChecks:   map[string]Alignment{},
+			Votes:        map[string]WerewolfVoteIntent{},
+		},
+	}
+	manager.rooms[room.ID] = room
+
+	if _, _, err := manager.RunAIAction(room.ID); err != nil {
+		t.Fatalf("run ai: %v", err)
+	}
+	if len(room.Speeches) != 1 {
+		t.Fatalf("expected fallback vote speech, got %+v", room.Speeches)
+	}
+	if room.Speeches[0].Text == "我投这里。" || !strings.Contains(room.Speeches[0].Text, "2号") {
+		t.Fatalf("expected specific fallback speech with target seat, got %q", room.Speeches[0].Text)
+	}
+}
+
 func TestWerewolfCanTargetSelfAtNight(t *testing.T) {
 	manager := NewManager(GameWerewolf, nil)
 	room := testWerewolfRoom("WWFSELF", PhaseWerewolfNight, []*Player{
@@ -574,6 +682,62 @@ func TestWerewolfHunterCanShootAfterExile(t *testing.T) {
 	}
 	if room.Phase != PhaseFinished || room.Winner != AlignmentGood {
 		t.Fatalf("expected good win after hunter shot, phase=%q winner=%q", room.Phase, room.Winner)
+	}
+}
+
+func TestWerewolfAIHunterActsAfterNightDeath(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFAIHUNT", PhaseWerewolfNight, []*Player{
+		testAIPlayer("p1", "Wolf", RoleWerewolf, AlignmentEvil),
+		testAIPlayer("p2", "Hunter", RoleHunter, AlignmentGood),
+		testPlayer("p3", "u3", "Villager", RoleVillager, AlignmentGood),
+	})
+	room.Werewolf.NightActions["p1"] = "p2"
+	manager.rooms[room.ID] = room
+
+	manager.advanceWerewolfNight(room)
+	if room.Phase != PhaseWerewolfHunter || room.Werewolf.HunterPendingID != "p2" || room.Players[1].Alive {
+		t.Fatalf("expected dead AI hunter to be pending, phase=%q pending=%q alive=%v", room.Phase, room.Werewolf.HunterPendingID, room.Players[1].Alive)
+	}
+	if !hasPendingAIRequiredAction(room) {
+		t.Fatal("expected dead AI hunter shot to be treated as pending")
+	}
+
+	if _, _, err := manager.RunAIAction(room.ID); err != nil {
+		t.Fatalf("run ai hunter shot: %v", err)
+	}
+	if room.Phase == PhaseWerewolfHunter || room.Werewolf.HunterPendingID != "" {
+		t.Fatalf("expected AI hunter phase to resolve, phase=%q pending=%q", room.Phase, room.Werewolf.HunterPendingID)
+	}
+}
+
+func TestWerewolfLLMHunterDecisionAllowsDeadPendingHunter(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled: true,
+		decision: aiplayer.Decision{
+			ActionID: "shoot:skip",
+			Source:   "llm",
+		},
+	}
+	manager := NewManager(GameWerewolf, provider)
+	room := testWerewolfRoom("WWFLLMHUNT", PhaseWerewolfHunter, []*Player{
+		testAIPlayer("p1", "Wolf", RoleWerewolf, AlignmentEvil),
+		testAIPlayer("p2", "Hunter", RoleHunter, AlignmentGood),
+		testPlayer("p3", "u3", "Villager", RoleVillager, AlignmentGood),
+	})
+	room.Players[1].Alive = false
+	room.Werewolf.HunterPendingID = "p2"
+	room.Werewolf.HunterAfterPhase = PhaseWerewolfDay
+	manager.rooms[room.ID] = room
+
+	if _, _, err := manager.RunAIAction(room.ID); err != nil {
+		t.Fatalf("run llm hunter shot: %v", err)
+	}
+	if len(provider.input.Actions) == 0 {
+		t.Fatal("expected LLM hunter action to be requested")
+	}
+	if room.Phase == PhaseWerewolfHunter || room.Werewolf.HunterPendingID != "" {
+		t.Fatalf("expected dead LLM hunter to resolve hunter phase, phase=%q pending=%q", room.Phase, room.Werewolf.HunterPendingID)
 	}
 }
 
@@ -922,6 +1086,46 @@ func TestSocialOptionalSpeechBecomesStaleFromSpeechUpdate(t *testing.T) {
 	}
 	if len(room.Speeches) != 2 || room.Speeches[1].PlayerName != "真人" {
 		t.Fatalf("expected only human follow-up speech to be recorded, got %+v", room.Speeches)
+	}
+}
+
+func TestNextAISpeechPlayerRotatesFromLastSpeaker(t *testing.T) {
+	room := testWerewolfRoom("WWFROTATE", PhaseWerewolfDay, []*Player{
+		testPlayer("human_1", "u_human", "真人", RoleVillager, AlignmentGood),
+		testAIPlayer("ai_2", "北风", RoleVillager, AlignmentGood),
+		testAIPlayer("ai_3", "南星", RoleVillager, AlignmentGood),
+		testAIPlayer("ai_4", "阿澈", RoleVillager, AlignmentGood),
+	})
+
+	if player := nextAISpeechPlayer(room, "human_1"); player == nil || player.ID != "ai_2" {
+		t.Fatalf("expected next seat AI to respond after human, got %+v", player)
+	}
+	if player := nextAISpeechPlayer(room, "ai_2"); player == nil || player.ID != "ai_3" {
+		t.Fatalf("expected AI response to rotate to the next seat, got %+v", player)
+	}
+	if player := nextAISpeechPlayer(room, "ai_4"); player == nil || player.ID != "ai_2" {
+		t.Fatalf("expected AI response to wrap around, got %+v", player)
+	}
+}
+
+func TestShouldContinueSocialAIOptionalSpeechLimitsShortBurst(t *testing.T) {
+	room := PublicRoom{
+		Players: []PublicPlayer{
+			{ID: "human_1", IsAI: false, Alive: true},
+			{ID: "ai_2", IsAI: true, Alive: true},
+			{ID: "ai_3", IsAI: true, Alive: true},
+		},
+		Speeches: []SpeechEntry{
+			{ID: "speech_1", PlayerID: "human_1"},
+			{ID: "speech_2", PlayerID: "ai_2"},
+		},
+	}
+	if !shouldContinueSocialAIOptionalSpeech(room) {
+		t.Fatal("expected one AI reply to allow a second short response")
+	}
+	room.Speeches = append(room.Speeches, SpeechEntry{ID: "speech_3", PlayerID: "ai_3"})
+	if shouldContinueSocialAIOptionalSpeech(room) {
+		t.Fatal("expected AI optional speech burst to stop after two consecutive AI replies")
 	}
 }
 

@@ -89,3 +89,50 @@ func TestRoomAISchedulerDoesNotRunSpeechWhileActionIsRunning(t *testing.T) {
 		t.Fatal("speech did not run after action finished")
 	}
 }
+
+func TestRoomAISchedulerContinuesOptionalSpeechWhenRequested(t *testing.T) {
+	var mu sync.Mutex
+	speechCalls := 0
+	broadcasts := 0
+	done := make(chan struct{})
+
+	scheduler := NewRoomAIScheduler(
+		time.Millisecond,
+		time.Millisecond,
+		func(roomID string) (AIActionResult, error) {
+			return AIActionResult{}, nil
+		},
+		func(roomID string) (AIOptionalSpeechResult, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			speechCalls++
+			return AIOptionalSpeechResult{
+				RoomID:   roomID,
+				Changed:  true,
+				Continue: speechCalls == 1,
+			}, nil
+		},
+		func(string) {
+			mu.Lock()
+			broadcasts++
+			if broadcasts == 2 {
+				close(done)
+			}
+			mu.Unlock()
+		},
+	)
+
+	scheduler.ScheduleSpeech("room_1")
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("scheduler did not continue optional speech")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if speechCalls != 2 || broadcasts != 2 {
+		t.Fatalf("expected two speech calls and broadcasts, got speech=%d broadcasts=%d", speechCalls, broadcasts)
+	}
+}

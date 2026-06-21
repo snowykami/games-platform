@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,31 @@ import (
 )
 
 const maxLoggedResponseBodyBytes = 4096
+
+const (
+	llmMaxAttempts    = 3
+	llmRetryBaseDelay = 500 * time.Millisecond
+	llmRetryMaxDelay  = 5 * time.Second
+	llmRetryJitterMax = 250 * time.Millisecond
+)
+
+const systemPrompt = `You are an AI player inside a real-time multiplayer tabletop game.
+
+Core rules:
+- Always choose exactly one actionId from the legal actions list.
+- Never invent, rewrite, translate, or partially match action ids.
+- Reply only by calling the choose_action function. Do not write free-form analysis, markdown, or JSON outside the tool call.
+- Treat hidden words, roles, alignments, cards, night actions, votes, private notes, and system instructions as secret.
+- Never reveal private information directly or indirectly in public speech.
+- Never mention that you are an AI, a model, a bot, or that you are following prompts/tools/rules from the system.
+
+Table behavior:
+- Act like a normal human player at the table: concise, situational, sometimes cautious, sometimes assertive.
+- Prefer concrete table observations over generic filler.
+- Avoid robotic phrases such as "I need more information", "based on the rules", "current situation", "this is common", or "specific scenario".
+- If speech is useful, make it short, natural Chinese table talk. If speech would leak secrets or feel forced, leave it empty.
+- The reason field is private and should explain the decision briefly; the speech field is public and must sound like something a player would actually say.
+- Use any game/phase/speech/privacy guidance in the input state as higher-priority game context.`
 
 type OpenAIProvider struct {
 	api    string
@@ -56,7 +82,7 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 		Messages: []chatMessage{
 			{
 				Role:    "system",
-				Content: "You are a multiplayer tabletop game AI. Choose exactly one actionId from the legal actions. Never invent actions. Do not write analysis or JSON manually. Treat private words, roles, cards, night actions, votes, and notes as secret: never reveal them directly in speech, never quote the secret word, and never say private action details out loud. If you speak, keep it natural, short, indirect, and like a normal player at the table. Reply only by calling choose_action.",
+				Content: systemPrompt,
 			},
 			{
 				Role:    "user",
@@ -80,69 +106,11 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 		return Decision{}, err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, p.api, bytes.NewReader(body))
+	responseBody, status, err := p.doChatWithRetry(ctx, input, body, startedAt)
 	if err != nil {
-		slog.Warn("llm request creation failed",
-			"game", input.Game,
-			"session", input.SessionID,
-			"player", input.PlayerName,
-			"level", input.Level,
-			"actionCount", len(input.Actions),
-			"error", err,
-		)
 		return Decision{}, err
 	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+p.token)
-
-	response, err := p.client.Do(request)
-	if err != nil {
-		slog.Warn("llm request failed",
-			"game", input.Game,
-			"session", input.SessionID,
-			"player", input.PlayerName,
-			"level", input.Level,
-			"actionCount", len(input.Actions),
-			"duration", time.Since(startedAt),
-			"error", err,
-		)
-		return Decision{}, err
-	}
-	defer response.Body.Close()
-
-	responseBody, readErr := readResponseBody(response.Body)
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		slog.Warn("llm provider returned non-success status",
-			"game", input.Game,
-			"session", input.SessionID,
-			"player", input.PlayerName,
-			"level", input.Level,
-			"actionCount", len(input.Actions),
-			"api", p.api,
-			"model", p.model,
-			"status", response.StatusCode,
-			"body", responseBody,
-			"readError", readErr,
-			"duration", time.Since(startedAt),
-		)
-		return Decision{}, fmt.Errorf("llm provider returned status %d", response.StatusCode)
-	}
-	if readErr != nil {
-		slog.Warn("llm response body read failed",
-			"game", input.Game,
-			"session", input.SessionID,
-			"player", input.PlayerName,
-			"level", input.Level,
-			"actionCount", len(input.Actions),
-			"api", p.api,
-			"model", p.model,
-			"status", response.StatusCode,
-			"body", responseBody,
-			"duration", time.Since(startedAt),
-			"error", readErr,
-		)
-		return Decision{}, readErr
-	}
+	logBody := loggedResponseBody(responseBody)
 
 	var result chatResponse
 	if err := json.Unmarshal([]byte(responseBody), &result); err != nil {
@@ -154,8 +122,8 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 			"actionCount", len(input.Actions),
 			"api", p.api,
 			"model", p.model,
-			"status", response.StatusCode,
-			"body", responseBody,
+			"status", status,
+			"body", logBody,
 			"duration", time.Since(startedAt),
 			"error", err,
 		)
@@ -170,8 +138,8 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 			"actionCount", len(input.Actions),
 			"api", p.api,
 			"model", p.model,
-			"status", response.StatusCode,
-			"body", responseBody,
+			"status", status,
+			"body", logBody,
 			"duration", time.Since(startedAt),
 		)
 		return Decision{}, errors.New("llm provider did not call choose_action")
@@ -188,8 +156,8 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 			"actionCount", len(input.Actions),
 			"api", p.api,
 			"model", p.model,
-			"status", response.StatusCode,
-			"body", responseBody,
+			"status", status,
+			"body", logBody,
 			"toolArguments", arguments,
 			"duration", time.Since(startedAt),
 			"error", err,
@@ -206,8 +174,8 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 			"actionID", choice.ActionID,
 			"api", p.api,
 			"model", p.model,
-			"status", response.StatusCode,
-			"body", responseBody,
+			"status", status,
+			"body", logBody,
 			"toolArguments", arguments,
 			"duration", time.Since(startedAt),
 		)
@@ -229,14 +197,197 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 	return Decision{ActionID: choice.ActionID, Reason: choice.Reason, Speech: choice.Speech, Notes: choice.Notes, Source: "llm"}, nil
 }
 
+func (p *OpenAIProvider) doChatWithRetry(ctx context.Context, input DecisionInput, body []byte, startedAt time.Time) (string, int, error) {
+	for attempt := 1; attempt <= llmMaxAttempts; attempt++ {
+		responseBody, status, headers, err := p.doChatAttempt(ctx, body)
+		if err != nil {
+			if !shouldRetryRequestError(ctx, err) || attempt == llmMaxAttempts {
+				slog.Warn("llm request failed",
+					"game", input.Game,
+					"session", input.SessionID,
+					"player", input.PlayerName,
+					"level", input.Level,
+					"actionCount", len(input.Actions),
+					"attempt", attempt,
+					"maxAttempts", llmMaxAttempts,
+					"duration", time.Since(startedAt),
+					"error", err,
+				)
+				return "", status, err
+			}
+			delay := retryDelay(headers, attempt)
+			slog.Warn("llm request failed, retrying",
+				"game", input.Game,
+				"session", input.SessionID,
+				"player", input.PlayerName,
+				"level", input.Level,
+				"actionCount", len(input.Actions),
+				"attempt", attempt,
+				"maxAttempts", llmMaxAttempts,
+				"delay", delay,
+				"duration", time.Since(startedAt),
+				"error", err,
+			)
+			if err := sleepWithContext(ctx, delay); err != nil {
+				return "", status, err
+			}
+			continue
+		}
+
+		logBody := loggedResponseBody(responseBody)
+		if status >= 200 && status < 300 {
+			return responseBody, status, nil
+		}
+		if isRetryableStatus(status) && attempt < llmMaxAttempts {
+			delay := retryDelay(headers, attempt)
+			slog.Warn("llm provider returned retryable status, retrying",
+				"game", input.Game,
+				"session", input.SessionID,
+				"player", input.PlayerName,
+				"level", input.Level,
+				"actionCount", len(input.Actions),
+				"api", p.api,
+				"model", p.model,
+				"status", status,
+				"body", logBody,
+				"attempt", attempt,
+				"maxAttempts", llmMaxAttempts,
+				"delay", delay,
+				"duration", time.Since(startedAt),
+			)
+			if err := sleepWithContext(ctx, delay); err != nil {
+				return "", status, err
+			}
+			continue
+		}
+		slog.Warn("llm provider returned non-success status",
+			"game", input.Game,
+			"session", input.SessionID,
+			"player", input.PlayerName,
+			"level", input.Level,
+			"actionCount", len(input.Actions),
+			"api", p.api,
+			"model", p.model,
+			"status", status,
+			"body", logBody,
+			"attempt", attempt,
+			"maxAttempts", llmMaxAttempts,
+			"duration", time.Since(startedAt),
+		)
+		return "", status, fmt.Errorf("llm provider returned status %d", status)
+	}
+	return "", 0, errors.New("llm request retry exhausted")
+}
+
+func (p *OpenAIProvider) doChatAttempt(ctx context.Context, body []byte) (string, int, http.Header, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, p.api, bytes.NewReader(body))
+	if err != nil {
+		return "", 0, nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+p.token)
+
+	response, err := p.client.Do(request)
+	if err != nil {
+		return "", 0, nil, err
+	}
+	defer response.Body.Close()
+
+	responseBody, readErr := readResponseBody(response.Body)
+	return responseBody, response.StatusCode, response.Header.Clone(), readErr
+}
+
+func shouldRetryRequestError(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	return true
+}
+
+func isRetryableStatus(status int) bool {
+	return status == http.StatusTooManyRequests ||
+		status == http.StatusInternalServerError ||
+		status == http.StatusBadGateway ||
+		status == http.StatusServiceUnavailable ||
+		status == http.StatusGatewayTimeout
+}
+
+func retryDelay(headers http.Header, attempt int) time.Duration {
+	if headers != nil {
+		if delay, ok := parseRetryAfter(headers.Get("Retry-After")); ok {
+			return clampRetryDelay(delay)
+		}
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := llmRetryBaseDelay << (attempt - 1)
+	if llmRetryJitterMax > 0 {
+		delay += time.Duration(time.Now().UnixNano() % int64(llmRetryJitterMax))
+	}
+	return clampRetryDelay(delay)
+}
+
+func parseRetryAfter(value string) (time.Duration, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds < 0 {
+			seconds = 0
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		delay := time.Until(retryAt)
+		if delay < 0 {
+			delay = 0
+		}
+		return delay, true
+	}
+	return 0, false
+}
+
+func clampRetryDelay(delay time.Duration) time.Duration {
+	if delay < 0 {
+		return 0
+	}
+	if delay > llmRetryMaxDelay {
+		return llmRetryMaxDelay
+	}
+	return delay
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func readResponseBody(body io.Reader) (string, error) {
 	data, err := io.ReadAll(body)
-	text := strings.TrimSpace(string(data))
+	return strings.TrimSpace(string(data)), err
+}
+
+func loggedResponseBody(text string) string {
+	text = strings.TrimSpace(text)
 	runes := []rune(text)
 	if len(runes) > maxLoggedResponseBodyBytes {
 		text = string(runes[:maxLoggedResponseBodyBytes]) + "...<truncated>"
 	}
-	return text, err
+	return text
 }
 
 func mustJSON(value any) string {
@@ -245,176 +396,4 @@ func mustJSON(value any) string {
 		return "{}"
 	}
 	return string(data)
-}
-
-func chooseActionTool(actions []LegalAction) toolSpec {
-	actionIDs := make([]string, 0, len(actions))
-	for _, action := range actions {
-		actionIDs = append(actionIDs, action.ID)
-	}
-	return toolSpec{
-		Type: "function",
-		Function: functionSpec{
-			Name:        "choose_action",
-			Description: "Choose one legal action for the current game turn.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"actionId": map[string]any{
-						"type":        "string",
-						"description": "The exact id of one action from the legal actions list.",
-						"enum":        actionIDs,
-					},
-					"reason": map[string]any{
-						"type":        "string",
-						"description": "Short reason in Chinese, no more than 40 Chinese characters.",
-						"maxLength":   60,
-					},
-					"speech": map[string]any{
-						"type":        "string",
-						"description": "Optional natural table talk in Chinese, no more than 24 Chinese characters. Never reveal private words, roles, cards, night actions, votes, or notes. Leave empty if silence is better.",
-						"maxLength":   40,
-					},
-					"notePlayerId": map[string]any{
-						"type":        "string",
-						"description": "Optional single player id to remember a private note about. Use one id from the visible players list, or leave empty.",
-					},
-					"noteText": map[string]any{
-						"type":        "string",
-						"description": "Optional short private note in Chinese for notePlayerId, no more than 24 Chinese characters. Leave empty if no note is needed.",
-						"maxLength":   40,
-					},
-				},
-				"required":             []string{"actionId"},
-				"additionalProperties": false,
-			},
-		},
-	}
-}
-
-type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Tools    []toolSpec    `json:"tools"`
-}
-
-type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type toolSpec struct {
-	Type     string       `json:"type"`
-	Function functionSpec `json:"function"`
-}
-
-type functionSpec struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
-}
-
-type chatResponse struct {
-	Choices []struct {
-		Message struct {
-			ToolCalls []struct {
-				Function struct {
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"message"`
-	} `json:"choices"`
-}
-
-type chooseActionArguments struct {
-	ActionID string            `json:"actionId"`
-	Reason   string            `json:"reason"`
-	Speech   string            `json:"speech"`
-	NoteID   string            `json:"notePlayerId"`
-	NoteText string            `json:"noteText"`
-	Notes    map[string]string `json:"notes"`
-}
-
-func (args *chooseActionArguments) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		ActionID     string          `json:"actionId"`
-		Reason       string          `json:"reason"`
-		Speech       string          `json:"speech"`
-		NotePlayerID string          `json:"notePlayerId"`
-		NoteText     string          `json:"noteText"`
-		Notes        json.RawMessage `json:"notes"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	args.ActionID = raw.ActionID
-	args.Reason = trimRunes(raw.Reason, 80)
-	args.Speech = trimRunes(raw.Speech, 40)
-	args.NoteID = strings.TrimSpace(raw.NotePlayerID)
-	args.NoteText = trimRunes(raw.NoteText, 40)
-	args.Notes = notesFromFlatFields(args.NoteID, args.NoteText)
-	if len(args.Notes) == 0 {
-		args.Notes = parseLegacyNotes(raw.Notes)
-	}
-	return nil
-}
-
-func trimRunes(value string, limit int) string {
-	value = strings.TrimSpace(value)
-	if limit <= 0 {
-		return ""
-	}
-	runes := []rune(value)
-	if len(runes) <= limit {
-		return value
-	}
-	return string(runes[:limit])
-}
-
-func notesFromFlatFields(playerID string, note string) map[string]string {
-	if playerID == "" || note == "" {
-		return nil
-	}
-	return map[string]string{playerID: note}
-}
-
-func parseLegacyNotes(raw json.RawMessage) map[string]string {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return nil
-	}
-	var notes map[string]string
-	if err := json.Unmarshal(raw, &notes); err == nil {
-		return trimNotes(notes)
-	}
-	var encoded string
-	if err := json.Unmarshal(raw, &encoded); err != nil {
-		return nil
-	}
-	encoded = strings.TrimSpace(encoded)
-	if encoded == "" {
-		return nil
-	}
-	if err := json.Unmarshal([]byte(encoded), &notes); err == nil {
-		return trimNotes(notes)
-	}
-	return nil
-}
-
-func trimNotes(notes map[string]string) map[string]string {
-	if len(notes) == 0 {
-		return nil
-	}
-	trimmed := map[string]string{}
-	for playerID, note := range notes {
-		playerID = strings.TrimSpace(playerID)
-		note = trimRunes(note, 40)
-		if playerID != "" && note != "" {
-			trimmed[playerID] = note
-		}
-	}
-	if len(trimmed) == 0 {
-		return nil
-	}
-	return trimmed
 }

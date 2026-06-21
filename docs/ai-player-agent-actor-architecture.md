@@ -770,8 +770,8 @@ error
 
 ### 当前落地状态
 
-- 已新增 `server/internal/gameactor`，包含 `RoomEvent`、`AgentEvent`、`PlayerIntent`、`ActiveAgentRequest`、`RoomVersion`、legal action hash、轻量 `RoomActor` 串行 inbox 和 `RoomCommandRegistry` 同步命令层。
-- 已新增 `gameactor.RoomAIScheduler`，把各游戏 Hub 里重复的旧 AI goroutine 去重集中；它只是迁移过渡层，不是最终 Agent Actor。
+- 已新增 `server/internal/gameactor`，包含 `RoomEvent`、`AgentEvent`、`PlayerIntent`、`ActiveAgentRequest`、`RoomVersion`、legal action hash、轻量 `RoomActor` 串行 inbox、`RoomCommandRegistry` 同步命令层和可嵌入各游戏 manager 的 `RoomRuntime`。
+- 已新增 `gameactor.RoomAIScheduler`，把各游戏 Hub 里重复的 AI action / optional speech goroutine 去重集中，并按房间保证正式动作和可选发言不并发。
 - 已新增 `server/internal/aiagent`，包含每个 AI session 可复用的 `Runner`、`Memory`、persona 输入、LLM request lifecycle、常驻 `Agent` inbox loop、`Registry` 生命周期管理，以及面向各游戏 manager 的 `Controller`。
 - 已调整 `gameactor.RoomAIScheduler`：同一房间 required action 链运行时不并发 optional speech，发言会延后到正式动作链结束，避免可选发言干扰正式决策。
 - Uno、五子棋、象棋、麻将、狼人杀、阿瓦隆和谁是卧底的 HTTP / WebSocket / AI scheduler 写入口已迁入 `RoomCommandRegistry`。同一 room 的加入/离开、发言、开始、出牌/落子/移动、社交推理行动、AI 正式动作和 AI 可选发言会按 room actor 队列串行执行。
@@ -783,9 +783,14 @@ error
 - 已将社交推理 optional speech 判定绑定到发言版本：AI 主动发言等待期间如果桌面出现新发言，旧发言会被丢弃。
 - 已将社交推理 AI context 中的玩家引用改为 `seat_1` 这类座位别名，并禁止泄露 `kind`、`isAI`、`userId`、`aiProfile`、`connected` 等内部或真实性字段。
 - 已将谁是卧底投票改为 select / change / confirm 模型，只有 confirmed vote 参与结算。
-- 已拆出 `socialdeduction/versions.go`、`ai_context.go`、`rules_undercover.go` 和 `undercover_view.go`，先降低 `manager.go` 对版本、AI context、谁是卧底规则/视图的混杂职责。
+- 已拆出 `socialdeduction/versions.go`、`ai_context.go`、`ai_decision.go`、`rules_werewolf_actions.go`、`rules_avalon_actions.go`、`rules_undercover.go` 和 `undercover_view.go`，降低 `manager.go` 对版本、AI context、AI 决策、候选动作和谁是卧底规则/视图的混杂职责。
+- 已拆出 Uno 的 `ai.go` 和 `rules.go`，`manager.go` 只保留房间入口、生命周期和少量协调逻辑。
+- 已拆出麻将的 `ai.go` 和 `rules.go`，将 LLM / fallback AI、牌墙、番型评分、tile 工具从 `manager.go` 移出。
+- 已拆出象棋的 `ai.go` 和 `rules.go`，将 LLM / fallback AI、合法走法、初始棋子、位置判断和棋子格式化从 `manager.go` 移出。
+- 已拆出五子棋的 `ai.go`，将 LLM / fallback AI、合法落点和估值策略从 `manager.go` 移出。
 - 已完成旧 AI 调度入口的命名清理：各游戏使用 `RunAIAction` / `RunAIOptionalSpeech` / `ScheduleAIAction` / `ScheduleAIOptionalSpeech` 表达 actor 化调度语义，运行时由 `RoomCommandRegistry` 包裹，不再绕过 room actor 写状态。
-- 尚未完成：继续拆薄大型 manager/http 文件，并在后续迭代中把当前同步命令层进一步收敛为更完整的 `GameAdapter -> RoomActor` 规则应用结构。
+- 已将每个游戏 manager 中重复的 room actor registry 和 `RunRoomCommand` 方法抽到 `gameactor.RoomRuntime`，游戏 manager 通过嵌入运行时获得统一命令入口。
+- 当前剩余：继续拆薄社交推理 `manager.go` 和各游戏 `http.go` / 前端大页面；后续可把当前同步命令层进一步收敛为更完整的 `GameAdapter -> RoomActor` 规则应用结构。
 
 ### 阶段 1：抽公共包
 

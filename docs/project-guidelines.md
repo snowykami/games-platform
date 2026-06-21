@@ -217,8 +217,10 @@ type GameDefinition = {
 
 - `RunAIAction` / `RunAIOptionalSpeech` / `ScheduleAIAction` / `ScheduleAIOptionalSpeech` 必须由 `RoomCommandRegistry` 包裹运行，不能绕过 room actor 写状态。
 - 新的 AI 玩家能力必须优先接入 `gameactor.RoomActor`、`gameactor.RoomVersion` 和 `aiagent.Controller`；不要在游戏 manager 里直接管理 LLM broker / registry。
-- 新的房间写操作必须经由 `RoomCommandRegistry` 或后续完整 `RoomActor` adapter；HTTP、WebSocket、后台 ticker、AI scheduler 不能直接并发写同一个房间。
+- 新的房间写操作必须经由 `gameactor.RoomRuntime` / `RoomCommandRegistry` 或后续完整 `RoomActor` adapter；HTTP、WebSocket、后台 ticker、AI scheduler 不能直接并发写同一个房间。
+- 游戏后端文件继续按职责拆分：`manager.go` 只做房间生命周期和协调，AI 决策放 `ai.go`，纯规则/胜负/牌理/棋规放 `rules.go` 或 `rules_*.go`，公开视图和 AI context 放 `view.go` / `ai_context.go`。新增功能不得把这些职责重新堆回 manager。
 - 同一房间的正式 AI 动作与可选发言不得并发执行；发言必须让位于 required action。
+- AI required action 的调度、pending 检查和 stale 校验必须复用同一套阶段行动资格，不要把“玩家存活”写成全局前置条件。例：狼人杀猎人已出局但处于 `hunter` 阶段时仍必须执行开枪或跳过。
 - 游戏 manager 不应直接调用 `aiProvider.Decide`；LLM 请求必须经由每个 AI 玩家自己的 `aiagent.Agent`，再以 intent 形式交还规则层校验和应用。
 - 每迁移一个游戏，必须清理该游戏的旧命名和重复调度入口，避免长期双轨；大型 manager/http 文件要继续拆薄到规则、视图、AI context、传输层组件。
 
@@ -331,6 +333,7 @@ AI 是正式玩家制度，不是演示数据。
 - LLM 不可信，返回 action 必须重新校验。
 - LLM 输入和输出 schema 保持扁平，避免深层嵌套 JSON。
 - LLM 失败、stale、非法 action、provider 响应异常必须打结构化日志，但不能记录 token。
+- LLM stale 判断不能只看玩家是否存活，必须按阶段动作规则判断该玩家是否仍是当前 required actor；死亡后触发的特殊动作要有回归测试。
 
 社交推理游戏：
 

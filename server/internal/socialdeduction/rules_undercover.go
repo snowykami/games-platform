@@ -74,6 +74,16 @@ func resolveUndercoverVote(room *Room) {
 	startNextUndercoverRound(room)
 }
 
+func confirmedUndercoverVotes(room *Room) map[string]string {
+	votes := map[string]string{}
+	for actorID, vote := range room.Undercover.Votes {
+		if vote.Confirmed && vote.TargetID != "" {
+			votes[actorID] = vote.TargetID
+		}
+	}
+	return votes
+}
+
 func startNextUndercoverRound(room *Room) {
 	room.Undercover.Round++
 	room.Undercover.Described = map[string]bool{}
