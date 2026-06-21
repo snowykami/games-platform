@@ -8,7 +8,7 @@ import { cn } from '@/shared/lib/utils'
 import { ChoiceButton, ConfirmChoiceButton, SubmittedNotice } from './socialActionControls'
 import { PlayerRefLabel } from './socialPlayers'
 import { socialButton } from './socialStyle'
-import { Panel } from './socialUi'
+import { Panel, SocialBadge } from './socialUi'
 
 export function WerewolfActionPanel({
   actions,
@@ -34,12 +34,14 @@ export function WerewolfActionPanel({
     const canAct = ['werewolf', 'seer', 'guard', 'witch'].includes(you.role ?? '')
     const witchVictim = room.players.find(player => player.id === room.werewolf.witchVictimId)
     const nightTargets = werewolfNightTargets(room, you)
+    const nightSubmitted = Boolean(room.werewolf.nightActionSubmitted) && you.role !== 'werewolf'
 
     return (
       <Panel config={config}>
         <h2 className="text-xl font-black">{t('werewolf.nightAction')}</h2>
-        <p className="text-sm leading-6 text-[#fff8e8]/76">{canAct ? t('werewolf.chooseNightTarget') : t('werewolf.noNightAction')}</p>
-        {you.role === 'witch' && (
+        <p className="text-sm leading-6 text-[#fff8e8]/76">{nightSubmitted ? t('werewolf.actionSubmitted') : canAct ? t('werewolf.chooseNightTarget') : t('werewolf.noNightAction')}</p>
+        {nightSubmitted && <SubmittedNotice config={config} label={t('werewolf.actionSubmitted')} />}
+        {you.role === 'witch' && !nightSubmitted && (
           <>
             <p className="rounded-lg bg-black/24 px-3 py-2 text-xs font-black text-[#fff8e8]/72">
               {witchVictim
@@ -70,7 +72,7 @@ export function WerewolfActionPanel({
             </button>
           </>
         )}
-        {canAct && you.role !== 'witch' && nightTargets.map(player => (
+        {canAct && !nightSubmitted && you.role !== 'witch' && nightTargets.map(player => (
           <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.nightAction(`target:${player.id}`).then(() => setMessage(t('werewolf.actionSubmitted')))}>
             <WerewolfNightRelationBadge player={player} you={you} />
             <PlayerRefLabel player={player} room={room} />
@@ -193,22 +195,21 @@ function werewolfNightTargets(room: SocialRoom, you: SocialPlayer) {
 function WerewolfNightRelationBadge({ player, you }: { player: SocialPlayer, you: SocialPlayer }) {
   if (you.role !== 'werewolf') {
     return (
-      <span className="inline-flex min-h-6 shrink-0 items-center rounded-full bg-white/12 px-2 text-xs font-black leading-none text-[#fff8e8]/76">
+      <SocialBadge className="bg-white/12 text-[#fff8e8]/76 ring-1 ring-white/12">
         目标
-      </span>
+      </SocialBadge>
     )
   }
   const relation = player.role === 'werewolf' ? 'friend' : 'enemy'
   return (
-    <span
+    <SocialBadge
       className={cn(
-        'inline-flex min-h-6 shrink-0 items-center rounded-full px-2 text-xs font-black leading-none ring-1',
         relation === 'friend'
           ? 'bg-[#123729] text-[#9fffd0] ring-[#36d399]/40'
           : 'bg-[#4a1424] text-[#ffd6df] ring-[#ff7a9a]/45',
       )}
     >
       {relation === 'friend' ? '友' : '敌'}
-    </span>
+    </SocialBadge>
   )
 }

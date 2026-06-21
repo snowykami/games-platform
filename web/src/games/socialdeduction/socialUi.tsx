@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { SocialGameSlug, SocialRole, SocialRoom } from './online'
+import type { SocialAlignment, SocialGameSlug, SocialRole, SocialRoom } from './online'
 import { ArrowLeft } from 'lucide-react'
 import { Link } from 'react-router'
 import { useI18n } from '@/i18n/context'
@@ -18,13 +18,48 @@ export function RoleList({ game }: { game: SocialGameSlug }) {
 export function RoleBadge({ dead = false, role, size = 'normal' }: { dead?: boolean, role: SocialRole, size?: 'normal' | 'large' }) {
   const { t } = useI18n()
   return (
-    <span className={cn('inline-flex items-center rounded-full font-black leading-none', size === 'large' ? 'min-h-8 px-3 text-sm' : 'min-h-6 px-2 text-xs', dead ? deadRoleClass() : alignmentClass(ROLE_ALIGNMENT[role]))}>
+    <SocialBadge className={dead ? deadBadgeClass() : alignmentClass(ROLE_ALIGNMENT[role])} size={size}>
       {roleLabel(role, t)}
+    </SocialBadge>
+  )
+}
+
+export function AlignmentBadge({ alignment, size = 'normal' }: { alignment: SocialAlignment, size?: 'normal' | 'large' }) {
+  const { t } = useI18n()
+  return (
+    <SocialBadge className={alignmentClass(alignment)} size={size}>
+      {t(`social.alignments.${alignment}`)}
+    </SocialBadge>
+  )
+}
+
+export function StatusBadge({ state, size = 'normal' }: { state: 'alive' | 'out', size?: 'normal' | 'large' }) {
+  const { t } = useI18n()
+  return (
+    <SocialBadge className={state === 'alive' ? 'bg-emerald-200 text-emerald-950 ring-1 ring-emerald-300/45' : deadBadgeClass()} size={size}>
+      {state === 'alive' ? t('social.alive') : t('social.out')}
+    </SocialBadge>
+  )
+}
+
+export function HiddenRoleBadge({ size = 'normal' }: { size?: 'normal' | 'large' }) {
+  const { t } = useI18n()
+  return (
+    <SocialBadge className="bg-white/12 text-[#fff8e8]/78 ring-1 ring-white/12" size={size}>
+      {t('social.hiddenRole')}
+    </SocialBadge>
+  )
+}
+
+export function SocialBadge({ children, className, size = 'normal' }: { children: ReactNode, className?: string, size?: 'normal' | 'large' }) {
+  return (
+    <span className={cn('inline-flex shrink-0 items-center rounded-full font-black leading-none', size === 'large' ? 'min-h-8 px-3 text-sm' : 'min-h-6 px-2 text-xs', className)}>
+      {children}
     </span>
   )
 }
 
-function deadRoleClass() {
+function deadBadgeClass() {
   return 'bg-[#242933] text-[#cbd5e1] ring-1 ring-[#ff9aa8]/42 shadow-[inset_0_-2px_0_rgba(255,154,168,0.28)]'
 }
 

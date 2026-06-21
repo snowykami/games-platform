@@ -11,7 +11,7 @@ func startAvalon(room *Room) {
 	room.Phase = PhaseAvalonTeam
 	room.Avalon = AvalonState{
 		Round:         1,
-		LeaderID:      room.Players[0].ID,
+		LeaderID:      firstSeatPlayerID(room),
 		TeamVotes:     map[string]bool{},
 		QuestCards:    map[string]string{},
 		RequiredTeam:  avalonTeamSize(len(room.Players), 1),
@@ -133,12 +133,16 @@ func avalonRequiredFails(players int, round int) int {
 }
 
 func advanceAvalonLeader(room *Room) {
+	players := playersBySeat(room)
+	if len(players) == 0 {
+		return
+	}
 	index := 0
-	for currentIndex, player := range room.Players {
+	for currentIndex, player := range players {
 		if player.ID == room.Avalon.LeaderID {
 			index = currentIndex
 			break
 		}
 	}
-	room.Avalon.LeaderID = room.Players[(index+1)%len(room.Players)].ID
+	room.Avalon.LeaderID = players[(index+1)%len(players)].ID
 }

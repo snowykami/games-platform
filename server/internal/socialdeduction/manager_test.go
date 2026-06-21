@@ -40,6 +40,43 @@ func TestPublicRoomHidesWerewolfRoles(t *testing.T) {
 	}
 }
 
+func TestPublicRoomShowsSeerCheckedAlignmentWithoutRole(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := &Room{
+		ID:         "WWFSEERVIEW",
+		Game:       GameWerewolf,
+		HostUserID: "u1",
+		Phase:      PhaseWerewolfNight,
+		Players: []*Player{
+			testPlayer("seer", "u_seer", "Seer", RoleSeer, AlignmentGood),
+			testPlayer("wolf", "u_wolf", "Wolf", RoleWerewolf, AlignmentEvil),
+			testPlayer("villager", "u_villager", "Villager", RoleVillager, AlignmentGood),
+		},
+		Werewolf: WerewolfState{
+			Day:          1,
+			NightActions: map[string]string{"seer": "wolf"},
+			SeerChecks:   map[string]Alignment{"wolf": AlignmentEvil},
+			Votes:        map[string]WerewolfVoteIntent{},
+		},
+	}
+
+	seerView := manager.publicRoom(room, "u_seer")
+	if !seerView.Werewolf.NightSubmitted {
+		t.Fatal("expected seer view to mark own night action submitted")
+	}
+	if seerView.Players[1].Role != "" || seerView.Players[1].Alignment != "" || seerView.Players[1].VisibleToYou {
+		t.Fatalf("expected checked wolf role to stay hidden in public player, got %+v", seerView.Players[1])
+	}
+	if got := seerView.Werewolf.SeerChecks["wolf"]; got != AlignmentEvil {
+		t.Fatalf("expected seer checks to expose only checked alignment, got %q", got)
+	}
+
+	wolfView := manager.publicRoom(room, "u_wolf")
+	if wolfView.Werewolf.SeerChecks != nil {
+		t.Fatalf("expected non-seer not to receive seer checks, got %+v", wolfView.Werewolf.SeerChecks)
+	}
+}
+
 func TestPublicRoomGodViewRevealsAllRoles(t *testing.T) {
 	manager := NewManager(GameWerewolf, nil)
 	room := &Room{
@@ -329,6 +366,32 @@ func TestWerewolfNightUsesLLMDecision(t *testing.T) {
 	}
 	if len(room.Speeches) != 0 {
 		t.Fatalf("expected werewolf night speech to stay private, got %+v", room.Speeches)
+	}
+}
+
+func TestWerewolfSeerCanOnlyCheckOncePerNight(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFSEER1", PhaseWerewolfNight, []*Player{
+		testPlayer("seer", "u_seer", "Seer", RoleSeer, AlignmentGood),
+		testPlayer("villager", "u_villager", "Villager", RoleVillager, AlignmentGood),
+		testPlayer("wolf", "u_wolf", "Wolf", RoleWerewolf, AlignmentEvil),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.NightAction(room.ID, "u_seer", "target:villager"); err != nil {
+		t.Fatalf("first seer check should succeed: %v", err)
+	}
+	if got := room.Werewolf.SeerChecks["villager"]; got != AlignmentGood {
+		t.Fatalf("expected first checked alignment to be stored, got %q", got)
+	}
+	if _, err := manager.NightAction(room.ID, "u_seer", "target:wolf"); err == nil {
+		t.Fatal("expected second seer check in the same night to fail")
+	}
+	if _, ok := room.Werewolf.SeerChecks["wolf"]; ok {
+		t.Fatal("expected second target not to be checked")
+	}
+	if actions := werewolfNightActions(room, room.Players[0]); len(actions) != 0 {
+		t.Fatalf("expected no seer actions after submitting, got %+v", actions)
 	}
 }
 
@@ -1097,6 +1160,69 @@ func TestUndercoverVoteRecordsNaturalReasonSpeech(t *testing.T) {
 	}
 }
 
+func TestSeatAliasesUseAssignedSeatOverJoinOrder(t *testing.T) {
+	room := testWerewolfRoom("WWFSEATS", PhaseWerewolfDay, []*Player{
+		testPlayer("host", "u1", "Host", RoleVillager, AlignmentGood),
+		testPlayer("guest", "u2", "Guest", RoleWerewolf, AlignmentEvil),
+		testPlayer("third", "u3", "Third", RoleVillager, AlignmentGood),
+	})
+	room.Players[0].Seat = 2
+	room.Players[1].Seat = 0
+	room.Players[2].Seat = 1
+
+	if got := aiPlayerNumber(room, room.Players[0]); got != 3 {
+		t.Fatalf("expected host to use assigned seat 3, got %d", got)
+	}
+	if got := aiPlayerNumber(room, room.Players[1]); got != 1 {
+		t.Fatalf("expected guest to use assigned seat 1, got %d", got)
+	}
+	if player := playerFromAIRef(room, "seat_2"); player == nil || player.ID != "third" {
+		t.Fatalf("expected seat_2 to resolve by assigned seat, got %+v", player)
+	}
+}
+
+func TestSocialStartOrderUsesAssignedSeats(t *testing.T) {
+	avalonRoom := &Room{
+		ID:    "AVLSEATS",
+		Game:  GameAvalon,
+		Phase: PhaseLobby,
+		Players: []*Player{
+			testPlayer("host", "u1", "Host", RoleLoyal, AlignmentGood),
+			testPlayer("seat_one", "u2", "Seat One", RoleLoyal, AlignmentGood),
+			testPlayer("seat_two", "u3", "Seat Two", RoleLoyal, AlignmentGood),
+			testPlayer("seat_three", "u4", "Seat Three", RoleLoyal, AlignmentGood),
+			testPlayer("seat_four", "u5", "Seat Four", RoleLoyal, AlignmentGood),
+		},
+	}
+	for index, seat := range []int{4, 0, 1, 2, 3} {
+		avalonRoom.Players[index].Seat = seat
+	}
+	startAvalon(avalonRoom)
+	if avalonRoom.Avalon.LeaderID != "seat_one" {
+		t.Fatalf("expected first Avalon leader to be assigned seat 1, got %q", avalonRoom.Avalon.LeaderID)
+	}
+
+	undercoverRoom := &Room{
+		ID:    "UNDSEATS",
+		Game:  GameUndercover,
+		Phase: PhaseLobby,
+		Players: []*Player{
+			testPlayer("host", "u1", "Host", RoleCivilian, AlignmentGood),
+			testPlayer("seat_one", "u2", "Seat One", RoleCivilian, AlignmentGood),
+			testPlayer("seat_two", "u3", "Seat Two", RoleCivilian, AlignmentGood),
+			testPlayer("seat_three", "u4", "Seat Three", RoleCivilian, AlignmentGood),
+		},
+		Undercover: UndercoverState{PresetID: defaultUndercoverPresetID()},
+	}
+	for index, seat := range []int{3, 0, 1, 2} {
+		undercoverRoom.Players[index].Seat = seat
+	}
+	startUndercover(undercoverRoom)
+	if undercoverRoom.Undercover.CurrentSpeakerID != "seat_one" {
+		t.Fatalf("expected first Undercover speaker to be assigned seat 1, got %q", undercoverRoom.Undercover.CurrentSpeakerID)
+	}
+}
+
 func TestUndercoverVoteRequiresConfirmationAndAllowsChanges(t *testing.T) {
 	manager := NewManager(GameUndercover, nil)
 	room := &Room{
@@ -1334,7 +1460,7 @@ func testPlayer(id string, userID string, name string, role Role, alignment Alig
 }
 
 func testWerewolfRoom(id string, phase Phase, players []*Player) *Room {
-	return &Room{
+	room := &Room{
 		ID:      id,
 		Game:    GameWerewolf,
 		Phase:   phase,
@@ -1348,6 +1474,8 @@ func testWerewolfRoom(id string, phase Phase, players []*Player) *Room {
 			RevealedIdiots: map[string]bool{},
 		},
 	}
+	assignSequentialTestSeats(room)
+	return room
 }
 
 func testAIPlayer(id string, name string, role Role, alignment Alignment) *Player {
@@ -1361,6 +1489,12 @@ func testAIPlayer(id string, name string, role Role, alignment Alignment) *Playe
 		Level:       string(aiplayer.LevelLLM),
 	}
 	return player
+}
+
+func assignSequentialTestSeats(room *Room) {
+	for index, player := range room.Players {
+		player.Seat = index
+	}
 }
 
 type fakeDecisionProvider struct {

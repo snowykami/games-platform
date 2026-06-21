@@ -136,6 +136,11 @@ func witchCanAct(room *Room) bool {
 }
 
 func applyWerewolfNightAction(room *Room, player *Player, actionID string) (*Player, error) {
+	if player.Role != RoleWerewolf {
+		if _, submitted := room.Werewolf.NightActions[player.ID]; submitted {
+			return nil, errors.New("night_action_already_submitted")
+		}
+	}
 	actions := werewolfNightActions(room, player)
 	if !aiplayer.ValidateAction(actionID, actions) {
 		return nil, errors.New("invalid_target")

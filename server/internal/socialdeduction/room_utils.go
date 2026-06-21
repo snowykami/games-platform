@@ -3,12 +3,15 @@ package socialdeduction
 import (
 	"fmt"
 	"math/rand/v2"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/snowykami/games-platform/server/internal/aiplayer"
 	"github.com/snowykami/games-platform/server/internal/roommeta"
 )
+
+const unassignedSeat = -1
 
 func mostVotedTarget(votes map[string]string, actorFilter func(string) bool) string {
 	counts := map[string]int{}
@@ -33,12 +36,26 @@ func shuffledPlayers(players []*Player) []*Player {
 	return next
 }
 
-func createHumanPlayer(user UserView, role string, seat int) *Player {
+func assignRandomSeats(room *Room) {
+	for seat, player := range shuffledPlayers(room.Players) {
+		player.Seat = seat
+	}
+}
+
+func playersBySeat(room *Room) []*Player {
+	players := append([]*Player{}, room.Players...)
+	sort.SliceStable(players, func(i, j int) bool {
+		return players[i].Seat < players[j].Seat
+	})
+	return players
+}
+
+func createHumanPlayer(user UserView, role string) *Player {
 	return &Player{
 		ID:        "plr_" + randomToken(8),
 		UserID:    user.ID,
 		Name:      user.DisplayName,
-		Seat:      seat,
+		Seat:      unassignedSeat,
 		RoomRole:  role,
 		Kind:      user.Kind,
 		Connected: true,

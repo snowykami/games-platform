@@ -10,6 +10,11 @@ func werewolfNightActions(room *Room, actor *Player) []aiplayer.LegalAction {
 	if !canActAtNight(actor) {
 		return nil
 	}
+	if actor.Role != RoleWerewolf {
+		if _, submitted := room.Werewolf.NightActions[actor.ID]; submitted {
+			return nil
+		}
+	}
 	if actor.Role == RoleWitch {
 		return witchNightActions(room, actor)
 	}

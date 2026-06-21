@@ -274,6 +274,7 @@ type WerewolfView struct {
 	SeerChecks        map[string]Alignment          `json:"seerChecks,omitempty"`
 	Votes             map[string]WerewolfVoteIntent `json:"votes"`
 	DaySpeakers       map[string]bool               `json:"daySpeakers,omitempty"`
+	NightSubmitted    bool                          `json:"nightActionSubmitted,omitempty"`
 	LastNight         string                        `json:"lastNight,omitempty"`
 	WitchVictimID     string                        `json:"witchVictimId,omitempty"`
 	WitchAntidoteUsed bool                          `json:"witchAntidoteUsed,omitempty"`

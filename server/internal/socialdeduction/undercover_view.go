@@ -91,7 +91,7 @@ func undercoverCountForPlayers(count int) int {
 }
 
 func firstLivingPlayerID(room *Room) string {
-	for _, player := range room.Players {
+	for _, player := range playersBySeat(room) {
 		if player.Alive {
 			return player.ID
 		}
@@ -100,12 +100,20 @@ func firstLivingPlayerID(room *Room) string {
 }
 
 func nextUndescribedLivingPlayer(room *Room) *Player {
-	for _, player := range room.Players {
+	for _, player := range playersBySeat(room) {
 		if player.Alive && !room.Undercover.Described[player.ID] {
 			return player
 		}
 	}
 	return nil
+}
+
+func firstSeatPlayerID(room *Room) string {
+	players := playersBySeat(room)
+	if len(players) == 0 {
+		return ""
+	}
+	return players[0].ID
 }
 
 func mostVotedUndercoverTarget(votes map[string]string) (string, bool) {

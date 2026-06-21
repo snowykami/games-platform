@@ -61,12 +61,25 @@ func avalonTeamActionsForLLM(room *Room, actions []aiplayer.LegalAction) ([]aipl
 }
 
 func aiPlayerNumber(room *Room, target *Player) int {
+	if target != nil && target.Seat >= 0 && hasUniqueSeat(room, target.Seat) {
+		return target.Seat + 1
+	}
 	for index, player := range room.Players {
 		if player.ID == target.ID {
 			return index + 1
 		}
 	}
 	return target.Seat + 1
+}
+
+func hasUniqueSeat(room *Room, seat int) bool {
+	count := 0
+	for _, player := range room.Players {
+		if player.Seat == seat {
+			count++
+		}
+	}
+	return count == 1
 }
 
 func aiPlayerRef(room *Room, target *Player) string {

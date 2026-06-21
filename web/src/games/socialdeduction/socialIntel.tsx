@@ -3,8 +3,7 @@ import type { GAME_COPY } from './socialTheme'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { PlayerRefLabel } from './socialPlayers'
-import { alignmentClass } from './socialStyle'
-import { RoleBadge } from './socialUi'
+import { AlignmentBadge, HiddenRoleBadge, RoleBadge, StatusBadge } from './socialUi'
 
 export function SelfIntel({
   className,
@@ -28,11 +27,9 @@ export function SelfIntel({
     <section className={cn('rounded-lg border p-4', config.panel, shouldCenterIntel && 'text-center', className)}>
       <h2 className={cn('text-xl font-black', config.accent)}>{t('social.yourIntel')}</h2>
       <div className={cn('mt-3 flex flex-wrap gap-2', shouldCenterIntel && 'justify-center')}>
-        {you?.role ? <RoleBadge dead={you.alive === false} role={you.role} size="large" /> : <span className="inline-flex min-h-8 items-center rounded-full bg-white/12 px-3 text-sm font-black leading-none">{t('social.hiddenRole')}</span>}
+        {you?.role ? <RoleBadge dead={you.alive === false} role={you.role} size="large" /> : <HiddenRoleBadge size="large" />}
         {you?.alive === false && (
-          <span className="inline-flex min-h-8 items-center rounded-full bg-[#3f1720] px-3 text-sm font-black leading-none text-[#ffd6df] ring-1 ring-[#ff9aa8]/45">
-            {t('social.out')}
-          </span>
+          <StatusBadge size="large" state="out" />
         )}
       </div>
       <p className="mt-3 text-sm leading-6 text-[#fff8e8]/72">
@@ -67,10 +64,9 @@ export function SelfIntel({
           {seerChecks.map(([playerId, alignment]) => {
             const checkedPlayer = room.players.find(player => player.id === playerId)
             return (
-              <span key={playerId} className={cn('inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-black', alignmentClass(alignment))}>
+              <span key={playerId} className="inline-flex items-center gap-1.5 rounded-full bg-black/28 px-3 py-1 text-xs font-black">
                 {checkedPlayer ? <PlayerRefLabel player={checkedPlayer} room={room} /> : t('common.player')}
-                {' · '}
-                {t(`social.alignments.${alignment}`)}
+                <AlignmentBadge alignment={alignment} />
               </span>
             )
           })}

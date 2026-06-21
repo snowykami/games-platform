@@ -119,6 +119,9 @@ func werewolfViewForViewer(room *Room, viewer *Player) WerewolfView {
 		view.WitchAntidoteUsed = room.Werewolf.WitchAntidoteUsed
 		view.WitchPoisonUsed = room.Werewolf.WitchPoisonUsed
 	}
+	if viewer != nil && room.Phase == PhaseWerewolfNight {
+		_, view.NightSubmitted = room.Werewolf.NightActions[viewer.ID]
+	}
 	return view
 }
 

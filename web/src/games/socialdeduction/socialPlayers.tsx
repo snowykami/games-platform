@@ -11,7 +11,7 @@ import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { socialIconButton } from './socialStyle'
 import { PLAYER_COLOR_PALETTE } from './socialTheme'
-import { RoleBadge } from './socialUi'
+import { AlignmentBadge, HiddenRoleBadge, RoleBadge, StatusBadge } from './socialUi'
 
 type SocialActions = ReturnType<typeof useSocialRoom>['actions']
 
@@ -32,9 +32,10 @@ export function PlayerGrid({
   llmModel: string
   room: SocialRoom
 }) {
+  const players = [...room.players].sort((left, right) => comparePlayerOrder(room, left, right))
   return (
     <div className={cn('grid content-start gap-3 overflow-auto pr-1', compact ? 'sm:grid-cols-2 xl:grid-cols-3' : 'sm:grid-cols-2', className)}>
-      {room.players.map(player => (
+      {players.map(player => (
         <SocialPlayerCard
           key={player.id}
           accent={playerAccent(room, player.id)}
@@ -72,6 +73,7 @@ function SocialPlayerCard({
   const playerStatusLabel = player.ai ? (llmModel ? `AI: ${llmModel}` : t('common.ai')) : player.roomRole === 'host' ? t('common.host') : player.connected ? t('common.online') : t('common.offline')
   const canRemove = isHost && room.phase === 'lobby' && player.roomRole !== 'host'
   const canNote = Boolean(room.youPlayerId && !isSelf)
+  const numberLabel = playerNumberLabel(player)
   const cardAccent = player.alive
     ? { border: accent.border, glow: accent.soft, side: accent.solid }
     : { border: 'rgba(148,163,184,0.72)', glow: 'rgba(15,23,42,0.28)', side: '#94a3b8' }
@@ -90,12 +92,14 @@ function SocialPlayerCard({
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2 pt-0.5">
           <PlayerStatusDot connected={player.connected} disconnectedAt={player.disconnectedAt} />
-          <span
-            className="inline-flex min-h-5 shrink-0 items-center rounded-md border px-1.5 text-[0.68rem] font-black leading-none"
-            style={{ backgroundColor: accent.soft, borderColor: accent.border, color: accent.text }}
-          >
-            {playerNumberLabel(room, player.id)}
-          </span>
+          {numberLabel && (
+            <span
+              className="inline-flex min-h-5 shrink-0 items-center rounded-md border px-1.5 text-[0.68rem] font-black leading-none"
+              style={{ backgroundColor: accent.soft, borderColor: accent.border, color: accent.text }}
+            >
+              {numberLabel}
+            </span>
+          )}
           <strong className="min-w-0 truncate text-base" style={{ color: accent.text, textShadow: `0 0 16px ${accent.soft}` }}>{player.name}</strong>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -134,7 +138,7 @@ function SocialPlayerCard({
         />
       </div>
 
-      <SocialPlayerBadges player={player} />
+      <SocialPlayerBadges player={player} room={room} />
 
       {canNote && (
         <PlayerNoteEditor className="mt-1" note={player.note} onSave={note => actions.updatePlayerNote(player.id, note)} />
@@ -143,16 +147,16 @@ function SocialPlayerCard({
   )
 }
 
-function SocialPlayerBadges({ player }: { player: SocialPlayer }) {
-  const { t } = useI18n()
+function SocialPlayerBadges({ player, room }: { player: SocialPlayer, room: SocialRoom }) {
+  const checkedAlignment = room.game === 'werewolf' ? room.werewolf.seerChecks?.[player.id] : undefined
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className={cn('inline-flex min-h-6 items-center rounded-full px-2 text-xs font-black leading-none', player.alive ? 'bg-emerald-200 text-emerald-950' : 'bg-zinc-300 text-zinc-950')}>
-        {player.alive ? t('social.alive') : t('social.out')}
-      </span>
+      <StatusBadge state={player.alive ? 'alive' : 'out'} />
       {player.visibleToYou && player.role
         ? <RoleBadge dead={!player.alive} role={player.role} />
-        : <span className="inline-flex min-h-6 items-center rounded-full bg-white/12 px-2 text-xs font-black leading-none">{t('social.hiddenRole')}</span>}
+        : checkedAlignment
+          ? <AlignmentBadge alignment={checkedAlignment} />
+          : <HiddenRoleBadge />}
     </div>
   )
 }
@@ -165,6 +169,7 @@ export function TableLogLine({ entry, room }: { entry: SocialRoom['log'][number]
   }
 
   const accent = playerAccent(room, speaker.id)
+  const numberLabel = playerNumberLabel(speaker)
   const rest = entry.playerName && entry.text.startsWith(entry.playerName)
     ? entry.text.slice(entry.playerName.length)
     : entry.text
@@ -175,8 +180,12 @@ export function TableLogLine({ entry, room }: { entry: SocialRoom['log'][number]
         className="mr-1.5 inline-flex min-h-6 items-center rounded-md border px-2 align-baseline text-xs font-black leading-none"
         style={{ backgroundColor: accent.soft, borderColor: accent.border, color: accent.text }}
       >
-        {playerNumberLabel(room, speaker.id)}
-        <span className="mx-1 opacity-65">·</span>
+        {numberLabel && (
+          <>
+            {numberLabel}
+            <span className="mx-1 opacity-65">·</span>
+          </>
+        )}
         {speaker.name}
       </span>
       <span>{rest}</span>
@@ -185,28 +194,56 @@ export function TableLogLine({ entry, room }: { entry: SocialRoom['log'][number]
 }
 
 function playerAccent(room: SocialRoom, playerId?: string): PlayerAccent {
-  const playerIndex = playerOrderIndex(room, playerId)
+  const playerIndex = playerVisualIndex(room, playerId)
   return PLAYER_COLOR_PALETTE[playerIndex % PLAYER_COLOR_PALETTE.length]
 }
 
-function playerNumberLabel(room: SocialRoom, playerId?: string) {
-  return `${playerOrderIndex(room, playerId) + 1}号`
+function playerNumberLabel(player?: SocialPlayer) {
+  const seat = playerSeatIndex(player)
+  return seat >= 0 ? `${seat + 1}号` : ''
 }
 
-function playerOrderIndex(room: SocialRoom, playerId?: string) {
-  return Math.max(0, room.players.findIndex(player => player.id === playerId))
+function playerSeatIndex(player?: SocialPlayer) {
+  return player && Number.isFinite(player.seat) && player.seat >= 0 ? player.seat : -1
+}
+
+function playerVisualIndex(room: SocialRoom, playerId?: string) {
+  const player = room.players.find(item => item.id === playerId)
+  const seat = playerSeatIndex(player)
+  if (seat >= 0) {
+    return seat
+  }
+  return Math.max(0, room.players.findIndex(item => item.id === playerId))
+}
+
+function comparePlayerOrder(room: SocialRoom, left: SocialPlayer, right: SocialPlayer) {
+  const leftSeat = playerSeatIndex(left)
+  const rightSeat = playerSeatIndex(right)
+  if (leftSeat >= 0 && rightSeat >= 0 && leftSeat !== rightSeat) {
+    return leftSeat - rightSeat
+  }
+  if (leftSeat >= 0 && rightSeat < 0) {
+    return -1
+  }
+  if (leftSeat < 0 && rightSeat >= 0) {
+    return 1
+  }
+  return room.players.indexOf(left) - room.players.indexOf(right)
 }
 
 export function PlayerRefLabel({ className, player, room }: { className?: string, player: SocialPlayer, room: SocialRoom }) {
   const accent = playerAccent(room, player.id)
+  const numberLabel = playerNumberLabel(player)
   return (
     <span className={cn('inline-flex min-w-0 items-center gap-1.5 align-middle', !player.alive && 'opacity-70', className)}>
-      <span
-        className="inline-flex min-h-5 shrink-0 items-center rounded-md border px-1.5 text-[0.68rem] font-black leading-none"
-        style={{ backgroundColor: accent.soft, borderColor: accent.border, color: accent.text }}
-      >
-        {playerNumberLabel(room, player.id)}
-      </span>
+      {numberLabel && (
+        <span
+          className="inline-flex min-h-5 shrink-0 items-center rounded-md border px-1.5 text-[0.68rem] font-black leading-none"
+          style={{ backgroundColor: accent.soft, borderColor: accent.border, color: accent.text }}
+        >
+          {numberLabel}
+        </span>
+      )}
       <span className="min-w-0 truncate font-black" style={{ color: accent.text, textShadow: `0 0 14px ${accent.soft}` }}>
         {player.name}
       </span>

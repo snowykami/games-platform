@@ -73,6 +73,7 @@ export interface SocialRoom {
     seerChecks?: Record<string, SocialAlignment>
     votes: Record<string, { targetId: string, confirmed: boolean }>
     daySpeakers?: Record<string, boolean>
+    nightActionSubmitted?: boolean
     lastNight?: string
     witchVictimId?: string
     witchAntidoteUsed?: boolean
@@ -225,6 +226,7 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
       confirmed: z.boolean().default(false),
     })).default({}),
     daySpeakers: z.record(z.string(), z.boolean()).optional(),
+    nightActionSubmitted: z.boolean().optional(),
     lastNight: z.string().optional(),
     witchVictimId: z.string().optional(),
     witchAntidoteUsed: z.boolean().optional(),

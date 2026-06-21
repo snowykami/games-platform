@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { roleLabel, roleTotal, socialButton } from './socialStyle'
-import { RoleBadge } from './socialUi'
+import { RoleBadge, SocialBadge } from './socialUi'
 
 export function WerewolfRoleSetup({
   actions,
@@ -101,11 +101,11 @@ export function WerewolfRoleSetup({
         <button className={socialButton(config, true)} disabled={!canSave} type="button" onClick={() => void saveCustom()}>
           {t('werewolf.applyCustomRoles')}
         </button>
-        <span className={cn('rounded-full px-2 py-1 text-xs font-black', total === room.players.length ? 'bg-emerald-200 text-emerald-950' : 'bg-[#4a1424] text-[#ffd6df]')}>
+        <SocialBadge className={total === room.players.length ? 'bg-emerald-200 text-emerald-950 ring-1 ring-emerald-300/45' : 'bg-[#4a1424] text-[#ffd6df] ring-1 ring-[#ff7a9a]/35'}>
           {total}
           {' / '}
           {room.players.length}
-        </span>
+        </SocialBadge>
       </div>
       <p className="min-h-5 text-xs font-bold text-[#fff8e8]/65">{message || room.werewolf.roleConfig.description}</p>
     </section>

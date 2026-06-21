@@ -24,7 +24,7 @@ func (m *Manager) CreateRoom(user UserView) PublicRoom {
 		SpeechUpdatedAt:   now,
 		PresenceUpdatedAt: now,
 	}
-	room.Players = append(room.Players, createHumanPlayer(user, "host", 0))
+	room.Players = append(room.Players, createHumanPlayer(user, "host"))
 	if room.Game == GameWerewolf {
 		applyDefaultWerewolfConfig(room)
 	}
@@ -54,7 +54,7 @@ func (m *Manager) JoinRoom(roomID string, user UserView) (PublicRoom, error) {
 		if len(room.Players) >= m.maxPlayers() {
 			return PublicRoom{}, errors.New("room_full")
 		}
-		player = createHumanPlayer(user, "player", len(room.Players))
+		player = createHumanPlayer(user, "player")
 		room.Players = append(room.Players, player)
 		reconcileLobbyConfig(room)
 		room.Log = append(room.Log, createLog(fmt.Sprintf("%s 加入了房间。", user.DisplayName)))
@@ -115,7 +115,7 @@ func (m *Manager) AddAI(roomID string, actorID string, options AIOptions) (Publi
 		ID:        "ai_" + randomToken(8),
 		UserID:    "ai_" + randomToken(8),
 		Name:      profile.Name,
-		Seat:      len(room.Players),
+		Seat:      unassignedSeat,
 		RoomRole:  "player",
 		Kind:      "ai",
 		IsAI:      true,
@@ -180,9 +180,6 @@ func (m *Manager) RemovePlayer(roomID string, actorID string, playerID string) (
 		room.Players = append(room.Players[:index], room.Players[index+1:]...)
 		if player.IsAI {
 			m.removeSocialAgent(room.ID, player.ID)
-		}
-		for seat, nextPlayer := range room.Players {
-			nextPlayer.Seat = seat
 		}
 		reconcileLobbyConfig(room)
 		room.Log = append(room.Log, createLog(fmt.Sprintf("%s 被房主移出了房间。", player.Name)))
