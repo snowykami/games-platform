@@ -46,9 +46,15 @@ const (
 	RoleHunter     Role = "hunter"
 	RoleIdiot      Role = "idiot"
 	RoleMerlin     Role = "merlin"
+	RolePercival   Role = "percival"
 	RoleAssassin   Role = "assassin"
+	RoleMorgana    Role = "morgana"
+	RoleMordred    Role = "mordred"
+	RoleOberon     Role = "oberon"
 	RoleMinion     Role = "minion"
 	RoleLoyal      Role = "loyal"
+	RoleLancelot   Role = "lancelot"
+	RoleLadyOfLake Role = "lady_of_lake"
 	RoleCivilian   Role = "civilian"
 	RoleUndercover Role = "undercover"
 	RoleBlank      Role = "blank"
@@ -317,6 +323,7 @@ type AvalonView struct {
 	Team          []string            `json:"team"`
 	TeamVotes     map[string]bool     `json:"teamVotes"`
 	TeamVoteCount int                 `json:"teamVoteCount"`
+	PercivalMarks []string            `json:"percivalMarks,omitempty"`
 	QuestResults  []AvalonQuestResult `json:"questResults"`
 	RejectedTeams int                 `json:"rejectedTeams"`
 	RequiredTeam  int                 `json:"requiredTeam"`

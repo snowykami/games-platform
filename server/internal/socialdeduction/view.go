@@ -61,7 +61,7 @@ func (m *Manager) publicRoomWithOptions(room *Room, viewerUserID string, options
 		MinPlayers:       m.minPlayers(),
 		MaxPlayers:       m.maxPlayers(),
 		Werewolf:         werewolfViewForViewer(room, viewer, godView),
-		Avalon:           avalonViewForViewer(room),
+		Avalon:           avalonViewForViewer(room, viewer),
 		Undercover:       undercoverViewForViewer(room, viewer),
 		Winner:           room.Winner,
 		WinnerMessage:    room.WinnerMessage,
@@ -97,9 +97,9 @@ func roleVisible(room *Room, viewer *Player, target *Player) bool {
 	}
 	if room.Game == GameAvalon {
 		if viewer.Alignment == AlignmentEvil && target.Alignment == AlignmentEvil {
-			return true
+			return viewer.Role != RoleOberon && target.Role != RoleOberon
 		}
-		return viewer.Role == RoleMerlin && target.Alignment == AlignmentEvil
+		return viewer.Role == RoleMerlin && target.Alignment == AlignmentEvil && target.Role != RoleMordred
 	}
 	if room.Game == GameUndercover {
 		return viewer.ID == target.ID
@@ -145,7 +145,7 @@ func werewolfNightActionsForView(room *Room) map[string]string {
 	return actions
 }
 
-func avalonViewForViewer(room *Room) AvalonView {
+func avalonViewForViewer(room *Room, viewer *Player) AvalonView {
 	teamVotes := cloneBoolMap(room.Avalon.TeamVotes)
 	if room.Phase == PhaseAvalonVote {
 		teamVotes = map[string]bool{}
@@ -156,6 +156,7 @@ func avalonViewForViewer(room *Room) AvalonView {
 		Team:          append([]string{}, room.Avalon.Team...),
 		TeamVotes:     teamVotes,
 		TeamVoteCount: len(room.Avalon.TeamVotes),
+		PercivalMarks: avalonPercivalMarks(room, viewer),
 		QuestResults:  append([]AvalonQuestResult{}, room.Avalon.QuestResults...),
 		RejectedTeams: room.Avalon.RejectedTeams,
 		RequiredTeam:  room.Avalon.RequiredTeam,
@@ -163,4 +164,17 @@ func avalonViewForViewer(room *Room) AvalonView {
 		Successes:     room.Avalon.Successes,
 		Fails:         room.Avalon.Fails,
 	}
+}
+
+func avalonPercivalMarks(room *Room, viewer *Player) []string {
+	if viewer == nil || viewer.Role != RolePercival || room.Phase == PhaseFinished {
+		return nil
+	}
+	marks := []string{}
+	for _, player := range room.Players {
+		if player.Role == RoleMerlin || player.Role == RoleMorgana {
+			marks = append(marks, player.ID)
+		}
+	}
+	return marks
 }

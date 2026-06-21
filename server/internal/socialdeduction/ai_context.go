@@ -76,7 +76,7 @@ func avalonAIState(room *Room, actor *Player, phase string) map[string]any {
 	if phase == "team_vote" {
 		teamVotes = map[string]bool{}
 	}
-	return map[string]any{
+	state := map[string]any{
 		"phase":         phase,
 		"round":         room.Avalon.Round,
 		"yourRole":      actor.Role,
@@ -91,6 +91,10 @@ func avalonAIState(room *Room, actor *Player, phase string) map[string]any {
 		"fails":         room.Avalon.Fails,
 		"recentSpeech":  aiSpeeches(room),
 	}
+	if actor.Role == RolePercival {
+		state["percivalMarks"] = aliasStringSlice(room, avalonPercivalMarks(room, actor))
+	}
+	return state
 }
 
 func undercoverAIState(room *Room, player *Player, phase string) map[string]any {

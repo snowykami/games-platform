@@ -1,11 +1,13 @@
+import type { ReactNode } from 'react'
 import type { SocialGameSlug, SocialPlayer, SocialRoom } from './online'
 import type { GAME_COPY } from './socialTheme'
 import type { useSocialRoom } from './useSocialRoom'
-import { Skull } from 'lucide-react'
+import { Check, Skull, X } from 'lucide-react'
 import { useState } from 'react'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { ChoiceButton, ConfirmChoiceButton, SubmittedNotice } from './socialActionControls'
+import { PlayerRefLabel } from './socialPlayers'
 import { socialButton } from './socialStyle'
 import { Panel } from './socialUi'
 
@@ -33,6 +35,9 @@ export function AvalonActionPanel({
   const onQuest = room.avalon.team.includes(you.id)
   const isLeader = room.avalon.leaderId === you.id
   const isAssassin = you.role === 'assassin'
+  const teamPlayers = room.avalon.team
+    .map(id => room.players.find(player => player.id === id))
+    .filter((player): player is SocialPlayer => Boolean(player))
 
   function toggleTeam(playerId: string) {
     setSelectedTeam(selectedTeam.includes(playerId)
@@ -54,7 +59,7 @@ export function AvalonActionPanel({
               type="button"
               onClick={() => toggleTeam(player.id)}
             >
-              {player.name}
+              <PlayerRefLabel player={player} room={room} />
             </button>
           ))}
         </div>
@@ -76,11 +81,19 @@ export function AvalonActionPanel({
     return (
       <Panel config={config}>
         <h2 className="text-xl font-black">{t('avalon.teamVote')}</h2>
-        <p className="text-sm leading-6 text-[#fff8e8]/76">{room.avalon.team.map(id => room.players.find(player => player.id === id)?.name).filter(Boolean).join(' / ')}</p>
+        <div className="flex flex-wrap gap-2 text-sm leading-6 text-[#fff8e8]/76">
+          {teamPlayers.map(player => <PlayerRefLabel key={player.id} player={player} room={room} />)}
+        </div>
         {teamVoteSubmitted && <SubmittedNotice config={config} label={t('avalon.voted')} />}
         <div className="grid grid-cols-2 gap-2">
-          <ChoiceButton config={config} disabled={teamVoteSubmitted} selected={selectedTeamVote === true} onClick={() => setSelectedTeamVote(true)}>{t('avalon.approve')}</ChoiceButton>
-          <ChoiceButton config={config} disabled={teamVoteSubmitted} selected={selectedTeamVote === false} onClick={() => setSelectedTeamVote(false)}>{t('avalon.reject')}</ChoiceButton>
+          <BinaryChoiceButton disabled={teamVoteSubmitted} selected={selectedTeamVote === true} tone="positive" onClick={() => setSelectedTeamVote(true)}>
+            <Check className="size-4" />
+            {t('avalon.approve')}
+          </BinaryChoiceButton>
+          <BinaryChoiceButton disabled={teamVoteSubmitted} selected={selectedTeamVote === false} tone="negative" onClick={() => setSelectedTeamVote(false)}>
+            <X className="size-4" />
+            {t('avalon.reject')}
+          </BinaryChoiceButton>
         </div>
         {!teamVoteSubmitted && (
           <ConfirmChoiceButton
@@ -107,8 +120,14 @@ export function AvalonActionPanel({
           <>
             {questSubmitted && <SubmittedNotice config={config} label={t('avalon.questSubmitted')} />}
             <div className="grid grid-cols-2 gap-2">
-              <ChoiceButton config={config} disabled={questSubmitted} selected={selectedQuestCard === 'success'} onClick={() => setSelectedQuestCard('success')}>{t('avalon.successCard')}</ChoiceButton>
-              <ChoiceButton config={config} disabled={questSubmitted || you.alignment !== 'evil'} selected={selectedQuestCard === 'fail'} onClick={() => setSelectedQuestCard('fail')}>{t('avalon.failCard')}</ChoiceButton>
+              <BinaryChoiceButton disabled={questSubmitted} selected={selectedQuestCard === 'success'} tone="positive" onClick={() => setSelectedQuestCard('success')}>
+                <Check className="size-4" />
+                {t('avalon.successCard')}
+              </BinaryChoiceButton>
+              <BinaryChoiceButton disabled={questSubmitted || you.alignment !== 'evil'} selected={selectedQuestCard === 'fail'} tone="negative" onClick={() => setSelectedQuestCard('fail')}>
+                <X className="size-4" />
+                {t('avalon.failCard')}
+              </BinaryChoiceButton>
             </div>
             {!questSubmitted && (
               <ConfirmChoiceButton
@@ -142,7 +161,7 @@ export function AvalonActionPanel({
         <p className="text-sm leading-6 text-[#fff8e8]/76">{isAssassin ? t('avalon.chooseMerlin') : t('avalon.waitAssassin')}</p>
         {isAssassin && room.players.filter(player => player.alignment === 'good' || !player.visibleToYou).map(player => (
           <ChoiceButton key={player.id} config={config} icon={<Skull className="size-4" />} selected={selectedAssassinationTarget === player.id} onClick={() => setSelectedAssassinationTarget(player.id)}>
-            {player.name}
+            <PlayerRefLabel player={player} room={room} />
           </ChoiceButton>
         ))}
         {isAssassin && (
@@ -150,7 +169,7 @@ export function AvalonActionPanel({
             config={config}
             disabled={!selectedAssassinationTarget}
             label={t('social.confirmAction')}
-            selectedLabel={selectedPlayer?.name}
+            selectedLabel={selectedPlayer ? <PlayerRefLabel player={selectedPlayer} room={room} /> : undefined}
             onConfirm={() => void actions.assassinate(selectedAssassinationTarget).then(() => setMessage(t('avalon.assassinated')))}
           />
         )}
@@ -159,4 +178,33 @@ export function AvalonActionPanel({
   }
 
   return <Panel config={config}>{t('social.waiting')}</Panel>
+}
+
+function BinaryChoiceButton({
+  children,
+  disabled = false,
+  onClick,
+  selected,
+  tone,
+}: {
+  children: ReactNode
+  disabled?: boolean
+  onClick: () => void
+  selected: boolean
+  tone: 'positive' | 'negative'
+}) {
+  const toneClass = tone === 'positive'
+    ? 'border-emerald-300/42 bg-emerald-500/14 text-emerald-100 hover:bg-emerald-300 hover:text-emerald-950'
+    : 'border-rose-300/42 bg-rose-500/14 text-rose-100 hover:bg-rose-300 hover:text-rose-950'
+
+  return (
+    <button
+      className={cn('inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-45', toneClass, selected && 'ring-2 ring-[#fff8e8] ring-offset-2 ring-offset-black/40')}
+      disabled={disabled}
+      type="button"
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  )
 }

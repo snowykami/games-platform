@@ -69,6 +69,7 @@ function SocialPlayerCard({
   const canRemove = isHost && room.phase === 'lobby' && player.roomRole !== 'host'
   const canNote = Boolean(room.youPlayerId && !isSelf)
   const numberLabel = playerNumberLabel(player)
+  const tableSpeechDisabled = isTableSpeechDisabled(room)
   const cardAccent = player.alive
     ? { border: accent.border, glow: accent.soft, side: accent.solid }
     : { border: 'rgba(148,163,184,0.72)', glow: 'rgba(15,23,42,0.28)', side: '#94a3b8' }
@@ -118,7 +119,7 @@ function SocialPlayerCard({
       {isSelf && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-white/6 p-1">
           <PlayerNameEditor buttonClassName="text-[#fff8e8]" className="min-w-[180px]" name={player.name} onSave={actions.renamePlayer} />
-          <SpeechButton onSend={actions.say} />
+          <SpeechButton disabled={tableSpeechDisabled} title={tableSpeechDisabled ? t('social.tableSpeechDisabled') : undefined} onSend={actions.say} />
         </div>
       )}
 
@@ -154,6 +155,10 @@ function SocialPlayerBadges({ player, room }: { player: SocialPlayer, room: Soci
           : <HiddenRoleBadge />}
     </div>
   )
+}
+
+function isTableSpeechDisabled(room: SocialRoom) {
+  return room.game === 'undercover' && room.phase === 'describe'
 }
 
 export function TableLogLine({ entry, room }: { entry: SocialRoom['log'][number], room: SocialRoom }) {

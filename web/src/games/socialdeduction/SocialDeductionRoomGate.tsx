@@ -13,7 +13,7 @@ import { createSocialRoom, getCurrentSocialRoom } from './online'
 import { ActionPanel } from './socialActionPanel'
 import { SelfIntel } from './socialIntel'
 import { UndercoverLobbyConfig, WerewolfRoleSetup } from './socialLobbyConfig'
-import { PlayerGrid, TableLogLine } from './socialPlayers'
+import { PlayerGrid, PlayerRefLabel, TableLogLine } from './socialPlayers'
 import { roleTotal, socialButton } from './socialStyle'
 import { GAME_COPY } from './socialTheme'
 import { RoleList, SocialShell, StatusPill } from './socialUi'
@@ -333,7 +333,12 @@ function SocialGamePage({
             <StatusPill className="shrink-0">
               {game === 'werewolf' ? t('werewolf.dayCount', { day: room.werewolf.day || 1 }) : t('avalon.roundCount', { round: room.avalon.round || 1 })}
             </StatusPill>
-            {game === 'avalon' && <StatusPill className="shrink-0">{t('avalon.leader', { name: leader?.name ?? '-' })}</StatusPill>}
+            {game === 'avalon' && (
+              <StatusPill className="shrink-0">
+                <span>{t('avalon.leader', { name: '' })}</span>
+                {leader ? <PlayerRefLabel player={leader} room={room} /> : '-'}
+              </StatusPill>
+            )}
             <StatusPill className="hidden shrink-0 sm:inline-flex">
               {t('common.room')}
               {' '}

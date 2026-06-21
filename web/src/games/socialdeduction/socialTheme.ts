@@ -53,18 +53,24 @@ export const GAME_COPY = {
 
 export const ROLES_BY_GAME: Record<SocialGameSlug, SocialRole[]> = {
   werewolf: ['villager', 'werewolf', 'seer', 'witch', 'hunter', 'idiot', 'guard'],
-  avalon: ['merlin', 'assassin', 'minion', 'loyal'],
+  avalon: ['merlin', 'percival', 'loyal', 'assassin', 'morgana', 'mordred', 'oberon', 'minion', 'lancelot', 'lady_of_lake'],
   undercover: ['civilian', 'undercover', 'blank'],
 }
 
 export const ROLE_ALIGNMENT: Record<SocialRole, 'good' | 'evil' | 'neutral'> = {
   assassin: 'evil',
+  morgana: 'evil',
+  mordred: 'evil',
+  oberon: 'evil',
   guard: 'good',
   hunter: 'good',
   idiot: 'good',
+  lady_of_lake: 'good',
+  lancelot: 'good',
   loyal: 'good',
   merlin: 'good',
   minion: 'evil',
+  percival: 'good',
   seer: 'good',
   villager: 'good',
   werewolf: 'evil',

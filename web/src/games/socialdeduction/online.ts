@@ -5,7 +5,7 @@ import { fetchWithAuthRedirect } from '@/auth/fetch'
 export type SocialGameSlug = 'werewolf' | 'avalon' | 'undercover'
 export type SocialPhase = 'lobby' | 'night' | 'day' | 'vote' | 'hunter' | 'team' | 'team_vote' | 'quest' | 'assassination' | 'describe' | 'undercover_vote' | 'finished'
 export type SocialAlignment = 'good' | 'evil' | 'neutral'
-export type SocialRole = 'villager' | 'werewolf' | 'seer' | 'guard' | 'witch' | 'hunter' | 'idiot' | 'merlin' | 'assassin' | 'minion' | 'loyal' | 'civilian' | 'undercover' | 'blank'
+export type SocialRole = 'villager' | 'werewolf' | 'seer' | 'guard' | 'witch' | 'hunter' | 'idiot' | 'merlin' | 'percival' | 'assassin' | 'morgana' | 'mordred' | 'oberon' | 'minion' | 'loyal' | 'lancelot' | 'lady_of_lake' | 'civilian' | 'undercover' | 'blank'
 
 export interface WerewolfRoleCounts {
   villager: number
@@ -89,6 +89,7 @@ export interface SocialRoom {
     team: string[]
     teamVotes: Record<string, boolean>
     teamVoteCount: number
+    percivalMarks?: string[]
     questResults: Array<{ round: number, teamSize: number, failCards: number }>
     rejectedTeams: number
     requiredTeam: number
@@ -159,7 +160,7 @@ export interface AIDebugTrace {
   createdAt: string
 }
 
-const roleSchema = z.enum(['villager', 'werewolf', 'seer', 'guard', 'witch', 'hunter', 'idiot', 'merlin', 'assassin', 'minion', 'loyal', 'civilian', 'undercover', 'blank'])
+const roleSchema = z.enum(['villager', 'werewolf', 'seer', 'guard', 'witch', 'hunter', 'idiot', 'merlin', 'percival', 'assassin', 'morgana', 'mordred', 'oberon', 'minion', 'loyal', 'lancelot', 'lady_of_lake', 'civilian', 'undercover', 'blank'])
 const alignmentSchema = z.enum(['good', 'evil', 'neutral'])
 const undercoverWordPairSchema = z.object({
   id: z.string(),
@@ -287,6 +288,7 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
     team: z.array(z.string()).default([]),
     teamVotes: z.record(z.string(), z.boolean()).default({}),
     teamVoteCount: z.number().default(0),
+    percivalMarks: z.array(z.string()).optional(),
     questResults: z.array(z.object({ round: z.number(), teamSize: z.number(), failCards: z.number() })).default([]),
     rejectedTeams: z.number().default(0),
     requiredTeam: z.number().default(0),

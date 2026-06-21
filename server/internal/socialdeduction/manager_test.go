@@ -285,6 +285,67 @@ func TestAvalonTeamVotesHiddenUntilVoteCompletes(t *testing.T) {
 	}
 }
 
+func TestAvalonRolesIncludeMainSpecials(t *testing.T) {
+	roles := avalonRoles(10)
+	for _, role := range []Role{RoleMerlin, RolePercival, RoleAssassin, RoleMorgana, RoleMordred, RoleOberon} {
+		if !roleInSlice(roles, role) {
+			t.Fatalf("expected 10-player avalon role set to include %q, got %#v", role, roles)
+		}
+	}
+	if evilRoleCount(roles) != 4 {
+		t.Fatalf("expected 4 evil roles in 10-player avalon, got %d from %#v", evilRoleCount(roles), roles)
+	}
+}
+
+func TestAvalonSpecialRoleVisibility(t *testing.T) {
+	manager := NewManager(GameAvalon, nil)
+	room := &Room{
+		ID:         "AVLSEER",
+		Game:       GameAvalon,
+		HostUserID: "u1",
+		Phase:      PhaseAvalonTeam,
+		Players: []*Player{
+			testPlayer("p1", "u1", "Merlin", RoleMerlin, AlignmentGood),
+			testPlayer("p2", "u2", "Percival", RolePercival, AlignmentGood),
+			testPlayer("p3", "u3", "Morgana", RoleMorgana, AlignmentEvil),
+			testPlayer("p4", "u4", "Mordred", RoleMordred, AlignmentEvil),
+			testPlayer("p5", "u5", "Oberon", RoleOberon, AlignmentEvil),
+			testPlayer("p6", "u6", "Assassin", RoleAssassin, AlignmentEvil),
+			testPlayer("p7", "u7", "Loyal", RoleLoyal, AlignmentGood),
+		},
+		Avalon: AvalonState{Round: 1, LeaderID: "p1", TeamVotes: map[string]bool{}, QuestCards: map[string]string{}, RequiredTeam: 2, RequiredFails: 1},
+	}
+
+	merlinView := manager.publicRoom(room, "u1")
+	if merlinView.Players[2].Role != RoleMorgana || merlinView.Players[4].Role != RoleOberon {
+		t.Fatalf("expected Merlin to see Morgana and Oberon, got %#v", merlinView.Players)
+	}
+	if merlinView.Players[3].Role != "" {
+		t.Fatalf("expected Merlin not to see Mordred, got %q", merlinView.Players[3].Role)
+	}
+
+	assassinView := manager.publicRoom(room, "u6")
+	if assassinView.Players[2].Role != RoleMorgana || assassinView.Players[3].Role != RoleMordred {
+		t.Fatalf("expected evil players to see non-Oberon evil teammates, got %#v", assassinView.Players)
+	}
+	if assassinView.Players[4].Role != "" {
+		t.Fatalf("expected Oberon to be hidden from evil teammates, got %q", assassinView.Players[4].Role)
+	}
+
+	oberonView := manager.publicRoom(room, "u5")
+	if oberonView.Players[2].Role != "" || oberonView.Players[5].Role != "" {
+		t.Fatalf("expected Oberon not to see evil teammates, got %#v", oberonView.Players)
+	}
+
+	percivalView := manager.publicRoom(room, "u2")
+	if percivalView.Players[0].Role != "" || percivalView.Players[2].Role != "" {
+		t.Fatalf("expected Percival marks to avoid exact role reveals, got %#v", percivalView.Players)
+	}
+	if !roleIDInSlice(percivalView.Avalon.PercivalMarks, "p1") || !roleIDInSlice(percivalView.Avalon.PercivalMarks, "p3") {
+		t.Fatalf("expected Percival to receive Merlin/Morgana marks, got %#v", percivalView.Avalon.PercivalMarks)
+	}
+}
+
 func TestAvalonGoodPlayerCannotSubmitFailCard(t *testing.T) {
 	manager := NewManager(GameAvalon, nil)
 	room := &Room{
@@ -314,6 +375,24 @@ func TestAvalonGoodPlayerCannotSubmitFailCard(t *testing.T) {
 	if _, err := manager.QuestCard(room.ID, "u1", "fail"); err == nil || err.Error() != "good_player_cannot_fail" {
 		t.Fatalf("expected good_player_cannot_fail, got %v", err)
 	}
+}
+
+func roleInSlice(roles []Role, expected Role) bool {
+	for _, role := range roles {
+		if role == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func roleIDInSlice(ids []string, expected string) bool {
+	for _, id := range ids {
+		if id == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func TestWerewolfCustomRoleConfigIsUsedOnStart(t *testing.T) {

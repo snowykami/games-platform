@@ -27,6 +27,7 @@ interface SpeechButtonProps {
   disabled?: boolean
   onSend: (text: string) => void | Promise<void>
   palette?: 'dark' | 'gomoku' | 'mahjong' | 'xiangqi'
+  title?: string
 }
 
 export function SpeechBubble({ align = 'start', anchorClassName, className, placement = 'auto', speech, speakerName, speakerStyle, spokenAt, text, ttlMs = 5000 }: SpeechBubbleProps) {
@@ -103,7 +104,7 @@ export function SpeechBubble({ align = 'start', anchorClassName, className, plac
   )
 }
 
-export function SpeechButton({ className, disabled = false, onSend, palette = 'dark' }: SpeechButtonProps) {
+export function SpeechButton({ className, disabled = false, onSend, palette = 'dark', title }: SpeechButtonProps) {
   const { t } = useI18n()
   const buttonRef = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
@@ -163,14 +164,15 @@ export function SpeechButton({ className, disabled = false, onSend, palette = 'd
       <button
         ref={buttonRef}
         aria-label={t('common.speak')}
-        className={cn('grid size-7 place-items-center rounded-full border transition', paletteClass(palette, 'button'))}
+        className={cn('grid size-7 place-items-center rounded-full border transition disabled:cursor-not-allowed disabled:opacity-45', paletteClass(palette, 'button'))}
         disabled={disabled}
+        title={title}
         type="button"
         onClick={() => setOpen(current => !current)}
       >
         <MessageCircle className="size-4" />
       </button>
-      {open && createPortal(
+      {open && !disabled && createPortal(
         <div
           className={cn('fixed z-[9999] grid w-[min(320px,calc(100vw-24px))] gap-2 rounded-lg border p-2 shadow-[0_20px_60px_rgba(0,0,0,0.45)]', paletteClass(palette, 'panel'))}
           style={{ left: panelPosition.left, top: panelPosition.top }}

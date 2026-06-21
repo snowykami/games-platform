@@ -23,8 +23,14 @@ func startAvalon(room *Room) {
 
 func avalonRoles(count int) []Role {
 	evil := map[int]int{5: 2, 6: 2, 7: 3, 8: 3, 9: 3, 10: 4}[count]
-	roles := []Role{RoleMerlin, RoleAssassin}
-	for len(roles) < evil+1 {
+	roles := []Role{RoleMerlin, RolePercival, RoleAssassin, RoleMorgana}
+	if count >= 7 && evil >= 3 {
+		roles = append(roles, RoleMordred)
+	}
+	if count >= 10 && evil >= 4 {
+		roles = append(roles, RoleOberon)
+	}
+	for evilRoleCount(roles) < evil {
 		roles = append(roles, RoleMinion)
 	}
 	for len(roles) < count {
@@ -34,10 +40,22 @@ func avalonRoles(count int) []Role {
 }
 
 func avalonAlignment(role Role) Alignment {
-	if role == RoleAssassin || role == RoleMinion {
+	switch role {
+	case RoleAssassin, RoleMorgana, RoleMordred, RoleOberon, RoleMinion:
 		return AlignmentEvil
+	default:
+		return AlignmentGood
 	}
-	return AlignmentGood
+}
+
+func evilRoleCount(roles []Role) int {
+	count := 0
+	for _, role := range roles {
+		if avalonAlignment(role) == AlignmentEvil {
+			count++
+		}
+	}
+	return count
 }
 
 func (m *Manager) resolveAvalonTeamVote(room *Room) {
