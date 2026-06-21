@@ -14,9 +14,15 @@ import (
 const unassignedSeat = -1
 
 func mostVotedTarget(votes map[string]string, actorFilter func(string) bool) string {
+	targetID, _ := uniqueMostVotedTarget(votes, actorFilter)
+	return targetID
+}
+
+func uniqueMostVotedTarget(votes map[string]string, actorFilter func(string) bool) (string, bool) {
 	counts := map[string]int{}
 	bestID := ""
 	bestCount := 0
+	tied := false
 	for actorID, targetID := range votes {
 		if !actorFilter(actorID) {
 			continue
@@ -25,9 +31,12 @@ func mostVotedTarget(votes map[string]string, actorFilter func(string) bool) str
 		if counts[targetID] > bestCount {
 			bestID = targetID
 			bestCount = counts[targetID]
+			tied = false
+		} else if targetID != bestID && counts[targetID] == bestCount {
+			tied = true
 		}
 	}
-	return bestID
+	return bestID, bestCount > 0 && !tied
 }
 
 func shuffledPlayers(players []*Player) []*Player {
@@ -129,6 +138,28 @@ func recordSpeech(room *Room, player *Player, text string) bool {
 		room.Speeches = room.Speeches[len(room.Speeches)-18:]
 	}
 	markWerewolfDaySpeech(room, player)
+	return true
+}
+
+func recordWerewolfWolfSpeech(room *Room, player *Player, text string) bool {
+	text = strings.TrimSpace(text)
+	if room == nil || player == nil || text == "" {
+		return false
+	}
+	runes := []rune(text)
+	if len(runes) > 120 {
+		text = string(runes[:120])
+	}
+	room.Werewolf.WolfSpeeches = append(room.Werewolf.WolfSpeeches, SpeechEntry{
+		ID:         "wolf_speech_" + randomToken(8),
+		PlayerID:   player.ID,
+		PlayerName: player.Name,
+		Text:       text,
+		SpokenAt:   time.Now().UTC(),
+	})
+	if len(room.Werewolf.WolfSpeeches) > 24 {
+		room.Werewolf.WolfSpeeches = room.Werewolf.WolfSpeeches[len(room.Werewolf.WolfSpeeches)-24:]
+	}
 	return true
 }
 

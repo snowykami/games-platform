@@ -2,7 +2,8 @@ import type { UnoOnlineRoom } from './online'
 import type { UnoColor } from './types'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/context'
-import { addUnoAI, callUno, catchUno, drawUnoCard, joinUnoRoom, playUnoCard, removeUnoPlayer, renameUnoPlayer, sayUno, startUnoRoom, updateUnoAI } from './online'
+import { sendRoomSocketMessage } from '../roomSocket'
+import { joinUnoRoom } from './online'
 
 export function useUnoRoom(roomId: string | undefined) {
   const { t } = useI18n()
@@ -68,11 +69,12 @@ export function useUnoRoom(roomId: string | undefined) {
     }
   }, [roomId])
 
-  const run = useCallback(async (action: () => Promise<UnoOnlineRoom>) => {
+  const send = useCallback(async (type: string, payload?: unknown) => {
     try {
       setError(undefined)
-      const nextRoom = await action()
-      setRoom(nextRoom)
+      if (!(await sendRoomSocketMessage(socketRef.current, type, payload))) {
+        setError(t('room.operationFailed'))
+      }
     }
     catch (err) {
       setError(err instanceof Error ? err.message : t('room.operationFailed'))
@@ -80,18 +82,18 @@ export function useUnoRoom(roomId: string | undefined) {
   }, [t])
 
   const actions = useMemo(() => ({
-    addAI: (level: string) => roomId ? run(() => addUnoAI(roomId, level)) : Promise.resolve(),
-    callUno: () => roomId ? run(() => callUno(roomId)) : Promise.resolve(),
-    catchUno: (targetId: string) => roomId ? run(() => catchUno(roomId, targetId)) : Promise.resolve(),
-    draw: () => roomId ? run(() => drawUnoCard(roomId)) : Promise.resolve(),
-    play: (cardId: string, color: UnoColor) => roomId ? run(() => playUnoCard(roomId, cardId, color)) : Promise.resolve(),
+    addAI: (level: string) => roomId ? send('room.add_ai', { level }) : Promise.resolve(),
+    callUno: () => roomId ? send('room.call_uno') : Promise.resolve(),
+    catchUno: (targetId: string) => roomId ? send('room.catch_uno', { targetId }) : Promise.resolve(),
+    draw: () => roomId ? send('room.draw') : Promise.resolve(),
+    play: (cardId: string, color: UnoColor) => roomId ? send('room.play', { cardId, color }) : Promise.resolve(),
     refresh,
-    removePlayer: (playerId: string) => roomId ? run(() => removeUnoPlayer(roomId, playerId)) : Promise.resolve(),
-    renamePlayer: (name: string) => roomId ? run(() => renameUnoPlayer(roomId, name)) : Promise.resolve(),
-    say: (text: string) => roomId ? run(() => sayUno(roomId, text)) : Promise.resolve(),
-    start: () => roomId ? run(() => startUnoRoom(roomId)) : Promise.resolve(),
-    updateAI: (playerId: string, level: string) => roomId ? run(() => updateUnoAI(roomId, playerId, level)) : Promise.resolve(),
-  }), [refresh, roomId, run])
+    removePlayer: (playerId: string) => roomId ? send('room.remove_player', { playerId }) : Promise.resolve(),
+    renamePlayer: (name: string) => roomId ? send('room.rename', { name }) : Promise.resolve(),
+    say: (text: string) => roomId ? send('room.speech', { text }) : Promise.resolve(),
+    start: () => roomId ? send('room.start') : Promise.resolve(),
+    updateAI: (playerId: string, level: string) => roomId ? send('room.update_ai', { playerId, level }) : Promise.resolve(),
+  }), [refresh, roomId, send])
 
   return { actions, error, isLoading, room, setRoom }
 }

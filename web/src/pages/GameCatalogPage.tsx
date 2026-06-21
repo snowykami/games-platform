@@ -16,6 +16,7 @@ const GAME_COVERS: Record<string, string> = {
   avalon: '/game-covers/avalon.webp',
   gomoku: '/game-covers/gomoku.webp',
   mahjong: '/game-covers/mahjong.webp',
+  undercover: '/game-covers/undercover.webp',
   uno: '/game-covers/uno.webp',
   werewolf: '/game-covers/werewolf.webp',
   xiangqi: '/game-covers/xiangqi.webp',

@@ -56,6 +56,7 @@ func (b *RequestBroker) WaitDecision(requestID string, responseCh <-chan gameact
 			ActionID: intent.ActionID,
 			Reason:   intent.Reason,
 			Speech:   intent.Speech,
+			Thinking: intent.Thinking,
 			Notes:    intent.Notes,
 			Source:   "llm",
 		}, nil

@@ -190,7 +190,8 @@ func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decis
 		"duration", time.Since(startedAt),
 	)
 
-	return Decision{ActionID: choice.ActionID, Reason: choice.Reason, Speech: choice.Speech, Notes: choice.Notes, Source: "llm"}, nil
+	message := result.Choices[0].Message
+	return Decision{ActionID: choice.ActionID, Reason: choice.Reason, Speech: choice.Speech, Thinking: trimRunes(firstNonEmpty(message.ReasoningContent, message.Thinking), 6000), Notes: choice.Notes, Source: "llm"}, nil
 }
 
 func (p *OpenAIProvider) doChatWithRetry(ctx context.Context, input DecisionInput, body []byte, startedAt time.Time) (string, int, error) {

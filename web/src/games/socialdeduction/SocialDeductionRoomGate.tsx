@@ -1,5 +1,5 @@
 import type { FormEvent, ReactNode } from 'react'
-import type { SocialGameSlug, SocialRoom } from './online'
+import type { AIDebugTrace, SocialGameSlug, SocialRoom } from './online'
 import { Bot, ClipboardList, Copy, DoorOpen, Eye, EyeOff, Plus, ScrollText, ShieldQuestion, Sparkles, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -372,6 +372,7 @@ function SocialGamePage({
         <aside className={cn('hidden min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden rounded-lg border p-4 shadow-[0_22px_64px_rgba(0,0,0,0.28)] lg:grid', config.panel)}>
           <h2 className="text-xl font-black">{t('social.tableLog')}</h2>
           {renderTableLog(true)}
+          <AIDebugPanel room={room} />
           {room.phase === 'finished' && (
             <div className="rounded-lg bg-[#fff8e8] p-3 text-[#171411]">
               <p className="text-xs font-black">{t('social.result')}</p>
@@ -387,6 +388,7 @@ function SocialGamePage({
           {mobilePanel === 'log' && (
             <div className="grid min-h-[55svh] grid-rows-[minmax(0,1fr)_auto] gap-3">
               {renderTableLog(false)}
+              <AIDebugPanel room={room} />
               {room.phase === 'finished' && (
                 <div className="rounded-lg bg-[#fff8e8] p-3 text-[#171411]">
                   <p className="text-xs font-black">{t('social.result')}</p>
@@ -399,6 +401,175 @@ function SocialGamePage({
       </section>
     </SocialShell>
   )
+}
+
+function AIDebugPanel({ room }: { room: SocialRoom }) {
+  const [selectedPlayerId, setSelectedPlayerId] = useState('')
+  const traces = room.godViewEnabled ? room.aiDebugTraces ?? [] : []
+  if (traces.length === 0) {
+    return null
+  }
+  const playerOptions = aiDebugPlayerOptions(room, traces)
+  const activePlayerId = playerOptions.some(option => option.id === selectedPlayerId) ? selectedPlayerId : ''
+  const visibleTraces = activePlayerId ? traces.filter(trace => trace.playerId === activePlayerId) : traces
+
+  return (
+    <section className="grid max-h-72 min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-hidden rounded-lg border border-cyan-200/18 bg-cyan-950/18 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-sm font-black text-cyan-100">
+          <Bot className="size-4" />
+          AI 调试
+        </h3>
+        <span className="rounded-full bg-cyan-100/12 px-2 py-1 text-[0.68rem] font-black text-cyan-100/80">
+          {visibleTraces.length}
+          /
+          {traces.length}
+        </span>
+      </div>
+      <div className="flex min-h-8 gap-1.5 overflow-x-auto pb-1">
+        <AIDebugPlayerFilterButton
+          active={activePlayerId === ''}
+          count={traces.length}
+          label="全部"
+          onClick={() => setSelectedPlayerId('')}
+        />
+        {playerOptions.map(option => (
+          <AIDebugPlayerFilterButton
+            key={option.id}
+            active={activePlayerId === option.id}
+            count={option.count}
+            label={option.label}
+            onClick={() => setSelectedPlayerId(option.id)}
+          />
+        ))}
+      </div>
+      <div className="grid min-h-0 content-start gap-2 overflow-y-auto pr-1">
+        {[...visibleTraces].reverse().map(trace => <AIDebugTraceCard key={trace.id} trace={trace} />)}
+      </div>
+    </section>
+  )
+}
+
+function AIDebugPlayerFilterButton({
+  active,
+  count,
+  label,
+  onClick,
+}: {
+  active: boolean
+  count: number
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      className={cn(
+        'inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[0.68rem] font-black transition',
+        active ? 'border-cyan-100/70 bg-cyan-100 text-cyan-950' : 'border-white/10 bg-white/8 text-[#fff8e8]/72 hover:bg-white/12',
+      )}
+      type="button"
+      onClick={onClick}
+    >
+      <span>{label}</span>
+      <span className={cn('rounded-full px-1.5 py-0.5 text-[0.62rem]', active ? 'bg-cyan-950/12' : 'bg-black/26')}>
+        {count}
+      </span>
+    </button>
+  )
+}
+
+function AIDebugTraceCard({ trace }: { trace: AIDebugTrace }) {
+  const thinking = trace.thinking?.trim()
+  return (
+    <article className="grid gap-2 rounded-lg bg-black/28 p-2 text-xs text-[#fff8e8]/78">
+      <div className="flex flex-wrap items-center gap-2 font-black text-[#fff8e8]">
+        <span>{trace.playerName ?? trace.playerId ?? 'AI'}</span>
+        <span className="rounded-md bg-white/10 px-1.5 py-1 text-[0.65rem] uppercase text-[#fff8e8]/70">{trace.phase}</span>
+        <span className="rounded-md bg-white/10 px-1.5 py-1 text-[0.65rem] uppercase text-[#fff8e8]/70">{trace.scope}</span>
+        <span className="ml-auto text-[0.65rem] text-[#fff8e8]/56">
+          {trace.durationMs}
+          ms
+        </span>
+      </div>
+      {trace.actionId && (
+        <p>
+          <strong>Action:</strong>
+          {' '}
+          {trace.actionId}
+        </p>
+      )}
+      {trace.reason && (
+        <p>
+          <strong>Reason:</strong>
+          {' '}
+          {trace.reason}
+        </p>
+      )}
+      {trace.speech && (
+        <p>
+          <strong>Speech:</strong>
+          {' '}
+          {trace.speech}
+        </p>
+      )}
+      {trace.error && (
+        <p className="text-rose-200">
+          <strong>Error:</strong>
+          {' '}
+          {trace.error}
+        </p>
+      )}
+      <details className="rounded-md border border-white/10 bg-black/20 p-2">
+        <summary className="cursor-pointer text-[0.7rem] font-black text-cyan-100">
+          Thinking
+          {!trace.thinkingAvailable && <span className="ml-2 text-[#fff8e8]/48">未返回</span>}
+        </summary>
+        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[0.68rem] leading-5 text-[#fff8e8]/72">{thinking || '当前模型未返回 thinking。'}</pre>
+      </details>
+      {trace.actions && trace.actions.length > 0 && (
+        <details className="rounded-md border border-white/10 bg-black/20 p-2">
+          <summary className="cursor-pointer text-[0.7rem] font-black text-[#fff8e8]/80">合法动作</summary>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {trace.actions.map(action => (
+              <span key={action.id} className="rounded-md bg-white/10 px-1.5 py-1 text-[0.65rem] font-bold text-[#fff8e8]/72" title={action.description}>
+                {action.label || action.id}
+              </span>
+            ))}
+          </div>
+        </details>
+      )}
+    </article>
+  )
+}
+
+function aiDebugPlayerOptions(room: SocialRoom, traces: AIDebugTrace[]) {
+  const counts = new Map<string, number>()
+  const names = new Map<string, string>()
+  for (const trace of traces) {
+    if (!trace.playerId) {
+      continue
+    }
+    counts.set(trace.playerId, (counts.get(trace.playerId) ?? 0) + 1)
+    names.set(trace.playerId, trace.playerName ?? trace.playerId)
+  }
+  for (const player of room.players) {
+    if (!player.isAI) {
+      continue
+    }
+    if (!counts.has(player.id)) {
+      counts.set(player.id, 0)
+    }
+    names.set(player.id, player.name)
+  }
+  return [...counts.entries()]
+    .map(([id, count]) => ({ count, id, label: names.get(id) ?? id }))
+    .sort((left, right) => {
+      const leftPlayer = room.players.find(player => player.id === left.id)
+      const rightPlayer = room.players.find(player => player.id === right.id)
+      const leftSeat = leftPlayer?.seat ?? Number.MAX_SAFE_INTEGER
+      const rightSeat = rightPlayer?.seat ?? Number.MAX_SAFE_INTEGER
+      return leftSeat - rightSeat || left.label.localeCompare(right.label)
+    })
 }
 
 type SocialMobilePanel = 'intel' | 'action' | 'log' | null

@@ -23,6 +23,22 @@ var sharedBotProfiles = []BotProfile{
 	{Name: "松间", Personality: "佛系型玩家，节奏稳定，不容易被挑衅影响判断。", SpeechStyle: "发言放松，例如“问题不大”“先随一张”。"},
 	{Name: "临川", Personality: "读牌型玩家，喜欢根据别人剩余资源推测下一步。", SpeechStyle: "像桌边聊天，例如“你是不是快没牌了”“我感觉不太妙”。"},
 	{Name: "晴岚", Personality: "机会型玩家，平时稳住，一旦看到胜势会迅速收口。", SpeechStyle: "发言干净自然，例如“有机会了”“这张舒服”。"},
+	{Name: "Harper", Personality: "稳中带进攻的玩家，会先观察局势再下判断。", SpeechStyle: "短句自然，例如“先看这边”“这个点有点怪”。"},
+	{Name: "Mason", Personality: "节奏型玩家，喜欢用明确行动推动局面。", SpeechStyle: "表达直接，例如“我先压一下”“这轮别散”。"},
+	{Name: "Luna", Personality: "直觉型玩家，会结合发言气氛和公开信息判断。", SpeechStyle: "语气轻松，例如“我感觉不太对”“先听一手”。"},
+	{Name: "Kai", Personality: "灵活型玩家，愿意根据新信息快速改站位。", SpeechStyle: "说话干净，例如“那我换个方向”“这票能看信息”。"},
+	{Name: "Sora", Personality: "观察型玩家，偏好从票型和顺序找线索。", SpeechStyle: "像普通桌游玩家，例如“这个顺序有说法”“别急着定”。"},
+	{Name: "Ren", Personality: "谨慎型玩家，不轻易跟风，会保留反向可能。", SpeechStyle: "发言克制，例如“先别一边倒”“这个理由还不够”。"},
+	{Name: "Aoi", Personality: "均衡型玩家，能在防守和试探之间切换。", SpeechStyle: "自然短句，例如“我先挂个疑问”“这点记一下”。"},
+	{Name: "Hikari", Personality: "信息型玩家，喜欢把公开结果和发言放在一起看。", SpeechStyle: "语气温和，例如“这个结果要对一下”“先按公开信息来”。"},
+	{Name: "さくら", Personality: "耐心型玩家，不急着定性，更重视连续发言变化。", SpeechStyle: "短句柔和，例如“先等等看”“这里有点微妙”。"},
+	{Name: "ゆい", Personality: "反应型玩家，会根据别人突然转向来判断风险。", SpeechStyle: "表达轻快，例如“这个转得有点快”“我先记一票”。"},
+	{Name: "はる", Personality: "保守型玩家，优先避免高风险动作。", SpeechStyle: "发言平实，例如“稳一点”“这轮别乱冲”。"},
+	{Name: "みお", Personality: "细节型玩家，会留意发言中的前后矛盾。", SpeechStyle: "语气认真，例如“刚才这句对不上”“我想追一下”。"},
+	{Name: "林澈", Personality: "推理型玩家，喜欢基于公开信息做短判断。", SpeechStyle: "表达清楚，例如“票型先看这里”“这个位置压力大”。"},
+	{Name: "许岚", Personality: "试探型玩家，会用轻压力观察别人反应。", SpeechStyle: "自然发问，例如“你这个理由是什么”“先给点压力”。"},
+	{Name: "陈佑", Personality: "稳健型玩家，不喜欢无依据跟票。", SpeechStyle: "发言简洁，例如“别只跟风”“我看公开信息”。"},
+	{Name: "周宁", Personality: "协调型玩家，会尝试把分散信息收束起来。", SpeechStyle: "像熟人局提醒，例如“先对一下线索”“别漏这个点”。"},
 }
 
 func NextProfile(usedNames map[string]bool) BotProfile {

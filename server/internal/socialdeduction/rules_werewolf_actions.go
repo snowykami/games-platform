@@ -41,12 +41,22 @@ func werewolfNightActions(room *Room, actor *Player) []aiplayer.LegalAction {
 			Description: fmt.Sprintf("座位 %d 的存活玩家", target.Seat+1),
 		})
 	}
+	if actor.Role == RoleWerewolf {
+		actions = append(actions, aiplayer.LegalAction{
+			ID:          werewolfSkipActionID,
+			Label:       "今晚弃权不刀",
+			Description: "狼队全员选择弃权时，今晚没有狼刀目标。",
+		})
+	}
 	return actions
 }
 
 func witchNightActions(room *Room, actor *Player) []aiplayer.LegalAction {
 	actions := []aiplayer.LegalAction{}
 	killID := currentWerewolfKillTarget(room)
+	if killID == "" {
+		return actions
+	}
 	if killID != "" && !room.Werewolf.WitchAntidoteUsed {
 		if target := findPlayerByID(room, killID); target != nil && target.Alive {
 			actions = append(actions, aiplayer.LegalAction{
@@ -88,10 +98,11 @@ func hunterShotActions(room *Room, actor *Player) []aiplayer.LegalAction {
 }
 
 func currentWerewolfKillTarget(room *Room) string {
-	return mostVotedTarget(room.Werewolf.NightActions, func(playerID string) bool {
-		player := findPlayerByID(room, playerID)
-		return player != nil && player.Role == RoleWerewolf
-	})
+	actionID, consensus := werewolfConsensusAction(room)
+	if !consensus || actionID == werewolfSkipActionID {
+		return ""
+	}
+	return actionID
 }
 
 func werewolfVoteActions(room *Room, actor *Player) []aiplayer.LegalAction {

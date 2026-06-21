@@ -124,7 +124,7 @@ func (c *Controller) Decide(request DecisionRequest) (aiplayer.Decision, error) 
 	}
 	if request.Stale != nil {
 		if err := request.Stale(decision); err != nil {
-			return aiplayer.Decision{}, err
+			return decision, err
 		}
 	}
 	return decision, nil

@@ -118,8 +118,12 @@ func (m *Manager) RunAIAction(roomID string) (PublicRoom, bool, error) {
 func hasPendingAIRequiredAction(room *Room) bool {
 	switch room.Phase {
 	case PhaseWerewolfNight:
+		_, wolfConsensus := werewolfConsensusAction(room)
 		for _, player := range room.Players {
-			if player.IsAI && player.Alive && canActAtNight(player) {
+			if player.IsAI && player.Alive && player.Role == RoleWerewolf && !wolfConsensus {
+				return true
+			}
+			if player.IsAI && player.Alive && len(werewolfNightActions(room, player)) > 0 {
 				if _, ok := room.Werewolf.NightActions[player.ID]; !ok {
 					return true
 				}
@@ -251,17 +255,16 @@ func pendingRequiredActions(room *Room) []string {
 
 func pendingWerewolfNightActions(room *Room) []string {
 	pending := []string{}
-	werewolfAlive := false
-	werewolfActed := false
+	allWolvesActed := allLivingWerewolvesActed(room)
+	_, wolfConsensus := werewolfConsensusAction(room)
 	for _, player := range room.Players {
 		if !player.Alive {
 			continue
 		}
 		switch player.Role {
 		case RoleWerewolf:
-			werewolfAlive = true
-			if _, ok := room.Werewolf.NightActions[player.ID]; ok {
-				werewolfActed = true
+			if _, ok := room.Werewolf.NightActions[player.ID]; !ok {
+				pending = append(pending, playerPendingLabel(player, "werewolf_kill"))
 			}
 		case RoleSeer:
 			if _, ok := room.Werewolf.NightActions[player.ID]; !ok {
@@ -272,15 +275,15 @@ func pendingWerewolfNightActions(room *Room) []string {
 				pending = append(pending, playerPendingLabel(player, "guard_protect"))
 			}
 		case RoleWitch:
-			if witchCanAct(room) {
+			if currentWerewolfKillTarget(room) != "" && witchCanAct(room) {
 				if _, ok := room.Werewolf.NightActions[player.ID]; !ok {
 					pending = append(pending, playerPendingLabel(player, "witch_action"))
 				}
 			}
 		}
 	}
-	if werewolfAlive && !werewolfActed {
-		pending = append(pending, "werewolf_group:any_alive_wolf")
+	if allWolvesActed && !wolfConsensus {
+		pending = append(pending, "werewolf_consensus:team")
 	}
 	return pending
 }

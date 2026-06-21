@@ -12,15 +12,21 @@ func (m *Manager) runAIAction(room *Room, player *Player) bool {
 		if !canActAtNight(player) {
 			return false
 		}
+		_, wolfConsensus := werewolfConsensusAction(room)
 		if _, ok := room.Werewolf.NightActions[player.ID]; ok {
-			return false
+			if player.Role != RoleWerewolf || wolfConsensus || !allLivingWerewolvesActed(room) {
+				return false
+			}
 		}
-		actionID, _ := m.chooseWerewolfNightAction(room, player)
+		actionID, speech := m.chooseWerewolfNightAction(room, player)
 		if actionID == "" {
 			return false
 		}
 		if _, err := applyWerewolfNightAction(room, player, actionID); err != nil {
 			return false
+		}
+		if player.Role == RoleWerewolf && speech != "" {
+			recordWerewolfWolfSpeech(room, player, speech)
 		}
 		m.advanceWerewolfNight(room)
 		return true

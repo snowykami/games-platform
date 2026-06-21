@@ -76,7 +76,9 @@ type functionSpec struct {
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
-			ToolCalls []struct {
+			ReasoningContent string `json:"reasoning_content"`
+			Thinking         string `json:"thinking"`
+			ToolCalls        []struct {
 				Function struct {
 					Arguments string `json:"arguments"`
 				} `json:"function"`
@@ -128,6 +130,16 @@ func trimRunes(value string, limit int) string {
 		return value
 	}
 	return string(runes[:limit])
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func notesFromFlatFields(playerID string, note string) map[string]string {

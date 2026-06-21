@@ -100,6 +100,7 @@ func (r *Runner) Decide(ctx context.Context, event gameactor.AgentEvent) (gameac
 		ActionID:  decision.ActionID,
 		Speech:    strings.TrimSpace(decision.Speech),
 		Reason:    strings.TrimSpace(decision.Reason),
+		Thinking:  strings.TrimSpace(decision.Thinking),
 		Notes:     decision.Notes,
 		CreatedAt: now(),
 	}

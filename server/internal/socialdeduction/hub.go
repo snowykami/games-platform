@@ -16,6 +16,11 @@ type wsMessage struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
+type noteMessageRequest struct {
+	PlayerID string `json:"playerId"`
+	Note     string `json:"note"`
+}
+
 const (
 	websocketWriteTimeout           = 2 * time.Second
 	socialAIActionDelay             = 620 * time.Millisecond
@@ -200,8 +205,15 @@ func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) err
 		if err := json.Unmarshal(message.Payload, &request); err != nil {
 			return errors.New("invalid_player_payload")
 		}
+		targetUserID := ""
+		if current, err := h.manager.Public(roomID, userID); err == nil {
+			targetUserID = playerUserID(current.Players, request.PlayerID)
+		}
 		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
 			_, err := h.manager.RemovePlayer(roomID, userID, request.PlayerID)
+			if err == nil {
+				h.CloseUser(roomID, targetUserID)
+			}
 			return err
 		})
 	case "room.speech":
@@ -213,6 +225,29 @@ func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) err
 			_, err := h.manager.Say(roomID, userID, request.Text)
 			return err
 		})
+	case "room.rename":
+		var request nameRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_name_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneView, func() error {
+			_, err := h.manager.RenamePlayer(roomID, userID, request.Name)
+			return err
+		})
+	case "room.note":
+		var request noteMessageRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_note_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneView, func() error {
+			_, err := h.manager.UpdatePlayerNote(roomID, userID, request.PlayerID, request.Note)
+			return err
+		})
+	case "room.start":
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.Start(roomID, userID)
+			return err
+		})
 	case "room.werewolf_roles":
 		var request werewolfRoleConfigRequest
 		if err := json.Unmarshal(message.Payload, &request); err != nil {
@@ -220,6 +255,114 @@ func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) err
 		}
 		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
 			_, err := h.manager.UpdateWerewolfRoles(roomID, userID, request.Config)
+			return err
+		})
+	case "room.night_action":
+		var request targetRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_night_action_payload")
+		}
+		actionID := request.ActionID
+		if actionID == "" {
+			actionID = request.TargetID
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.NightAction(roomID, userID, actionID)
+			return err
+		})
+	case "room.wolf_speech":
+		var request speechRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_wolf_speech_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventPlayerSpeech, gameactor.LaneSpeech, func() error {
+			_, err := h.manager.WerewolfWolfSpeech(roomID, userID, request.Text)
+			return err
+		})
+	case "room.hunter_shot":
+		var request targetRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_hunter_shot_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.HunterShot(roomID, userID, request.TargetID)
+			return err
+		})
+	case "room.advance_day":
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.AdvanceDay(roomID, userID)
+			return err
+		})
+	case "room.werewolf_vote":
+		var request targetRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_werewolf_vote_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.WerewolfVote(roomID, userID, request.TargetID, request.Confirmed)
+			return err
+		})
+	case "room.team":
+		var request teamRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_team_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.ProposeTeam(roomID, userID, request.Team)
+			return err
+		})
+	case "room.team_vote":
+		var request teamVoteRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_team_vote_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.TeamVote(roomID, userID, request.Approve)
+			return err
+		})
+	case "room.quest":
+		var request questRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_quest_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.QuestCard(roomID, userID, request.Card)
+			return err
+		})
+	case "room.assassinate":
+		var request targetRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_assassinate_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.Assassinate(roomID, userID, request.TargetID)
+			return err
+		})
+	case "room.undercover_config":
+		var request undercoverConfigRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_undercover_config_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.UpdateUndercoverConfig(roomID, userID, request.PresetID, request.IncludeBlank)
+			return err
+		})
+	case "room.describe":
+		var request describeRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_describe_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.UndercoverDescribe(roomID, userID, request.Text)
+			return err
+		})
+	case "room.undercover_vote":
+		var request targetRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_undercover_vote_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.UndercoverVote(roomID, userID, request.TargetID, request.Confirmed)
 			return err
 		})
 	default:

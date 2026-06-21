@@ -16,8 +16,9 @@ func resetRoom(room *Room) {
 	room.LastAISpeechSourceID = ""
 	room.ActionSeq = 0
 	room.RecentActions = nil
+	room.AIDebugTraces = nil
 	clearAIPlayerNotes(room)
-	room.Werewolf = WerewolfState{RoleConfig: roleConfig, RolePresets: werewolfRolePresets(len(room.Players)), NightActions: map[string]string{}, SeerChecks: map[string]Alignment{}, Votes: map[string]WerewolfVoteIntent{}, DaySpeakers: map[string]bool{}, RevealedIdiots: map[string]bool{}, Day: 1}
+	room.Werewolf = WerewolfState{RoleConfig: roleConfig, RolePresets: werewolfRolePresets(len(room.Players)), NightActions: map[string]string{}, WolfSpeeches: nil, SeerChecks: map[string]Alignment{}, Votes: map[string]WerewolfVoteIntent{}, DaySpeakers: map[string]bool{}, RevealedIdiots: map[string]bool{}, Day: 1}
 	room.Avalon = AvalonState{TeamVotes: map[string]bool{}, QuestCards: map[string]string{}, Round: 1}
 	room.Undercover = UndercoverState{PresetID: undercoverConfig.PresetID, IncludeBlank: undercoverConfig.IncludeBlank, Presets: undercoverPresets(), Described: map[string]bool{}, Votes: map[string]UndercoverVoteIntent{}, Round: 1}
 	assignRandomSeats(room)

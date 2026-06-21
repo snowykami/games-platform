@@ -39,6 +39,7 @@ type Decision struct {
 	ActionID string            `json:"actionId"`
 	Reason   string            `json:"reason,omitempty"`
 	Speech   string            `json:"speech,omitempty"`
+	Thinking string            `json:"thinking,omitempty"`
 	Notes    map[string]string `json:"notes,omitempty"`
 	Source   string            `json:"source"`
 }

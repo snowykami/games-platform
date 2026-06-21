@@ -186,8 +186,15 @@ func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) err
 		if err := json.Unmarshal(message.Payload, &request); err != nil {
 			return errors.New("invalid_player_payload")
 		}
+		targetUserID := ""
+		if current, err := h.manager.Public(roomID, userID); err == nil {
+			targetUserID = playerUserID(current.Players, request.PlayerID)
+		}
 		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
 			_, err := h.manager.RemovePlayer(roomID, userID, request.PlayerID)
+			if err == nil {
+				h.CloseUser(roomID, targetUserID)
+			}
 			return err
 		})
 	case "room.speech":
@@ -197,6 +204,15 @@ func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) err
 		}
 		return h.runMessageCommand(roomID, gameactor.EventPlayerSpeech, gameactor.LaneSpeech, func() error {
 			_, err := h.manager.Say(roomID, userID, request.Text)
+			return err
+		})
+	case "room.rename":
+		var request nameRequest
+		if err := json.Unmarshal(message.Payload, &request); err != nil {
+			return errors.New("invalid_name_payload")
+		}
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneView, func() error {
+			_, err := h.manager.RenamePlayer(roomID, userID, request.Name)
 			return err
 		})
 	case "room.start":

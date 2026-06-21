@@ -1,6 +1,7 @@
 import type { MahjongOnlineRoom } from './online'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { addMahjongAI, claimMahjong, discardMahjongTile, drawMahjongTile, joinMahjongRoom, removeMahjongPlayer, renameMahjongPlayer, sayMahjong, selfDrawMahjong, skipMahjongClaims, startMahjongRoom, updateMahjongAI } from './online'
+import { sendRoomSocketMessage } from '../roomSocket'
+import { joinMahjongRoom } from './online'
 
 export function useMahjongRoom(roomId: string | undefined) {
   const [room, setRoom] = useState<MahjongOnlineRoom>()
@@ -65,11 +66,12 @@ export function useMahjongRoom(roomId: string | undefined) {
     }
   }, [roomId])
 
-  const run = useCallback(async (action: () => Promise<MahjongOnlineRoom>) => {
+  const send = useCallback(async (type: string, payload?: unknown) => {
     try {
       setError(undefined)
-      const nextRoom = await action()
-      setRoom(nextRoom)
+      if (!(await sendRoomSocketMessage(socketRef.current, type, payload))) {
+        setError('操作失败。')
+      }
     }
     catch (err) {
       setError(err instanceof Error ? err.message : '操作失败。')
@@ -77,19 +79,19 @@ export function useMahjongRoom(roomId: string | undefined) {
   }, [])
 
   const actions = useMemo(() => ({
-    addAI: (level: string) => roomId ? run(() => addMahjongAI(roomId, level)) : Promise.resolve(),
-    claim: (claimId: string) => roomId ? run(() => claimMahjong(roomId, claimId)) : Promise.resolve(),
-    discard: (tileId: string) => roomId ? run(() => discardMahjongTile(roomId, tileId)) : Promise.resolve(),
-    draw: () => roomId ? run(() => drawMahjongTile(roomId)) : Promise.resolve(),
+    addAI: (level: string) => roomId ? send('room.add_ai', { level }) : Promise.resolve(),
+    claim: (claimId: string) => roomId ? send('room.claim', { claimId }) : Promise.resolve(),
+    discard: (tileId: string) => roomId ? send('room.discard', { tileId }) : Promise.resolve(),
+    draw: () => roomId ? send('room.draw') : Promise.resolve(),
     refresh,
-    removePlayer: (playerId: string) => roomId ? run(() => removeMahjongPlayer(roomId, playerId)) : Promise.resolve(),
-    renamePlayer: (name: string) => roomId ? run(() => renameMahjongPlayer(roomId, name)) : Promise.resolve(),
-    say: (text: string) => roomId ? run(() => sayMahjong(roomId, text)) : Promise.resolve(),
-    selfDraw: () => roomId ? run(() => selfDrawMahjong(roomId)) : Promise.resolve(),
-    skipClaims: () => roomId ? run(() => skipMahjongClaims(roomId)) : Promise.resolve(),
-    start: () => roomId ? run(() => startMahjongRoom(roomId)) : Promise.resolve(),
-    updateAI: (playerId: string, level: string) => roomId ? run(() => updateMahjongAI(roomId, playerId, level)) : Promise.resolve(),
-  }), [refresh, roomId, run])
+    removePlayer: (playerId: string) => roomId ? send('room.remove_player', { playerId }) : Promise.resolve(),
+    renamePlayer: (name: string) => roomId ? send('room.rename', { name }) : Promise.resolve(),
+    say: (text: string) => roomId ? send('room.speech', { text }) : Promise.resolve(),
+    selfDraw: () => roomId ? send('room.self_draw') : Promise.resolve(),
+    skipClaims: () => roomId ? send('room.skip_claims') : Promise.resolve(),
+    start: () => roomId ? send('room.start') : Promise.resolve(),
+    updateAI: (playerId: string, level: string) => roomId ? send('room.update_ai', { playerId, level }) : Promise.resolve(),
+  }), [refresh, roomId, send])
 
   return { actions, error, isLoading, room, setRoom }
 }

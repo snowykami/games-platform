@@ -86,6 +86,7 @@ func (h *Handler) Routes() http.Handler {
 	router.Post("/rooms/{roomID}/start", h.start)
 	router.Post("/rooms/{roomID}/werewolf-roles", h.updateWerewolfRoles)
 	router.Post("/rooms/{roomID}/night-action", h.nightAction)
+	router.Post("/rooms/{roomID}/wolf-speech", h.wolfSpeech)
 	router.Post("/rooms/{roomID}/hunter-shot", h.hunterShot)
 	router.Post("/rooms/{roomID}/advance-day", h.advanceDay)
 	router.Post("/rooms/{roomID}/werewolf-vote", h.werewolfVote)

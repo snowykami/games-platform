@@ -9,6 +9,8 @@ import (
 	"github.com/snowykami/games-platform/server/internal/aiplayer"
 )
 
+const werewolfSkipActionID = "skip:wolf"
+
 func startWerewolf(room *Room) {
 	if err := validateWerewolfCounts(room.Werewolf.RoleConfig.Counts, len(room.Players)); err != nil {
 		applyDefaultWerewolfConfig(room)
@@ -22,6 +24,7 @@ func startWerewolf(room *Room) {
 	room.Werewolf.Day = 1
 	room.Werewolf.RolePresets = nil
 	room.Werewolf.NightActions = map[string]string{}
+	room.Werewolf.WolfSpeeches = nil
 	room.Werewolf.SeerChecks = map[string]Alignment{}
 	room.Werewolf.Votes = map[string]WerewolfVoteIntent{}
 	room.Werewolf.DaySpeakers = map[string]bool{}
@@ -43,10 +46,7 @@ func (m *Manager) advanceWerewolfNight(room *Room) {
 		return
 	}
 
-	killID := mostVotedTarget(room.Werewolf.NightActions, func(playerID string) bool {
-		player := findPlayerByID(room, playerID)
-		return player != nil && player.Role == RoleWerewolf
-	})
+	killID := currentWerewolfKillTarget(room)
 	protectedID := ""
 	for playerID, targetID := range room.Werewolf.NightActions {
 		player := findPlayerByID(room, playerID)
@@ -100,31 +100,36 @@ func (m *Manager) advanceWerewolfNight(room *Room) {
 }
 
 func allRequiredNightActions(room *Room) bool {
-	werewolfActed := false
-	werewolfAlive := false
+	killID := ""
+	if hasLivingWerewolf(room) {
+		actionID, consensus := werewolfConsensusAction(room)
+		if !consensus {
+			return false
+		}
+		if actionID != werewolfSkipActionID {
+			killID = actionID
+		}
+	}
 	for _, player := range room.Players {
 		if !player.Alive {
 			continue
 		}
 		switch player.Role {
 		case RoleWerewolf:
-			werewolfAlive = true
-			if _, ok := room.Werewolf.NightActions[player.ID]; ok {
-				werewolfActed = true
-			}
+			continue
 		case RoleSeer, RoleGuard:
 			if _, ok := room.Werewolf.NightActions[player.ID]; !ok {
 				return false
 			}
 		case RoleWitch:
-			if witchCanAct(room) {
+			if killID != "" && witchCanAct(room) {
 				if _, ok := room.Werewolf.NightActions[player.ID]; !ok {
 					return false
 				}
 			}
 		}
 	}
-	return !werewolfAlive || werewolfActed
+	return true
 }
 
 func canActAtNight(player *Player) bool {
@@ -133,6 +138,37 @@ func canActAtNight(player *Player) bool {
 
 func witchCanAct(room *Room) bool {
 	return !room.Werewolf.WitchAntidoteUsed || !room.Werewolf.WitchPoisonUsed
+}
+
+func allLivingWerewolvesActed(room *Room) bool {
+	for _, player := range room.Players {
+		if player.Alive && player.Role == RoleWerewolf {
+			if _, ok := room.Werewolf.NightActions[player.ID]; !ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func hasLivingWerewolf(room *Room) bool {
+	for _, player := range room.Players {
+		if player.Alive && player.Role == RoleWerewolf {
+			return true
+		}
+	}
+	return false
+}
+
+func werewolfConsensusAction(room *Room) (string, bool) {
+	if !allLivingWerewolvesActed(room) {
+		return "", false
+	}
+	actionID, unique := uniqueMostVotedTarget(room.Werewolf.NightActions, func(playerID string) bool {
+		player := findPlayerByID(room, playerID)
+		return player != nil && player.Alive && player.Role == RoleWerewolf
+	})
+	return actionID, unique
 }
 
 func applyWerewolfNightAction(room *Room, player *Player, actionID string) (*Player, error) {
@@ -147,6 +183,9 @@ func applyWerewolfNightAction(room *Room, player *Player, actionID string) (*Pla
 	}
 	switch {
 	case strings.HasPrefix(actionID, "skip:"):
+		if player.Role == RoleWerewolf && actionID != werewolfSkipActionID {
+			return nil, errors.New("invalid_target")
+		}
 		room.Werewolf.NightActions[player.ID] = actionID
 		return nil, nil
 	case strings.HasPrefix(actionID, "save:"):
@@ -301,7 +340,14 @@ func (m *Manager) resolveWerewolfVote(room *Room) {
 	if len(confirmedVotes) < werewolfVoterCount(room) {
 		return
 	}
-	targetID := mostVotedTarget(confirmedVotes, func(string) bool { return true })
+	targetID, unique := uniqueMostVotedTarget(confirmedVotes, func(string) bool { return true })
+	if !unique {
+		message := "放逐投票平票，无人出局。"
+		room.Log = append(room.Log, createLog(message))
+		recordAction(room, PublicAction{Type: "vote_tie", Message: message})
+		startNextWerewolfNight(room)
+		return
+	}
 	if target := findPlayerByID(room, targetID); target != nil {
 		if target.Role == RoleIdiot && !room.Werewolf.RevealedIdiots[target.ID] {
 			if room.Werewolf.RevealedIdiots == nil {
@@ -347,6 +393,7 @@ func startNextWerewolfNight(room *Room) {
 	room.Werewolf.Votes = map[string]WerewolfVoteIntent{}
 	room.Werewolf.DaySpeakers = map[string]bool{}
 	room.Werewolf.NightActions = map[string]string{}
+	room.Werewolf.WolfSpeeches = nil
 	room.Phase = PhaseWerewolfNight
 	room.Log = append(room.Log, createLog("夜幕再次降临。"))
 	recordAction(room, PublicAction{Type: "night_started", Message: "夜幕再次降临。"})

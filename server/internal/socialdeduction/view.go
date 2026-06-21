@@ -41,6 +41,10 @@ func (m *Manager) publicRoomWithOptions(room *Room, viewerUserID string, options
 	if len(logs) > 12 {
 		logs = logs[len(logs)-12:]
 	}
+	aiDebugTraces := []AIDebugTrace(nil)
+	if godView {
+		aiDebugTraces = append([]AIDebugTrace{}, room.AIDebugTraces...)
+	}
 	youPlayerID := ""
 	if viewer != nil {
 		youPlayerID = viewer.ID
@@ -56,7 +60,7 @@ func (m *Manager) publicRoomWithOptions(room *Room, viewerUserID string, options
 		YouPlayerID:      youPlayerID,
 		MinPlayers:       m.minPlayers(),
 		MaxPlayers:       m.maxPlayers(),
-		Werewolf:         werewolfViewForViewer(room, viewer),
+		Werewolf:         werewolfViewForViewer(room, viewer, godView),
 		Avalon:           avalonViewForViewer(room),
 		Undercover:       undercoverViewForViewer(room, viewer),
 		Winner:           room.Winner,
@@ -67,6 +71,7 @@ func (m *Manager) publicRoomWithOptions(room *Room, viewerUserID string, options
 		Speeches:         append([]SpeechEntry{}, room.Speeches...),
 		ActionSeq:        room.ActionSeq,
 		RecentActions:    append([]PublicAction{}, room.RecentActions...),
+		AIDebugTraces:    aiDebugTraces,
 	}
 }
 
@@ -102,7 +107,7 @@ func roleVisible(room *Room, viewer *Player, target *Player) bool {
 	return false
 }
 
-func werewolfViewForViewer(room *Room, viewer *Player) WerewolfView {
+func werewolfViewForViewer(room *Room, viewer *Player, godView bool) WerewolfView {
 	view := WerewolfView{
 		Day:             room.Werewolf.Day,
 		RoleConfig:      room.Werewolf.RoleConfig,
@@ -119,10 +124,25 @@ func werewolfViewForViewer(room *Room, viewer *Player) WerewolfView {
 		view.WitchAntidoteUsed = room.Werewolf.WitchAntidoteUsed
 		view.WitchPoisonUsed = room.Werewolf.WitchPoisonUsed
 	}
+	if godView || (viewer != nil && viewer.Role == RoleWerewolf) {
+		view.WolfSpeeches = append([]SpeechEntry{}, room.Werewolf.WolfSpeeches...)
+		view.WolfNightActions = werewolfNightActionsForView(room)
+	}
 	if viewer != nil && room.Phase == PhaseWerewolfNight {
 		_, view.NightSubmitted = room.Werewolf.NightActions[viewer.ID]
 	}
 	return view
+}
+
+func werewolfNightActionsForView(room *Room) map[string]string {
+	actions := map[string]string{}
+	for playerID, actionID := range room.Werewolf.NightActions {
+		player := findPlayerByID(room, playerID)
+		if player != nil && player.Role == RoleWerewolf {
+			actions[playerID] = actionID
+		}
+	}
+	return actions
 }
 
 func avalonViewForViewer(room *Room) AvalonView {

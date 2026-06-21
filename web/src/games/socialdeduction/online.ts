@@ -74,6 +74,8 @@ export interface SocialRoom {
     votes: Record<string, { targetId: string, confirmed: boolean }>
     daySpeakers?: Record<string, boolean>
     nightActionSubmitted?: boolean
+    wolfSpeeches?: GameSpeechEntry[]
+    wolfNightActions?: Record<string, string>
     lastNight?: string
     witchVictimId?: string
     witchAntidoteUsed?: boolean
@@ -133,6 +135,28 @@ export interface SocialRoom {
     targetId?: string
     message: string
   }>
+  aiDebugTraces?: AIDebugTrace[]
+}
+
+export interface AIDebugTrace {
+  id: string
+  playerId?: string
+  playerName?: string
+  phase: SocialPhase
+  scope: string
+  actionId?: string
+  reason?: string
+  speech?: string
+  thinking?: string
+  thinkingAvailable: boolean
+  error?: string
+  durationMs: number
+  actions?: Array<{
+    id: string
+    label: string
+    description?: string
+  }>
+  createdAt: string
 }
 
 const roleSchema = z.enum(['villager', 'werewolf', 'seer', 'guard', 'witch', 'hunter', 'idiot', 'merlin', 'assassin', 'minion', 'loyal', 'civilian', 'undercover', 'blank'])
@@ -205,6 +229,27 @@ const speechSchema = z.object({
   spokenAt: z.string(),
 })
 
+const aiDebugTraceSchema: z.ZodType<AIDebugTrace> = z.object({
+  id: z.string(),
+  playerId: z.string().optional(),
+  playerName: z.string().optional(),
+  phase: z.enum(['lobby', 'night', 'day', 'vote', 'hunter', 'team', 'team_vote', 'quest', 'assassination', 'describe', 'undercover_vote', 'finished']),
+  scope: z.string(),
+  actionId: z.string().optional(),
+  reason: z.string().optional(),
+  speech: z.string().optional(),
+  thinking: z.string().optional(),
+  thinkingAvailable: z.boolean(),
+  error: z.string().optional(),
+  durationMs: z.number(),
+  actions: z.array(z.object({
+    id: z.string(),
+    label: z.string(),
+    description: z.string().optional(),
+  })).optional(),
+  createdAt: z.string(),
+})
+
 const roomSchema: z.ZodType<SocialRoom> = z.object({
   id: z.string(),
   game: z.enum(['werewolf', 'avalon', 'undercover']),
@@ -227,6 +272,8 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
     })).default({}),
     daySpeakers: z.record(z.string(), z.boolean()).optional(),
     nightActionSubmitted: z.boolean().optional(),
+    wolfSpeeches: z.array(speechSchema).optional(),
+    wolfNightActions: z.record(z.string(), z.string()).optional(),
     lastNight: z.string().optional(),
     witchVictimId: z.string().optional(),
     witchAntidoteUsed: z.boolean().optional(),
@@ -284,6 +331,7 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
     targetId: z.string().optional(),
     message: z.string(),
   })),
+  aiDebugTraces: z.array(aiDebugTraceSchema).optional(),
 })
 
 const roomResponseSchema = z.object({ room: roomSchema })
@@ -367,6 +415,10 @@ export async function updateWerewolfRoles(roomId: string, config: WerewolfRoleCo
 
 export async function werewolfNightAction(roomId: string, actionId: string, options?: SocialRequestOptions) {
   return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/night-action`, jsonPost({ actionId }), options)
+}
+
+export async function werewolfWolfSpeech(roomId: string, text: string, options?: SocialRequestOptions) {
+  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/wolf-speech`, jsonPost({ text }), options)
 }
 
 export async function werewolfHunterShot(roomId: string, targetId: string, options?: SocialRequestOptions) {

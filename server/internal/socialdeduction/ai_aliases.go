@@ -154,6 +154,22 @@ func aliasStringMap(room *Room, values map[string]string) map[string]string {
 	return aliased
 }
 
+func aliasWerewolfNightActions(room *Room) map[string]string {
+	aliased := map[string]string{}
+	for playerID, actionID := range room.Werewolf.NightActions {
+		player := findPlayerByID(room, playerID)
+		if player == nil || player.Role != RoleWerewolf {
+			continue
+		}
+		aliasedAction := actionID
+		if target := findPlayerByID(room, actionID); target != nil {
+			aliasedAction = "target:" + aiPlayerRef(room, target)
+		}
+		aliased[aiPlayerRef(room, player)] = aliasedAction
+	}
+	return aliased
+}
+
 func aliasStringSlice(room *Room, values []string) []string {
 	aliased := []string{}
 	for _, value := range values {
@@ -213,11 +229,10 @@ func aiSpeeches(room *Room) []map[string]any {
 			playerRef = aiPlayerRef(room, player)
 		}
 		speeches = append(speeches, map[string]any{
-			"id":         speech.ID,
-			"playerId":   playerRef,
-			"playerName": speech.PlayerName,
-			"text":       speech.Text,
-			"spokenAt":   speech.SpokenAt,
+			"id":       speech.ID,
+			"playerId": playerRef,
+			"text":     aliasPlayerNamesInText(room, speech.Text),
+			"spokenAt": speech.SpokenAt,
 		})
 	}
 	return speeches
@@ -225,4 +240,32 @@ func aiSpeeches(room *Room) []map[string]any {
 
 func aiSpeechForWerewolf(room *Room) []map[string]any {
 	return aiSpeeches(room)
+}
+
+func aiWerewolfWolfSpeeches(room *Room) []map[string]any {
+	speeches := make([]map[string]any, 0, len(room.Werewolf.WolfSpeeches))
+	for _, speech := range room.Werewolf.WolfSpeeches {
+		playerRef := speech.PlayerID
+		if player := findPlayerByID(room, speech.PlayerID); player != nil {
+			playerRef = aiPlayerRef(room, player)
+		}
+		speeches = append(speeches, map[string]any{
+			"id":       speech.ID,
+			"playerId": playerRef,
+			"text":     aliasPlayerNamesInText(room, speech.Text),
+			"spokenAt": speech.SpokenAt,
+		})
+	}
+	return speeches
+}
+
+func aliasPlayerNamesInText(room *Room, text string) string {
+	for _, player := range room.Players {
+		name := strings.TrimSpace(player.Name)
+		if name == "" {
+			continue
+		}
+		text = strings.ReplaceAll(text, name, fmt.Sprintf("座位 %d", aiPlayerNumber(room, player)))
+	}
+	return text
 }

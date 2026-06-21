@@ -126,6 +126,7 @@ func TestRestartClearsPreviousGameConversationAndAIMemory(t *testing.T) {
 	room.LastAISpeechSourceID = "speech_old"
 	room.ActionSeq = 12
 	room.RecentActions = []PublicAction{{Seq: 12, Type: "old", Message: "上一局动作。"}}
+	room.AIDebugTraces = []AIDebugTrace{{ID: "ai_trace_old", PlayerID: "p2", PlayerName: "North", Thinking: "上一局 thinking"}}
 	room.PlayerNotes = map[string]map[string]string{
 		"p1": {"p2": "主人自己的跨局备注"},
 		"p2": {"p1": "AI 上局记住了房主身份"},
@@ -165,6 +166,54 @@ func TestRestartClearsPreviousGameConversationAndAIMemory(t *testing.T) {
 	}
 	if len(room.RecentActions) != 1 || room.RecentActions[0].Seq != 1 || room.ActionSeq != 1 {
 		t.Fatalf("expected public actions to restart from first action, seq=%d actions=%+v", room.ActionSeq, room.RecentActions)
+	}
+	if len(room.AIDebugTraces) != 0 {
+		t.Fatalf("expected AI debug traces to be cleared, got %+v", room.AIDebugTraces)
+	}
+}
+
+func TestAIDebugTraceOnlyVisibleInGodView(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled: true,
+		decision: aiplayer.Decision{
+			ActionID: "vote:seat_1",
+			Reason:   "二号票型异常",
+			Speech:   "我先压二号看反应。",
+			Thinking: "这里是模型 thinking，只能给管理员上帝视角看。",
+			Source:   "llm",
+		},
+	}
+	manager := NewManager(GameWerewolf, provider)
+	room := testWerewolfRoom("WWFTRACE", PhaseWerewolfVote, []*Player{
+		testPlayer("p1", "u1", "Host", RoleVillager, AlignmentGood),
+		testAIPlayer("p2", "North", RoleWerewolf, AlignmentEvil),
+		testAIPlayer("p3", "South", RoleVillager, AlignmentGood),
+	})
+	room.HostUserID = "u1"
+	manager.rooms[room.ID] = room
+
+	if _, _, err := manager.RunAIAction(room.ID); err != nil {
+		t.Fatalf("run ai action: %v", err)
+	}
+	if len(room.AIDebugTraces) != 1 {
+		t.Fatalf("expected one AI debug trace, got %+v", room.AIDebugTraces)
+	}
+
+	normalView := manager.publicRoom(room, "u1")
+	if len(normalView.AIDebugTraces) != 0 {
+		t.Fatalf("expected normal view to hide AI debug traces, got %+v", normalView.AIDebugTraces)
+	}
+
+	godView := manager.publicRoomWithOptions(room, "u1", PublicRoomOptions{GodViewAvailable: true, GodView: true})
+	if len(godView.AIDebugTraces) != 1 {
+		t.Fatalf("expected god view to include AI debug trace, got %+v", godView.AIDebugTraces)
+	}
+	trace := godView.AIDebugTraces[0]
+	if trace.Thinking == "" || !trace.ThinkingAvailable {
+		t.Fatalf("expected thinking to be visible in god view trace, got %+v", trace)
+	}
+	if trace.ActionID != "vote:seat_1" || trace.Reason == "" || trace.Speech == "" || len(trace.Actions) == 0 {
+		t.Fatalf("expected trace to include decision debug fields, got %+v", trace)
 	}
 }
 
@@ -466,7 +515,7 @@ func TestWerewolfOptionalSpeechStateIncludesNightResultAndDeaths(t *testing.T) {
 	room.Werewolf.LastNight = "Dead Player 在夜晚出局。"
 
 	state := manager.aiSpeechState(room, room.Players[1])
-	if state["lastNight"] != room.Werewolf.LastNight {
+	if state["lastNight"] != "座位 1 在夜晚出局。" {
 		t.Fatalf("expected optional speech state to include lastNight, got %+v", state["lastNight"])
 	}
 	facts, ok := state["publicFacts"].([]string)
@@ -474,7 +523,7 @@ func TestWerewolfOptionalSpeechStateIncludesNightResultAndDeaths(t *testing.T) {
 		t.Fatalf("expected publicFacts in optional speech state, got %+v", state["publicFacts"])
 	}
 	joinedFacts := strings.Join(facts, "\n")
-	if !strings.Contains(joinedFacts, "Dead Player 在夜晚出局") || !strings.Contains(joinedFacts, "已出局玩家") {
+	if !strings.Contains(joinedFacts, "座位 1 在夜晚出局") || !strings.Contains(joinedFacts, "已出局玩家") {
 		t.Fatalf("expected public facts to include death result and out players, got %q", joinedFacts)
 	}
 	guide := fmt.Sprint(state["speechGuide"])
@@ -523,6 +572,11 @@ func TestWerewolfLLMInputDoesNotExposeAIOrHumanIDPrefixes(t *testing.T) {
 	}
 	if strings.Contains(serialized, "击杀 snowykami") || strings.Contains(serialized, "击杀 北风") {
 		t.Fatalf("expected LLM kill actions to use seat labels, got %s", serialized)
+	}
+	for _, name := range []string{"snowykami", "北风", "南星"} {
+		if strings.Contains(serialized, name) {
+			t.Fatalf("expected social LLM input to hide player display name %q, got %s", name, serialized)
+		}
 	}
 	if room.Werewolf.NightActions["ai_wolf"] != "plr_human" {
 		t.Fatalf("expected aliased action to resolve to real target, got %q", room.Werewolf.NightActions["ai_wolf"])
@@ -782,6 +836,187 @@ func TestWerewolfCanTargetSelfAtNight(t *testing.T) {
 	}
 }
 
+func TestWerewolfNightRequiresEveryLivingWolfAction(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFALLWOLVES", PhaseWerewolfNight, []*Player{
+		testPlayer("wolf_1", "u1", "Wolf One", RoleWerewolf, AlignmentEvil),
+		testPlayer("wolf_2", "u2", "Wolf Two", RoleWerewolf, AlignmentEvil),
+		testPlayer("p3", "u3", "Villager One", RoleVillager, AlignmentGood),
+		testPlayer("p4", "u4", "Villager Two", RoleVillager, AlignmentGood),
+		testPlayer("p5", "u5", "Villager Three", RoleVillager, AlignmentGood),
+		testPlayer("p6", "u6", "Villager Four", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.NightAction(room.ID, "u1", "target:p3"); err != nil {
+		t.Fatalf("first wolf action: %v", err)
+	}
+	if room.Phase != PhaseWerewolfNight || !room.Players[2].Alive {
+		t.Fatalf("expected night to wait for second wolf, phase=%q p3Alive=%v", room.Phase, room.Players[2].Alive)
+	}
+	if pending := pendingWerewolfNightActions(room); len(pending) != 1 || !strings.Contains(pending[0], "wolf_2") {
+		t.Fatalf("expected second wolf to be pending, got %+v", pending)
+	}
+
+	if _, err := manager.NightAction(room.ID, "u2", "target:p3"); err != nil {
+		t.Fatalf("second wolf action: %v", err)
+	}
+	if room.Phase != PhaseWerewolfDay || room.Players[2].Alive {
+		t.Fatalf("expected night to resolve after both wolves act, phase=%q p3Alive=%v", room.Phase, room.Players[2].Alive)
+	}
+}
+
+func TestWerewolfNightRequiresWolfConsensusBeforeKill(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFWOLFTIE", PhaseWerewolfNight, []*Player{
+		testPlayer("wolf_1", "u1", "Wolf One", RoleWerewolf, AlignmentEvil),
+		testPlayer("wolf_2", "u2", "Wolf Two", RoleWerewolf, AlignmentEvil),
+		testPlayer("p3", "u3", "Villager One", RoleVillager, AlignmentGood),
+		testPlayer("p4", "u4", "Villager Two", RoleVillager, AlignmentGood),
+		testPlayer("p5", "u5", "Villager Three", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.NightAction(room.ID, "u1", "target:p3"); err != nil {
+		t.Fatalf("first wolf action: %v", err)
+	}
+	if _, err := manager.NightAction(room.ID, "u2", "target:p4"); err != nil {
+		t.Fatalf("second wolf action: %v", err)
+	}
+	if room.Phase != PhaseWerewolfNight {
+		t.Fatalf("expected night to continue until wolves agree, got %q", room.Phase)
+	}
+	if !room.Players[2].Alive || !room.Players[3].Alive {
+		t.Fatalf("expected no one to die before consensus, p3=%v p4=%v", room.Players[2].Alive, room.Players[3].Alive)
+	}
+	if pending := pendingWerewolfNightActions(room); len(pending) == 0 || pending[len(pending)-1] != "werewolf_consensus:team" {
+		t.Fatalf("expected wolf consensus to be pending, got %+v", pending)
+	}
+
+	if _, err := manager.NightAction(room.ID, "u2", "target:p3"); err != nil {
+		t.Fatalf("second wolf realign: %v", err)
+	}
+	if room.Phase == PhaseWerewolfNight || room.Players[2].Alive {
+		t.Fatalf("expected consensus kill to resolve, phase=%q p3Alive=%v", room.Phase, room.Players[2].Alive)
+	}
+}
+
+func TestWerewolfWitchWaitsForAllWolvesBeforeSeeingVictim(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFWITCHWOLVES", PhaseWerewolfNight, []*Player{
+		testPlayer("wolf_1", "u1", "Wolf One", RoleWerewolf, AlignmentEvil),
+		testPlayer("wolf_2", "u2", "Wolf Two", RoleWerewolf, AlignmentEvil),
+		testPlayer("witch", "u3", "Witch", RoleWitch, AlignmentGood),
+		testPlayer("p4", "u4", "Villager", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.NightAction(room.ID, "u1", "target:p4"); err != nil {
+		t.Fatalf("first wolf action: %v", err)
+	}
+	if victim := currentWerewolfKillTarget(room); victim != "" {
+		t.Fatalf("expected no visible wolf victim until every wolf acts, got %q", victim)
+	}
+	if actions := werewolfNightActions(room, room.Players[2]); len(actions) != 0 {
+		t.Fatalf("expected witch to wait for all wolves, got %+v", actions)
+	}
+
+	if _, err := manager.NightAction(room.ID, "u2", "target:p4"); err != nil {
+		t.Fatalf("second wolf action: %v", err)
+	}
+	if victim := currentWerewolfKillTarget(room); victim != "p4" {
+		t.Fatalf("expected visible victim after all wolves agree, got %q", victim)
+	}
+	if actions := werewolfNightActions(room, room.Players[2]); len(actions) == 0 {
+		t.Fatal("expected witch actions after all wolves submit")
+	}
+}
+
+func TestWerewolfWitchCannotActBeforeWolfTarget(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFWITCHWAIT", PhaseWerewolfNight, []*Player{
+		testPlayer("p1", "u1", "Wolf", RoleWerewolf, AlignmentEvil),
+		testPlayer("p2", "u2", "Witch", RoleWitch, AlignmentGood),
+		testPlayer("p3", "u3", "Villager", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	if actions := werewolfNightActions(room, room.Players[1]); len(actions) != 0 {
+		t.Fatalf("expected witch to wait before wolf target is known, got %+v", actions)
+	}
+	if _, err := manager.NightAction(room.ID, "u2", "skip:witch"); err == nil {
+		t.Fatal("expected witch action before wolf target to fail")
+	}
+
+	if _, err := manager.NightAction(room.ID, "u1", "target:p3"); err != nil {
+		t.Fatalf("wolf action: %v", err)
+	}
+	if room.Phase != PhaseWerewolfNight {
+		t.Fatalf("expected night to wait for witch after wolf target, got %q", room.Phase)
+	}
+	if actions := werewolfNightActions(room, room.Players[1]); len(actions) == 0 {
+		t.Fatal("expected witch actions after wolf target is known")
+	}
+}
+
+func TestWerewolfNightAllowsWolfConsensusSkip(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFSKIPKILL", PhaseWerewolfNight, []*Player{
+		testPlayer("wolf_1", "u1", "Wolf One", RoleWerewolf, AlignmentEvil),
+		testPlayer("wolf_2", "u2", "Wolf Two", RoleWerewolf, AlignmentEvil),
+		testPlayer("p3", "u3", "Villager One", RoleVillager, AlignmentGood),
+		testPlayer("p4", "u4", "Villager Two", RoleVillager, AlignmentGood),
+		testPlayer("p5", "u5", "Villager Three", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.NightAction(room.ID, "u1", werewolfSkipActionID); err != nil {
+		t.Fatalf("first wolf skip: %v", err)
+	}
+	if room.Phase != PhaseWerewolfNight {
+		t.Fatalf("expected night to wait for second wolf, got %q", room.Phase)
+	}
+	if _, err := manager.NightAction(room.ID, "u2", werewolfSkipActionID); err != nil {
+		t.Fatalf("second wolf skip: %v", err)
+	}
+	if room.Phase != PhaseWerewolfDay {
+		t.Fatalf("expected unanimous skip to advance to day, got %q", room.Phase)
+	}
+	if room.Werewolf.LastNight != "昨夜无人出局。" {
+		t.Fatalf("expected no-death night result, got %q", room.Werewolf.LastNight)
+	}
+}
+
+func TestWerewolfWolfSpeechOnlyVisibleToWolvesAndGodView(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFWOLFCHAT", PhaseWerewolfNight, []*Player{
+		testPlayer("wolf_1", "u1", "Wolf One", RoleWerewolf, AlignmentEvil),
+		testPlayer("wolf_2", "u2", "Wolf Two", RoleWerewolf, AlignmentEvil),
+		testPlayer("p3", "u3", "Villager", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.WerewolfWolfSpeech(room.ID, "u1", "先压 3 号，看看女巫救不救。"); err != nil {
+		t.Fatalf("wolf speech: %v", err)
+	}
+	if _, err := manager.NightAction(room.ID, "u1", "target:p3"); err != nil {
+		t.Fatalf("wolf action: %v", err)
+	}
+
+	wolfView := manager.publicRoom(room, "u2")
+	if len(wolfView.Werewolf.WolfSpeeches) != 1 || wolfView.Werewolf.WolfNightActions["wolf_1"] != "p3" {
+		t.Fatalf("expected wolf view to include wolf chat and choices, got speeches=%+v actions=%+v", wolfView.Werewolf.WolfSpeeches, wolfView.Werewolf.WolfNightActions)
+	}
+	villagerView := manager.publicRoom(room, "u3")
+	if len(villagerView.Werewolf.WolfSpeeches) != 0 || len(villagerView.Werewolf.WolfNightActions) != 0 {
+		t.Fatalf("expected villager view to hide wolf chat and choices, got speeches=%+v actions=%+v", villagerView.Werewolf.WolfSpeeches, villagerView.Werewolf.WolfNightActions)
+	}
+	godView := manager.publicRoomWithOptions(room, "u3", PublicRoomOptions{GodViewAvailable: true, GodView: true})
+	if len(godView.Werewolf.WolfSpeeches) != 1 || godView.Werewolf.WolfNightActions["wolf_1"] != "p3" {
+		t.Fatalf("expected god view to include wolf chat and choices, got speeches=%+v actions=%+v", godView.Werewolf.WolfSpeeches, godView.Werewolf.WolfNightActions)
+	}
+}
+
 func TestWerewolfWitchCanSaveNightVictim(t *testing.T) {
 	manager := NewManager(GameWerewolf, nil)
 	room := testWerewolfRoom("WWFWITCH1", PhaseWerewolfNight, []*Player{
@@ -864,6 +1099,46 @@ func TestWerewolfHunterCanShootAfterExile(t *testing.T) {
 	}
 	if room.Phase != PhaseFinished || room.Winner != AlignmentGood {
 		t.Fatalf("expected good win after hunter shot, phase=%q winner=%q", room.Phase, room.Winner)
+	}
+}
+
+func TestWerewolfVoteTieExilesNoOne(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFVOTETIE", PhaseWerewolfVote, []*Player{
+		testPlayer("p1", "u1", "Villager One", RoleVillager, AlignmentGood),
+		testPlayer("p2", "u2", "Wolf", RoleWerewolf, AlignmentEvil),
+		testPlayer("p3", "u3", "Villager Two", RoleVillager, AlignmentGood),
+		testPlayer("p4", "u4", "Villager Three", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.WerewolfVote(room.ID, "u1", "p2", true); err != nil {
+		t.Fatalf("p1 vote: %v", err)
+	}
+	if _, err := manager.WerewolfVote(room.ID, "u2", "p1", true); err != nil {
+		t.Fatalf("p2 vote: %v", err)
+	}
+	if _, err := manager.WerewolfVote(room.ID, "u3", "p1", true); err != nil {
+		t.Fatalf("p3 vote: %v", err)
+	}
+	if _, err := manager.WerewolfVote(room.ID, "u4", "p2", true); err != nil {
+		t.Fatalf("p4 vote: %v", err)
+	}
+	if room.Phase != PhaseWerewolfNight {
+		t.Fatalf("expected tied vote to move to next night, got %q", room.Phase)
+	}
+	if !room.Players[0].Alive || !room.Players[1].Alive {
+		t.Fatalf("expected tied vote to exile nobody, p1=%v p2=%v", room.Players[0].Alive, room.Players[1].Alive)
+	}
+	foundTieLog := false
+	for _, entry := range room.Log {
+		if strings.Contains(entry.Text, "平票") {
+			foundTieLog = true
+			break
+		}
+	}
+	if !foundTieLog {
+		t.Fatalf("expected tie log, got %+v", room.Log)
 	}
 }
 
@@ -1380,6 +1655,7 @@ func TestSocialDecisionDoesNotBecomeStaleFromSpeechUpdate(t *testing.T) {
 		testAIPlayer("ai_witch", "女巫", RoleWitch, AlignmentGood),
 		testAIPlayer("ai_wolf", "狼人", RoleWerewolf, AlignmentEvil),
 	})
+	room.Werewolf.NightActions["ai_wolf"] = "human_villager"
 	manager.rooms[room.ID] = room
 	provider.onDecide = func(aiplayer.DecisionInput) {
 		if _, err := manager.Say(room.ID, "u_human", "我插一句，不应该打断夜晚行动。"); err != nil {
@@ -1407,6 +1683,7 @@ func TestSocialDecisionDoesNotBecomeStaleFromPresenceUpdate(t *testing.T) {
 		testAIPlayer("ai_witch", "女巫", RoleWitch, AlignmentGood),
 		testAIPlayer("ai_wolf", "狼人", RoleWerewolf, AlignmentEvil),
 	})
+	room.Werewolf.NightActions["ai_wolf"] = "human_villager"
 	manager.rooms[room.ID] = room
 	provider.onDecide = func(aiplayer.DecisionInput) {
 		touchPresence(room)
@@ -1432,6 +1709,7 @@ func TestSocialDecisionBecomesStaleFromRuleUpdate(t *testing.T) {
 		testAIPlayer("ai_witch", "女巫", RoleWitch, AlignmentGood),
 		testAIPlayer("ai_wolf", "狼人", RoleWerewolf, AlignmentEvil),
 	})
+	room.Werewolf.NightActions["ai_wolf"] = "human_villager"
 	touchRule(room)
 	manager.rooms[room.ID] = room
 	provider.onDecide = func(aiplayer.DecisionInput) {

@@ -1,7 +1,8 @@
 import type { GomokuOnlineRoom } from './online'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/context'
-import { addGomokuAI, joinGomokuRoom, placeGomokuStone, removeGomokuPlayer, renameGomokuPlayer, sayGomoku, startGomokuRoom, updateGomokuAI } from './online'
+import { sendRoomSocketMessage } from '../roomSocket'
+import { joinGomokuRoom } from './online'
 
 export function useGomokuRoom(roomId: string | undefined) {
   const { t } = useI18n()
@@ -67,11 +68,12 @@ export function useGomokuRoom(roomId: string | undefined) {
     }
   }, [roomId])
 
-  const run = useCallback(async (action: () => Promise<GomokuOnlineRoom>) => {
+  const send = useCallback(async (type: string, payload?: unknown) => {
     try {
       setError(undefined)
-      const nextRoom = await action()
-      setRoom(nextRoom)
+      if (!(await sendRoomSocketMessage(socketRef.current, type, payload))) {
+        setError(t('room.operationFailed'))
+      }
     }
     catch (err) {
       setError(err instanceof Error ? err.message : t('room.operationFailed'))
@@ -79,15 +81,15 @@ export function useGomokuRoom(roomId: string | undefined) {
   }, [t])
 
   const actions = useMemo(() => ({
-    addAI: (level: string) => roomId ? run(() => addGomokuAI(roomId, level)) : Promise.resolve(),
-    place: (x: number, y: number) => roomId ? run(() => placeGomokuStone(roomId, x, y)) : Promise.resolve(),
+    addAI: (level: string) => roomId ? send('room.add_ai', { level }) : Promise.resolve(),
+    place: (x: number, y: number) => roomId ? send('room.place', { x, y }) : Promise.resolve(),
     refresh,
-    removePlayer: (playerId: string) => roomId ? run(() => removeGomokuPlayer(roomId, playerId)) : Promise.resolve(),
-    renamePlayer: (name: string) => roomId ? run(() => renameGomokuPlayer(roomId, name)) : Promise.resolve(),
-    say: (text: string) => roomId ? run(() => sayGomoku(roomId, text)) : Promise.resolve(),
-    start: () => roomId ? run(() => startGomokuRoom(roomId)) : Promise.resolve(),
-    updateAI: (playerId: string, level: string) => roomId ? run(() => updateGomokuAI(roomId, playerId, level)) : Promise.resolve(),
-  }), [refresh, roomId, run])
+    removePlayer: (playerId: string) => roomId ? send('room.remove_player', { playerId }) : Promise.resolve(),
+    renamePlayer: (name: string) => roomId ? send('room.rename', { name }) : Promise.resolve(),
+    say: (text: string) => roomId ? send('room.speech', { text }) : Promise.resolve(),
+    start: () => roomId ? send('room.start') : Promise.resolve(),
+    updateAI: (playerId: string, level: string) => roomId ? send('room.update_ai', { playerId, level }) : Promise.resolve(),
+  }), [refresh, roomId, send])
 
   return { actions, error, isLoading, room, setRoom }
 }

@@ -108,6 +108,7 @@ type PlayerIntent struct {
 	ActionID  string
 	Speech    string
 	Reason    string
+	Thinking  string
 	Notes     map[string]string
 	CreatedAt time.Time
 }

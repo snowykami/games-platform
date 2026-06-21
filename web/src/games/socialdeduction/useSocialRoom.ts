@@ -1,29 +1,8 @@
 import type { SocialGameSlug, SocialRoom, WerewolfRoleConfig } from './online'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/context'
-import {
-  addSocialAI,
-  advanceWerewolfDay,
-  assassinateAvalon,
-  describeUndercover,
-  joinSocialRoom,
-  parseSocialRoom,
-  playAvalonQuest,
-  proposeAvalonTeam,
-  removeSocialPlayer,
-  renameSocialPlayer,
-  saySocial,
-  startSocialRoom,
-  updateSocialAI,
-  updateSocialPlayerNote,
-  updateUndercoverConfig,
-  updateWerewolfRoles,
-  voteAvalonTeam,
-  voteUndercover,
-  werewolfHunterShot,
-  werewolfNightAction,
-  werewolfVote,
-} from './online'
+import { sendRoomSocketMessage } from '../roomSocket'
+import { joinSocialRoom, parseSocialRoom } from './online'
 
 export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined, godView = false) {
   const { t } = useI18n()
@@ -89,11 +68,12 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined, 
     }
   }, [game, godView, roomId])
 
-  const run = useCallback(async (action: () => Promise<SocialRoom>) => {
+  const send = useCallback(async (type: string, payload?: unknown) => {
     try {
       setError(undefined)
-      const nextRoom = await action()
-      setRoom(nextRoom)
+      if (!(await sendRoomSocketMessage(socketRef.current, type, payload))) {
+        setError(t('room.operationFailed'))
+      }
     }
     catch (err) {
       setError(err instanceof Error ? err.message : t('room.operationFailed'))
@@ -101,27 +81,28 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined, 
   }, [t])
 
   const actions = useMemo(() => ({
-    addAI: (level: string) => roomId ? run(() => addSocialAI(game, roomId, level, { godView })) : Promise.resolve(),
-    advanceDay: () => roomId ? run(() => advanceWerewolfDay(roomId, { godView })) : Promise.resolve(),
-    assassinate: (targetId: string) => roomId ? run(() => assassinateAvalon(roomId, targetId, { godView })) : Promise.resolve(),
-    hunterShot: (targetId: string) => roomId ? run(() => werewolfHunterShot(roomId, targetId, { godView })) : Promise.resolve(),
-    nightAction: (actionId: string) => roomId ? run(() => werewolfNightAction(roomId, actionId, { godView })) : Promise.resolve(),
-    playQuest: (card: 'success' | 'fail') => roomId ? run(() => playAvalonQuest(roomId, card, { godView })) : Promise.resolve(),
-    proposeTeam: (team: string[]) => roomId ? run(() => proposeAvalonTeam(roomId, team, { godView })) : Promise.resolve(),
+    addAI: (level: string) => roomId ? send('room.add_ai', { level }) : Promise.resolve(),
+    advanceDay: () => roomId ? send('room.advance_day') : Promise.resolve(),
+    assassinate: (targetId: string) => roomId ? send('room.assassinate', { targetId }) : Promise.resolve(),
+    hunterShot: (targetId: string) => roomId ? send('room.hunter_shot', { targetId }) : Promise.resolve(),
+    nightAction: (actionId: string) => roomId ? send('room.night_action', { actionId }) : Promise.resolve(),
+    playQuest: (card: 'success' | 'fail') => roomId ? send('room.quest', { card }) : Promise.resolve(),
+    proposeTeam: (team: string[]) => roomId ? send('room.team', { team }) : Promise.resolve(),
     refresh,
-    removePlayer: (playerId: string) => roomId ? run(() => removeSocialPlayer(game, roomId, playerId, { godView })) : Promise.resolve(),
-    renamePlayer: (name: string) => roomId ? run(() => renameSocialPlayer(game, roomId, name, { godView })) : Promise.resolve(),
-    say: (text: string) => roomId ? run(() => saySocial(game, roomId, text, { godView })) : Promise.resolve(),
-    start: () => roomId ? run(() => startSocialRoom(game, roomId, { godView })) : Promise.resolve(),
-    teamVote: (approve: boolean) => roomId ? run(() => voteAvalonTeam(roomId, approve, { godView })) : Promise.resolve(),
-    undercoverConfig: (presetId: string, includeBlank: boolean) => roomId ? run(() => updateUndercoverConfig(roomId, presetId, includeBlank, { godView })) : Promise.resolve(),
-    undercoverDescribe: (text: string) => roomId ? run(() => describeUndercover(roomId, text, { godView })) : Promise.resolve(),
-    undercoverVote: (targetId: string, confirmed: boolean) => roomId ? run(() => voteUndercover(roomId, targetId, confirmed, { godView })) : Promise.resolve(),
-    updateAI: (playerId: string, level: string) => roomId ? run(() => updateSocialAI(game, roomId, playerId, level, { godView })) : Promise.resolve(),
-    updatePlayerNote: (playerId: string, note: string) => roomId ? run(() => updateSocialPlayerNote(game, roomId, playerId, note, { godView })) : Promise.resolve(),
-    updateWerewolfRoles: (config: WerewolfRoleConfig) => roomId ? run(() => updateWerewolfRoles(roomId, config, { godView })) : Promise.resolve(),
-    werewolfVote: (targetId: string, confirmed: boolean) => roomId ? run(() => werewolfVote(roomId, targetId, confirmed, { godView })) : Promise.resolve(),
-  }), [game, godView, refresh, roomId, run])
+    removePlayer: (playerId: string) => roomId ? send('room.remove_player', { playerId }) : Promise.resolve(),
+    renamePlayer: (name: string) => roomId ? send('room.rename', { name }) : Promise.resolve(),
+    say: (text: string) => roomId ? send('room.speech', { text }) : Promise.resolve(),
+    start: () => roomId ? send('room.start') : Promise.resolve(),
+    teamVote: (approve: boolean) => roomId ? send('room.team_vote', { approve }) : Promise.resolve(),
+    undercoverConfig: (presetId: string, includeBlank: boolean) => roomId ? send('room.undercover_config', { presetId, includeBlank }) : Promise.resolve(),
+    undercoverDescribe: (text: string) => roomId ? send('room.describe', { text }) : Promise.resolve(),
+    undercoverVote: (targetId: string, confirmed: boolean) => roomId ? send('room.undercover_vote', { targetId, confirmed }) : Promise.resolve(),
+    updateAI: (playerId: string, level: string) => roomId ? send('room.update_ai', { playerId, level }) : Promise.resolve(),
+    updatePlayerNote: (playerId: string, note: string) => roomId ? send('room.note', { playerId, note }) : Promise.resolve(),
+    updateWerewolfRoles: (config: WerewolfRoleConfig) => roomId ? send('room.werewolf_roles', { config }) : Promise.resolve(),
+    wolfSpeech: (text: string) => roomId ? send('room.wolf_speech', { text }) : Promise.resolve(),
+    werewolfVote: (targetId: string, confirmed: boolean) => roomId ? send('room.werewolf_vote', { targetId, confirmed }) : Promise.resolve(),
+  }), [refresh, roomId, send])
 
   return { actions, error, isLoading, room, setRoom }
 }

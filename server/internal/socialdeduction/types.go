@@ -120,11 +120,35 @@ type PublicAction struct {
 	Message   string `json:"message"`
 }
 
+type AIDebugAction struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+type AIDebugTrace struct {
+	ID                string          `json:"id"`
+	PlayerID          string          `json:"playerId,omitempty"`
+	PlayerName        string          `json:"playerName,omitempty"`
+	Phase             Phase           `json:"phase"`
+	Scope             string          `json:"scope"`
+	ActionID          string          `json:"actionId,omitempty"`
+	Reason            string          `json:"reason,omitempty"`
+	Speech            string          `json:"speech,omitempty"`
+	Thinking          string          `json:"thinking,omitempty"`
+	ThinkingAvailable bool            `json:"thinkingAvailable"`
+	Error             string          `json:"error,omitempty"`
+	DurationMs        int64           `json:"durationMs"`
+	Actions           []AIDebugAction `json:"actions,omitempty"`
+	CreatedAt         time.Time       `json:"createdAt"`
+}
+
 type WerewolfState struct {
 	Day               int                           `json:"day"`
 	RoleConfig        WerewolfRoleConfig            `json:"roleConfig"`
 	RolePresets       []WerewolfRolePreset          `json:"rolePresets,omitempty"`
 	NightActions      map[string]string             `json:"-"`
+	WolfSpeeches      []SpeechEntry                 `json:"-"`
 	SeerChecks        map[string]Alignment          `json:"-"`
 	Votes             map[string]WerewolfVoteIntent `json:"votes"`
 	DaySpeakers       map[string]bool               `json:"-"`
@@ -235,6 +259,7 @@ type Room struct {
 	Speeches             []SpeechEntry
 	LastAISpeechSourceID string
 	PlayerNotes          map[string]map[string]string
+	AIDebugTraces        []AIDebugTrace
 	ActionSeq            int
 	RecentActions        []PublicAction
 	CreatedAt            time.Time
@@ -265,6 +290,7 @@ type PublicRoom struct {
 	Speeches         []SpeechEntry  `json:"speeches"`
 	ActionSeq        int            `json:"actionSeq"`
 	RecentActions    []PublicAction `json:"recentActions"`
+	AIDebugTraces    []AIDebugTrace `json:"aiDebugTraces,omitempty"`
 }
 
 type WerewolfView struct {
@@ -275,6 +301,8 @@ type WerewolfView struct {
 	Votes             map[string]WerewolfVoteIntent `json:"votes"`
 	DaySpeakers       map[string]bool               `json:"daySpeakers,omitempty"`
 	NightSubmitted    bool                          `json:"nightActionSubmitted,omitempty"`
+	WolfSpeeches      []SpeechEntry                 `json:"wolfSpeeches,omitempty"`
+	WolfNightActions  map[string]string             `json:"wolfNightActions,omitempty"`
 	LastNight         string                        `json:"lastNight,omitempty"`
 	WitchVictimID     string                        `json:"witchVictimId,omitempty"`
 	WitchAntidoteUsed bool                          `json:"witchAntidoteUsed,omitempty"`

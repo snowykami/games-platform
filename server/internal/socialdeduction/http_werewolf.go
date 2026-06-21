@@ -3,6 +3,7 @@ package socialdeduction
 import (
 	"net/http"
 
+	"github.com/snowykami/games-platform/server/internal/gameactor"
 	"github.com/snowykami/games-platform/server/internal/httpx"
 )
 
@@ -29,6 +30,17 @@ func (h *Handler) nightAction(w http.ResponseWriter, r *http.Request) {
 			actionID = request.TargetID
 		}
 		return h.manager.NightAction(roomID, userID, actionID)
+	})
+}
+
+func (h *Handler) wolfSpeech(w http.ResponseWriter, r *http.Request) {
+	var request speechRequest
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
+		return
+	}
+	h.mutateRoomWithEvent(w, r, gameactor.EventPlayerSpeech, gameactor.LaneSpeech, func(roomID string, userID string) (PublicRoom, error) {
+		return h.manager.WerewolfWolfSpeech(roomID, userID, request.Text)
 	})
 }
 

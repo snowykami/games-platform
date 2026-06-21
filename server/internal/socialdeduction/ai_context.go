@@ -14,7 +14,6 @@ func werewolfAIState(room *Room, actor *Player) map[string]any {
 	for _, player := range room.Players {
 		entry := map[string]any{
 			"id":    aiPlayerRef(room, player),
-			"name":  player.Name,
 			"seat":  aiPlayerNumber(room, player),
 			"alive": player.Alive,
 		}
@@ -34,7 +33,7 @@ func werewolfAIState(room *Room, actor *Player) map[string]any {
 		"yourAlignment":   actor.Alignment,
 		"players":         players,
 		"visibleAllies":   visibleAllies,
-		"lastNight":       room.Werewolf.LastNight,
+		"lastNight":       aliasPlayerNamesInText(room, room.Werewolf.LastNight),
 		"votes":           aliasWerewolfVoteIntents(room, room.Werewolf.Votes),
 		"recentSpeech":    aiSpeechForWerewolf(room),
 		"revealedIdiots":  aliasBoolMap(room, room.Werewolf.RevealedIdiots),
@@ -50,6 +49,12 @@ func werewolfAIState(room *Room, actor *Player) map[string]any {
 			"poisonUsed":   room.Werewolf.WitchPoisonUsed,
 		}
 	}
+	if actor.Role == RoleWerewolf {
+		_, consensus := werewolfConsensusAction(room)
+		state["wolfChat"] = aiWerewolfWolfSpeeches(room)
+		state["wolfChoices"] = aliasWerewolfNightActions(room)
+		state["wolfConsensusReached"] = consensus
+	}
 	return state
 }
 
@@ -58,7 +63,6 @@ func avalonAIState(room *Room, actor *Player, phase string) map[string]any {
 	for _, player := range room.Players {
 		entry := map[string]any{
 			"id":    aiPlayerRef(room, player),
-			"name":  player.Name,
 			"seat":  aiPlayerNumber(room, player),
 			"alive": player.Alive,
 		}
@@ -111,7 +115,6 @@ func publicPlayersForAI(room *Room, actor *Player) []map[string]any {
 	for _, player := range room.Players {
 		entry := map[string]any{
 			"id":    aiPlayerRef(room, player),
-			"name":  player.Name,
 			"seat":  aiPlayerNumber(room, player),
 			"alive": player.Alive,
 		}

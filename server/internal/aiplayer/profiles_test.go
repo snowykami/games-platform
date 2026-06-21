@@ -12,4 +12,16 @@ func TestProfilesExposeSharedPool(t *testing.T) {
 			t.Fatalf("profile must include name, personality, and speech style: %+v", profile)
 		}
 	}
+	if !hasProfileName(profiles, "Harper") || !hasProfileName(profiles, "Sora") || !hasProfileName(profiles, "さくら") || !hasProfileName(profiles, "林澈") {
+		t.Fatalf("expected shared pool to include mixed English, romaji, Japanese, and Chinese names, got %+v", profiles)
+	}
+}
+
+func hasProfileName(profiles []BotProfile, name string) bool {
+	for _, profile := range profiles {
+		if profile.Name == name {
+			return true
+		}
+	}
+	return false
 }

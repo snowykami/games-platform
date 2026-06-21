@@ -65,6 +65,24 @@ func (m *Manager) NightAction(roomID string, actorID string, actionID string) (P
 	return m.publicRoom(room, actorID), nil
 }
 
+func (m *Manager) WerewolfWolfSpeech(roomID string, actorID string, text string) (PublicRoom, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	room, player, err := m.requireWerewolfActor(roomID, actorID, PhaseWerewolfNight)
+	if err != nil {
+		return PublicRoom{}, err
+	}
+	if player.Role != RoleWerewolf {
+		return PublicRoom{}, errors.New("only_werewolf_chat")
+	}
+	if !recordWerewolfWolfSpeech(room, player, text) {
+		return PublicRoom{}, errors.New("empty_speech")
+	}
+	touchSpeech(room)
+	return m.publicRoom(room, actorID), nil
+}
+
 func (m *Manager) HunterShot(roomID string, actorID string, targetID string) (PublicRoom, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

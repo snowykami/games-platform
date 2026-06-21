@@ -94,7 +94,7 @@ func (m *Manager) socialDecisionScoped(room *Room, player *Player, state map[str
 		Phase:         string(room.Phase),
 		Type:          eventType,
 		Profile: aiagent.Profile{
-			Name:        player.Name,
+			Name:        fmt.Sprintf("座位 %d", aiPlayerNumber(room, player)),
 			Personality: personality,
 			SpeechStyle: speechStyle,
 		},
@@ -166,10 +166,13 @@ func (m *Manager) socialDecisionScoped(room *Room, player *Player, state map[str
 			return staleErr
 		},
 	})
+	duration := time.Since(startedAt)
+	currentPlayer := findPlayerByID(room, playerID)
 	if err != nil {
+		recordAIDebugTrace(room, currentPlayer, phase, scope, actions, decision, err, duration)
 		return decision, err
 	}
-	currentPlayer := findPlayerByID(room, playerID)
+	recordAIDebugTrace(room, currentPlayer, phase, scope, actions, decision, nil, duration)
 	m.applyAINotes(room, currentPlayer, decision.Notes)
 	m.rememberAI(room, currentPlayer, fmt.Sprintf("phase=%s action=%s reason=%s speech=%s", room.Phase, decision.ActionID, strings.TrimSpace(decision.Reason), strings.TrimSpace(decision.Speech)))
 	return decision, nil
@@ -270,12 +273,12 @@ func (m *Manager) aiSpeechState(room *Room, player *Player) map[string]any {
 func werewolfPublicFacts(room *Room) []string {
 	facts := []string{}
 	if room.Werewolf.LastNight != "" {
-		facts = append(facts, "昨夜公开结果："+room.Werewolf.LastNight)
+		facts = append(facts, "昨夜公开结果："+aliasPlayerNamesInText(room, room.Werewolf.LastNight))
 	}
 	outPlayers := []string{}
 	alivePlayers := []string{}
 	for _, player := range playersBySeat(room) {
-		label := fmt.Sprintf("%s:%s", aiPlayerRef(room, player), player.Name)
+		label := fmt.Sprintf("%s:座位 %d", aiPlayerRef(room, player), aiPlayerNumber(room, player))
 		if player.Alive {
 			alivePlayers = append(alivePlayers, label)
 		} else {

@@ -1,7 +1,8 @@
 import type { XiangqiOnlineRoom } from './online'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/context'
-import { addXiangqiAI, joinXiangqiRoom, moveXiangqiPiece, removeXiangqiPlayer, renameXiangqiPlayer, sayXiangqi, startXiangqiRoom, updateXiangqiAI } from './online'
+import { sendRoomSocketMessage } from '../roomSocket'
+import { joinXiangqiRoom } from './online'
 
 export function useXiangqiRoom(roomId: string | undefined) {
   const { t } = useI18n()
@@ -68,10 +69,12 @@ export function useXiangqiRoom(roomId: string | undefined) {
     }
   }, [roomId])
 
-  const run = useCallback(async (action: () => Promise<XiangqiOnlineRoom>) => {
+  const send = useCallback(async (type: string, payload?: unknown) => {
     try {
       setError(undefined)
-      setRoom(await action())
+      if (!(await sendRoomSocketMessage(socketRef.current, type, payload))) {
+        setError(t('room.operationFailed'))
+      }
     }
     catch (err) {
       setError(err instanceof Error ? err.message : t('room.operationFailed'))
@@ -79,15 +82,15 @@ export function useXiangqiRoom(roomId: string | undefined) {
   }, [t])
 
   const actions = useMemo(() => ({
-    addAI: (level: string) => roomId ? run(() => addXiangqiAI(roomId, level)) : Promise.resolve(),
-    move: (pieceId: string, x: number, y: number) => roomId ? run(() => moveXiangqiPiece(roomId, pieceId, x, y)) : Promise.resolve(),
+    addAI: (level: string) => roomId ? send('room.add_ai', { level }) : Promise.resolve(),
+    move: (pieceId: string, x: number, y: number) => roomId ? send('room.move', { pieceId, x, y }) : Promise.resolve(),
     refresh,
-    removePlayer: (playerId: string) => roomId ? run(() => removeXiangqiPlayer(roomId, playerId)) : Promise.resolve(),
-    renamePlayer: (name: string) => roomId ? run(() => renameXiangqiPlayer(roomId, name)) : Promise.resolve(),
-    say: (text: string) => roomId ? run(() => sayXiangqi(roomId, text)) : Promise.resolve(),
-    start: () => roomId ? run(() => startXiangqiRoom(roomId)) : Promise.resolve(),
-    updateAI: (playerId: string, level: string) => roomId ? run(() => updateXiangqiAI(roomId, playerId, level)) : Promise.resolve(),
-  }), [refresh, roomId, run])
+    removePlayer: (playerId: string) => roomId ? send('room.remove_player', { playerId }) : Promise.resolve(),
+    renamePlayer: (name: string) => roomId ? send('room.rename', { name }) : Promise.resolve(),
+    say: (text: string) => roomId ? send('room.speech', { text }) : Promise.resolve(),
+    start: () => roomId ? send('room.start') : Promise.resolve(),
+    updateAI: (playerId: string, level: string) => roomId ? send('room.update_ai', { playerId, level }) : Promise.resolve(),
+  }), [refresh, roomId, send])
 
   return { actions, error, isLoading, room }
 }

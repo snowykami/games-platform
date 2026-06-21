@@ -1,7 +1,7 @@
 import type { SocialGameSlug, SocialPlayer, SocialRoom } from './online'
 import type { GAME_COPY } from './socialTheme'
 import type { useSocialRoom } from './useSocialRoom'
-import { Shield, Skull, Vote } from 'lucide-react'
+import { Send, Shield, Skull, Vote } from 'lucide-react'
 import { useState } from 'react'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
@@ -24,6 +24,8 @@ export function WerewolfActionPanel({
   you: SocialPlayer
 }) {
   const { t } = useI18n()
+  const [selectedNightAction, setSelectedNightAction] = useState('')
+  const [wolfMessage, setWolfMessage] = useState('')
   const [selectedWerewolfVote, setSelectedWerewolfVote] = useState('')
   const [selectedHunterTarget, setSelectedHunterTarget] = useState('')
   const livingTargets = room.players.filter(player => player.alive && player.id !== you.id)
@@ -35,12 +37,90 @@ export function WerewolfActionPanel({
     const witchVictim = room.players.find(player => player.id === room.werewolf.witchVictimId)
     const nightTargets = werewolfNightTargets(room, you)
     const nightSubmitted = Boolean(room.werewolf.nightActionSubmitted) && you.role !== 'werewolf'
+    const canSubmitNightAction = canAct && !nightSubmitted && (you.role !== 'witch' || Boolean(witchVictim))
+    const selectedNightPlayerID = selectedNightAction.split(':')[1] ?? ''
+    const selectedNightPlayer = room.players.find(player => player.id === selectedNightPlayerID)
+    const selectedNightLabel = selectedNightAction === 'skip:witch'
+      ? t('werewolf.skipWitch')
+      : selectedNightAction === 'skip:wolf'
+        ? t('werewolf.skipWolfKill')
+        : selectedNightPlayer
+          ? (
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                {selectedNightAction.startsWith('save:') && t('werewolf.useAntidoteTarget')}
+                {selectedNightAction.startsWith('poison:') && t('werewolf.usePoisonTarget')}
+                {selectedNightAction.startsWith('target:') && t('werewolf.nightTarget')}
+                <PlayerRefLabel player={selectedNightPlayer} room={room} />
+              </span>
+            )
+          : undefined
+
+    function toggleNightAction(actionID: string) {
+      setSelectedNightAction(selectedNightAction === actionID ? '' : actionID)
+    }
+
+    function submitWolfMessage() {
+      const text = wolfMessage.trim()
+      if (!text) {
+        return
+      }
+      void actions.wolfSpeech(text).then(() => {
+        setWolfMessage('')
+        setMessage(t('werewolf.wolfMessageSent'))
+      })
+    }
 
     return (
       <Panel config={config}>
         <h2 className="text-xl font-black">{t('werewolf.nightAction')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">{nightSubmitted ? t('werewolf.actionSubmitted') : canAct ? t('werewolf.chooseNightTarget') : t('werewolf.noNightAction')}</p>
         {nightSubmitted && <SubmittedNotice config={config} label={t('werewolf.actionSubmitted')} />}
+        {you.role === 'werewolf' && (
+          <div className="grid gap-2 rounded-lg border border-white/12 bg-black/18 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-black text-[#fff8e8]">{t('werewolf.wolfChat')}</h3>
+              <span className="text-xs font-black text-[#fff8e8]/58">{t('werewolf.wolfChoices')}</span>
+            </div>
+            <div className="grid gap-1.5">
+              {room.players.filter(player => player.alive && player.role === 'werewolf').map(player => (
+                <div key={player.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-black/22 px-2 py-1.5 text-xs font-black text-[#fff8e8]/76">
+                  <PlayerRefLabel player={player} room={room} />
+                  <span>{werewolfChoiceLabel(room, room.werewolf.wolfNightActions?.[player.id], t('werewolf.skipWolfKill'), t('werewolf.wolfChoicePending'))}</span>
+                </div>
+              ))}
+            </div>
+            <div className="grid max-h-32 gap-1.5 overflow-y-auto pr-1">
+              {(room.werewolf.wolfSpeeches ?? []).map((speech) => {
+                const speaker = room.players.find(player => player.id === speech.playerId)
+                return (
+                  <p key={speech.id} className="rounded-md bg-black/24 px-2 py-1.5 text-xs font-bold leading-5 text-[#fff8e8]/76">
+                    {speaker ? <PlayerRefLabel player={speaker} room={room} /> : speech.playerName}
+                    <span className="mx-1 text-[#fff8e8]/45">:</span>
+                    <span>{speech.text}</span>
+                  </p>
+                )
+              })}
+            </div>
+            <div className="flex gap-2">
+              <textarea
+                className="min-h-11 flex-1 resize-none rounded-lg border border-white/12 bg-black/22 px-3 py-2 text-sm font-bold text-[#fff8e8] outline-none placeholder:text-[#fff8e8]/35 focus:border-white/28"
+                maxLength={120}
+                placeholder={t('werewolf.wolfChatPlaceholder')}
+                value={wolfMessage}
+                onChange={event => setWolfMessage(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault()
+                    submitWolfMessage()
+                  }
+                }}
+              />
+              <button className={socialButton(config, true)} disabled={!wolfMessage.trim()} type="button" onClick={submitWolfMessage}>
+                <Send className="size-4" />
+              </button>
+            </div>
+          </div>
+        )}
         {you.role === 'witch' && !nightSubmitted && (
           <>
             <p className="rounded-lg bg-black/24 px-3 py-2 text-xs font-black text-[#fff8e8]/72">
@@ -53,31 +133,50 @@ export function WerewolfActionPanel({
                   )
                 : t('werewolf.witchNoVictim')}
             </p>
-            {witchVictim && !room.werewolf.witchAntidoteUsed && (
-              <button className={socialButton(config, true)} type="button" onClick={() => void actions.nightAction(`save:${witchVictim.id}`).then(() => setMessage(t('werewolf.actionSubmitted')))}>
-                <Shield className="size-4" />
-                {t('werewolf.useAntidoteTarget')}
-                <PlayerRefLabel player={witchVictim} room={room} />
-              </button>
+            {witchVictim && (
+              <>
+                {!room.werewolf.witchAntidoteUsed && (
+                  <ChoiceButton config={config} icon={<Shield className="size-4" />} selected={selectedNightAction === `save:${witchVictim.id}`} onClick={() => toggleNightAction(`save:${witchVictim.id}`)}>
+                    {t('werewolf.useAntidoteTarget')}
+                    <PlayerRefLabel player={witchVictim} room={room} />
+                  </ChoiceButton>
+                )}
+                {!room.werewolf.witchPoisonUsed && livingTargets.map(player => (
+                  <ChoiceButton key={player.id} config={config} icon={<Skull className="size-4" />} selected={selectedNightAction === `poison:${player.id}`} onClick={() => toggleNightAction(`poison:${player.id}`)}>
+                    {t('werewolf.usePoisonTarget')}
+                    <PlayerRefLabel player={player} room={room} />
+                  </ChoiceButton>
+                ))}
+                <ChoiceButton config={config} selected={selectedNightAction === 'skip:witch'} onClick={() => toggleNightAction('skip:witch')}>
+                  {t('werewolf.skipWitch')}
+                </ChoiceButton>
+              </>
             )}
-            {!room.werewolf.witchPoisonUsed && livingTargets.map(player => (
-              <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.nightAction(`poison:${player.id}`).then(() => setMessage(t('werewolf.actionSubmitted')))}>
-                <Skull className="size-4" />
-                {t('werewolf.usePoisonTarget')}
-                <PlayerRefLabel player={player} room={room} />
-              </button>
-            ))}
-            <button className={socialButton(config)} type="button" onClick={() => void actions.nightAction('skip:witch').then(() => setMessage(t('werewolf.actionSubmitted')))}>
-              {t('werewolf.skipWitch')}
-            </button>
           </>
         )}
         {canAct && !nightSubmitted && you.role !== 'witch' && nightTargets.map(player => (
-          <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.nightAction(`target:${player.id}`).then(() => setMessage(t('werewolf.actionSubmitted')))}>
+          <ChoiceButton key={player.id} config={config} selected={selectedNightAction === `target:${player.id}`} onClick={() => toggleNightAction(`target:${player.id}`)}>
             <WerewolfNightRelationBadge player={player} you={you} />
             <PlayerRefLabel player={player} room={room} />
-          </button>
+          </ChoiceButton>
         ))}
+        {you.role === 'werewolf' && (
+          <ChoiceButton config={config} selected={selectedNightAction === 'skip:wolf'} onClick={() => toggleNightAction('skip:wolf')}>
+            {t('werewolf.skipWolfKill')}
+          </ChoiceButton>
+        )}
+        {canSubmitNightAction && (
+          <ConfirmChoiceButton
+            config={config}
+            disabled={!selectedNightAction}
+            label={t('social.confirmAction')}
+            selectedLabel={selectedNightLabel}
+            onConfirm={() => void actions.nightAction(selectedNightAction).then(() => {
+              setSelectedNightAction('')
+              setMessage(t('werewolf.actionSubmitted'))
+            })}
+          />
+        )}
       </Panel>
     )
   }
@@ -190,6 +289,20 @@ function werewolfNightTargets(room: SocialRoom, you: SocialPlayer) {
     }
     return true
   })
+}
+
+function werewolfChoiceLabel(room: SocialRoom, actionId: string | undefined, skipLabel: string, pendingLabel: string) {
+  if (!actionId) {
+    return pendingLabel
+  }
+  if (actionId === 'skip:wolf') {
+    return skipLabel
+  }
+  const player = room.players.find(item => item.id === actionId)
+  if (!player) {
+    return pendingLabel
+  }
+  return `${player.seat >= 0 ? `${player.seat + 1}号 · ` : ''}${player.name}`
 }
 
 function WerewolfNightRelationBadge({ player, you }: { player: SocialPlayer, you: SocialPlayer }) {
