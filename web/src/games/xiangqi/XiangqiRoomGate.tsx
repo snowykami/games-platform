@@ -271,8 +271,8 @@ function XiangqiShell({ children }: { children: ReactNode }) {
       <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="mb-1 text-xs font-black tracking-normal text-[#f2d59a]/80">ONLINE XIANGQI ROOM</p>
-            <h1 className="text-[clamp(40px,8vw,84px)] font-black leading-[0.82] tracking-normal text-[#fff8e8]">
+            <p className="mb-0.5 text-xs font-black tracking-normal text-[#f2d59a]/80">ONLINE XIANGQI ROOM</p>
+            <h1 className="text-sm font-black leading-none tracking-normal text-[#fff8e8]/92 sm:text-base">
               {t('xiangqi.title')}
             </h1>
           </div>

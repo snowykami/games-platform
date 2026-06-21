@@ -84,8 +84,8 @@ export function SocialShell({
       <div className={cn('relative mx-auto grid w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3', fixedViewport ? 'h-svh min-h-0' : 'min-h-svh')}>
         <header className="flex items-end justify-between gap-3">
           <div>
-            <p className="mb-1 text-xs font-black tracking-normal text-[#fff8e8]/72">{t(GAME_COPY[game].subtitleKey)}</p>
-            <h1 className="text-[clamp(30px,8vw,84px)] font-black leading-[0.82] tracking-normal [text-shadow:0_8px_0_rgba(0,0,0,0.34)]">
+            <p className="mb-0.5 text-[11px] font-black tracking-normal text-[#fff8e8]/72 sm:text-xs">{t(GAME_COPY[game].subtitleKey)}</p>
+            <h1 className="text-sm font-black leading-none tracking-normal text-[#fff8e8]/92 sm:text-base">
               {t(GAME_COPY[game].titleKey)}
             </h1>
           </div>

@@ -158,8 +158,8 @@ export function UnoPage({ roomId }: { roomId: string }) {
       <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_auto_minmax(0,1fr)] gap-2 py-2 sm:gap-3 sm:py-3 lg:h-full lg:min-h-0">
         <header className="flex min-h-0 items-end justify-between gap-4">
           <div>
-            <p className="mb-1 text-[11px] font-black tracking-normal text-[#fff8e8]/75 sm:text-xs">ONLINE UNO TABLE</p>
-            <h1 className="text-[clamp(38px,7vw,82px)] font-black leading-[0.82] tracking-normal [text-shadow:0_7px_0_rgba(20,19,16,0.35)]">
+            <p className="mb-0.5 text-[11px] font-black tracking-normal text-[#fff8e8]/75 sm:text-xs">ONLINE UNO TABLE</p>
+            <h1 className="text-sm font-black leading-none tracking-normal text-[#fff8e8]/92 sm:text-base">
               UNO
             </h1>
           </div>

@@ -268,8 +268,8 @@ function GomokuShell({ children }: { children: ReactNode }) {
       <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3">
         <header className="flex items-end justify-between gap-4">
           <div>
-            <p className="mb-1 text-xs font-black tracking-normal text-[#f4f0e4]/75">ONLINE GOMOKU BOARD</p>
-            <h1 className="text-[clamp(40px,8vw,84px)] font-black leading-[0.82] tracking-normal [text-shadow:0_7px_0_rgba(0,0,0,0.32)]">
+            <p className="mb-0.5 text-xs font-black tracking-normal text-[#f4f0e4]/75">ONLINE GOMOKU BOARD</p>
+            <h1 className="text-sm font-black leading-none tracking-normal text-[#f4f0e4]/92 sm:text-base">
               {t('gomoku.title')}
             </h1>
           </div>

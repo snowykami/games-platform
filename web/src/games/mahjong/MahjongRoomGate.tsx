@@ -274,8 +274,8 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
       <div className="mx-auto grid min-h-svh w-[min(1380px,calc(100vw-24px))] grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-3 py-3">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="mb-1 text-xs font-black text-[#ffd166]">ONLINE CHINESE OFFICIAL MAHJONG</p>
-            <h1 className="text-[clamp(34px,6vw,76px)] font-black leading-none tracking-normal text-[#fff8e8]">国标麻将</h1>
+            <p className="mb-0.5 text-xs font-black text-[#ffd166]">ONLINE CHINESE OFFICIAL MAHJONG</p>
+            <h1 className="text-sm font-black leading-none tracking-normal text-[#fff8e8]/92 sm:text-base">国标麻将</h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link className="mahjong-action" to="/">
@@ -398,8 +398,8 @@ function MahjongShell({ children }: { children: ReactNode }) {
       <div className="mx-auto grid min-h-svh w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3">
         <header className="flex items-end justify-between gap-4">
           <div>
-            <p className="mb-1 text-xs font-black tracking-normal text-[#ffd166]">ONLINE MAHJONG TABLE</p>
-            <h1 className="text-[clamp(40px,8vw,84px)] font-black leading-[0.82] tracking-normal [text-shadow:0_7px_0_rgba(0,0,0,0.32)]">国标麻将</h1>
+            <p className="mb-0.5 text-xs font-black tracking-normal text-[#ffd166]">ONLINE MAHJONG TABLE</p>
+            <h1 className="text-sm font-black leading-none tracking-normal text-[#fff8e8]/92 sm:text-base">国标麻将</h1>
           </div>
           <Link className="inline-grid min-h-10 place-items-center rounded-full border border-[#d8b66a]/45 bg-[#081914]/55 px-4 text-sm font-bold text-[#fff8e8] transition hover:bg-[#081914]/72" to="/">
             <ArrowLeft className="mr-2 inline size-4" />

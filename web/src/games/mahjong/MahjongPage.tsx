@@ -150,8 +150,8 @@ export function MahjongPage() {
       <div className="mx-auto grid min-h-svh w-[min(1380px,calc(100vw-24px))] grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-3 py-3">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="mb-1 text-xs font-black text-[#ffd166]">CHINESE OFFICIAL MAHJONG</p>
-            <h1 className="text-[clamp(34px,6vw,76px)] font-black leading-none tracking-normal text-[#fff8e8]">
+            <p className="mb-0.5 text-xs font-black text-[#ffd166]">CHINESE OFFICIAL MAHJONG</p>
+            <h1 className="text-sm font-black leading-none tracking-normal text-[#fff8e8]/92 sm:text-base">
               {t('mahjong.title')}
             </h1>
           </div>

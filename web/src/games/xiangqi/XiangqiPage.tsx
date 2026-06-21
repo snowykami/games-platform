@@ -110,8 +110,8 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
       <div className="mx-auto grid h-full w-[min(1280px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-2 py-2 sm:gap-3 sm:py-3">
         <header className="flex min-h-0 flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="mb-1 text-xs font-black text-[#f2d59a]/80">ONLINE XIANGQI TABLE</p>
-            <h1 className="text-4xl font-black leading-none tracking-normal text-[#fff8e8] sm:text-6xl">{t('xiangqi.title')}</h1>
+            <p className="mb-0.5 text-xs font-black text-[#f2d59a]/80">ONLINE XIANGQI TABLE</p>
+            <h1 className="text-sm font-black leading-none tracking-normal text-[#fff8e8]/92 sm:text-base">{t('xiangqi.title')}</h1>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button asChild className="border-[#fff8e8]/30 bg-[#fff8e8]/10 text-[#fff8e8] hover:bg-[#fff8e8]/18" variant="outline">
