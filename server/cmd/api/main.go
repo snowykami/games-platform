@@ -58,7 +58,11 @@ func main() {
 }
 
 func routes(cfg config.Config) http.Handler {
-	authStore := auth.NewStore()
+	authStore, err := auth.NewPostgresStore(context.Background(), cfg.Database.URL)
+	if err != nil {
+		slog.Error("auth store initialization failed", "error", err)
+		os.Exit(1)
+	}
 	authHandler := auth.NewHandler(authStore, cfg.OIDC, cfg.HTTP.SecureSessionCookie)
 	aiProvider := aiplayer.NewOpenAIProvider(cfg.AI)
 	aiHandler := aiplayer.NewHandler(aiProvider)

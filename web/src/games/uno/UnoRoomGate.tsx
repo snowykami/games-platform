@@ -49,7 +49,6 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   const [pendingAI, setPendingAI] = useState(false)
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
-  const [llmModel, setLLMModel] = useState('')
   const [variantKey, setVariantKey] = useState('classic')
   const [themeKey, setThemeKey] = useState('classic')
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
@@ -59,7 +58,6 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
       setLLMEnabled(capabilities.llmEnabled)
-      setLLMModel(capabilities.model ?? '')
       if (!capabilities.llmEnabled && aiLevel === 'ai') {
         setAILevel('normal')
       }
@@ -215,7 +213,7 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                 {t('common.copyLink')}
               </button>
               <div className="grid min-w-[250px] grid-cols-[minmax(120px,1fr)_auto_auto] items-end gap-2">
-                <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} llmModel={llmModel} onChange={setAILevel} />
+                <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} onChange={setAILevel} />
                 <button
                   className={cn('uno-button', pendingAI && 'loading')}
                   disabled={pendingAI || !isHost || !room || room.players.length >= 10}
@@ -250,7 +248,6 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                             disabled={!isHost || room.phase !== 'lobby'}
                             level={player.ai.level}
                             llmEnabled={llmEnabled}
-                            llmModel={llmModel}
                             onChange={level => void actions.updateAI(player.id, level)}
                           />
                         )

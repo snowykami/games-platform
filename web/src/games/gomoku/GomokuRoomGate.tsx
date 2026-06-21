@@ -31,7 +31,6 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
   const [pendingAI, setPendingAI] = useState(false)
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
-  const [llmModel, setLLMModel] = useState('')
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
   const loadCurrentRoom = useCallback(() => getCurrentGomokuRoom(), [])
   const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
@@ -39,7 +38,6 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
       setLLMEnabled(capabilities.llmEnabled)
-      setLLMModel(capabilities.model ?? '')
       if (!capabilities.llmEnabled && aiLevel === 'ai') {
         setAILevel('normal')
       }
@@ -181,7 +179,7 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
                 {t('common.copyLink')}
               </button>
               <div className="grid min-w-[250px] grid-cols-[minmax(120px,1fr)_auto_auto] items-end gap-2">
-                <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} llmModel={llmModel} palette="gomoku" onChange={setAILevel} />
+                <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} palette="gomoku" onChange={setAILevel} />
                 <button
                   className={cn('gomoku-button', pendingAI && 'loading')}
                   disabled={pendingAI || !isHost || !room || room.players.length >= 2}
@@ -216,7 +214,6 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
                             disabled={!isHost || room.phase !== 'lobby'}
                             level={player.ai.level}
                             llmEnabled={llmEnabled}
-                            llmModel={llmModel}
                             palette="gomoku"
                             onChange={level => void actions.updateAI(player.id, level)}
                           />

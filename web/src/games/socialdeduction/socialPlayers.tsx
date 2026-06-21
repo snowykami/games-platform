@@ -21,7 +21,6 @@ export function PlayerGrid({
   compact = false,
   config,
   isHost,
-  llmModel,
   room,
 }: {
   actions: SocialActions
@@ -29,7 +28,6 @@ export function PlayerGrid({
   compact?: boolean
   config: typeof GAME_COPY[SocialGameSlug]
   isHost: boolean
-  llmModel: string
   room: SocialRoom
 }) {
   const players = [...room.players].sort((left, right) => comparePlayerOrder(room, left, right))
@@ -42,7 +40,6 @@ export function PlayerGrid({
           actions={actions}
           config={config}
           isHost={isHost}
-          llmModel={llmModel}
           player={player}
           room={room}
         />
@@ -56,7 +53,6 @@ function SocialPlayerCard({
   actions,
   config,
   isHost,
-  llmModel,
   player,
   room,
 }: {
@@ -64,13 +60,12 @@ function SocialPlayerCard({
   actions: SocialActions
   config: typeof GAME_COPY[SocialGameSlug]
   isHost: boolean
-  llmModel: string
   player: SocialPlayer
   room: SocialRoom
 }) {
   const { t } = useI18n()
   const isSelf = player.id === room.youPlayerId
-  const playerStatusLabel = player.ai ? (llmModel ? `AI: ${llmModel}` : t('common.ai')) : player.roomRole === 'host' ? t('common.host') : player.connected ? t('common.online') : t('common.offline')
+  const playerStatusLabel = player.ai ? t('common.ai') : player.roomRole === 'host' ? t('common.host') : player.connected ? t('common.online') : t('common.offline')
   const canRemove = isHost && room.phase === 'lobby' && player.roomRole !== 'host'
   const canNote = Boolean(room.youPlayerId && !isSelf)
   const numberLabel = playerNumberLabel(player)

@@ -25,6 +25,7 @@ func (m *Manager) Start(roomID string, actorID string) (PublicRoom, error) {
 		return PublicRoom{}, fmt.Errorf("need_%d_players", m.minPlayers())
 	}
 
+	m.removeRoomAgents(room.ID)
 	resetRoom(room)
 	if m.game == GameWerewolf {
 		startWerewolf(room)
@@ -33,7 +34,7 @@ func (m *Manager) Start(roomID string, actorID string) (PublicRoom, error) {
 	} else {
 		startUndercover(room)
 	}
-	touchRule(room)
+	touchRuleAndSpeech(room)
 	return m.publicRoom(room, actorID), nil
 }
 

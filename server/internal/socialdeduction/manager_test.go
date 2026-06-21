@@ -108,6 +108,66 @@ func TestPublicRoomGodViewRevealsAllRoles(t *testing.T) {
 	}
 }
 
+func TestRestartClearsPreviousGameConversationAndAIMemory(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFRESTART", PhaseFinished, []*Player{
+		testPlayer("p1", "u1", "Host", RoleVillager, AlignmentGood),
+		testAIPlayer("p2", "North", RoleWerewolf, AlignmentEvil),
+		testAIPlayer("p3", "South", RoleVillager, AlignmentGood),
+		testAIPlayer("p4", "West", RoleVillager, AlignmentGood),
+		testAIPlayer("p5", "East", RoleVillager, AlignmentGood),
+		testAIPlayer("p6", "Moon", RoleVillager, AlignmentGood),
+	})
+	room.HostUserID = "u1"
+	room.Winner = AlignmentGood
+	room.WinnerMessage = "上一局好人胜利。"
+	room.Log = []LogEntry{{ID: "log_old", Text: "上一局遗留桌面记录。"}}
+	room.Speeches = []SpeechEntry{{ID: "speech_old", PlayerID: "p2", PlayerName: "North", Text: "上一局我是狼。", SpokenAt: time.Now().UTC()}}
+	room.LastAISpeechSourceID = "speech_old"
+	room.ActionSeq = 12
+	room.RecentActions = []PublicAction{{Seq: 12, Type: "old", Message: "上一局动作。"}}
+	room.PlayerNotes = map[string]map[string]string{
+		"p1": {"p2": "主人自己的跨局备注"},
+		"p2": {"p1": "AI 上局记住了房主身份"},
+	}
+	manager.rooms[room.ID] = room
+	manager.aiSessions[socialAISessionKey(room.ID, "p2")] = &socialAISession{
+		Game:     GameWerewolf,
+		RoomID:   room.ID,
+		PlayerID: "p2",
+		Memory:   []string{"上一局投过 p1"},
+	}
+
+	if _, err := manager.Start(room.ID, "u1"); err != nil {
+		t.Fatalf("restart room: %v", err)
+	}
+
+	if room.Winner != "" || room.WinnerMessage != "" {
+		t.Fatalf("expected winner state to reset, got winner=%q message=%q", room.Winner, room.WinnerMessage)
+	}
+	if len(room.Speeches) != 0 {
+		t.Fatalf("expected previous speeches to be cleared, got %+v", room.Speeches)
+	}
+	if room.LastAISpeechSourceID != "" {
+		t.Fatalf("expected AI speech source to reset, got %q", room.LastAISpeechSourceID)
+	}
+	if _, ok := manager.aiSessions[socialAISessionKey(room.ID, "p2")]; ok {
+		t.Fatal("expected AI session memory to be removed on restart")
+	}
+	if _, ok := room.PlayerNotes["p2"]; ok {
+		t.Fatalf("expected AI private notes to be cleared, got %+v", room.PlayerNotes["p2"])
+	}
+	if got := room.PlayerNotes["p1"]["p2"]; got != "主人自己的跨局备注" {
+		t.Fatalf("expected human private note to persist, got %q", got)
+	}
+	if len(room.Log) != 1 || strings.Contains(room.Log[0].Text, "上一局") {
+		t.Fatalf("expected previous table log to be replaced by new start log, got %+v", room.Log)
+	}
+	if len(room.RecentActions) != 1 || room.RecentActions[0].Seq != 1 || room.ActionSeq != 1 {
+		t.Fatalf("expected public actions to restart from first action, seq=%d actions=%+v", room.ActionSeq, room.RecentActions)
+	}
+}
+
 func TestPublicRoomDoesNotSerializeStableUserIDs(t *testing.T) {
 	manager := NewManager(GameWerewolf, nil)
 	room := &Room{
@@ -531,7 +591,7 @@ func TestSocialLLMInputIncludesGameAndSpeechGuidance(t *testing.T) {
 		t.Fatalf("expected map state, got %#v", provider.input.State)
 	}
 	serialized := fmt.Sprint(state)
-	for _, expected := range []string{"真实玩家", "狼人杀目标", "夜晚行动", "避免模板话", "不能直接或间接泄露隐藏身份"} {
+	for _, expected := range []string{"真实玩家", "狼人杀目标", "夜晚行动", "避免模板话", "不能直接或间接泄露隐藏身份", "最近发言只是待验证的桌面主张", "独立判断"} {
 		if !strings.Contains(serialized, expected) {
 			t.Fatalf("expected social guidance %q in LLM state, got %s", expected, serialized)
 		}

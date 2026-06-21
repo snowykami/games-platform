@@ -21,7 +21,6 @@ export function getAILevelDescription(level: AILevel, locale: keyof typeof messa
 export interface AICapabilities {
   levels: AILevel[]
   llmEnabled: boolean
-  model?: string
   profiles: Array<{
     name: string
     personality: string
@@ -38,7 +37,6 @@ export interface LegalAction {
 const capabilitiesSchema = z.object({
   levels: z.array(z.enum(['beginner', 'normal', 'master', 'ai'])),
   llmEnabled: z.boolean(),
-  model: z.string().optional(),
   profiles: z.array(z.object({
     name: z.string(),
     personality: z.string(),

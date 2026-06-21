@@ -31,7 +31,6 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
   const [pendingAI, setPendingAI] = useState(false)
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
-  const [llmModel, setLLMModel] = useState('')
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
   const loadCurrentRoom = useCallback(() => getCurrentXiangqiRoom(), [])
   const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
@@ -43,7 +42,6 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
         return
       }
       setLLMEnabled(capabilities.llmEnabled)
-      setLLMModel(capabilities.model ?? '')
       setAILevel(current => current === 'ai' && !capabilities.llmEnabled ? 'normal' : current)
     })
     return () => {
@@ -184,7 +182,7 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
                 {t('common.copyLink')}
               </button>
               <div className="grid min-w-[250px] grid-cols-[minmax(120px,1fr)_auto_auto] items-end gap-2">
-                <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} llmModel={llmModel} palette="xiangqi" onChange={setAILevel} />
+                <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} palette="xiangqi" onChange={setAILevel} />
                 <button
                   className={cn('xiangqi-button', pendingAI && 'loading')}
                   disabled={pendingAI || !isHost || !room || room.players.length >= 2}
@@ -219,7 +217,6 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
                             disabled={!isHost || room.phase !== 'lobby'}
                             level={player.ai.level}
                             llmEnabled={llmEnabled}
-                            llmModel={llmModel}
                             palette="xiangqi"
                             onChange={level => void actions.updateAI(player.id, level)}
                           />

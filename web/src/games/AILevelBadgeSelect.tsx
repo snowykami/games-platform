@@ -8,12 +8,11 @@ interface AILevelBadgeSelectProps {
   disabled?: boolean
   level: string | undefined
   llmEnabled: boolean
-  llmModel?: string
   onChange?: (level: AILevel) => void
   palette?: 'dark' | 'gomoku' | 'mahjong' | 'xiangqi'
 }
 
-export function AILevelBadgeSelect({ className, disabled = false, level, llmEnabled, llmModel, onChange, palette = 'dark' }: AILevelBadgeSelectProps) {
+export function AILevelBadgeSelect({ className, disabled = false, level, llmEnabled, onChange, palette = 'dark' }: AILevelBadgeSelectProps) {
   const { locale, t } = useI18n()
   const value = normalizeAILevel(level)
 
@@ -32,7 +31,7 @@ export function AILevelBadgeSelect({ className, disabled = false, level, llmEnab
     >
       {AI_LEVELS.map(option => (
         <option key={option} className="text-[#171411]" disabled={option === 'ai' && !llmEnabled} value={option}>
-          {option === 'ai' && llmModel ? `AI: ${llmModel}` : getAILevelLabel(option, locale)}
+          {getAILevelLabel(option, locale)}
         </option>
       ))}
     </select>

@@ -7,12 +7,11 @@ interface AILevelPickerProps {
   className?: string
   level: string
   llmEnabled: boolean
-  llmModel?: string
   onChange: (level: AILevel) => void
   palette?: 'dark' | 'gomoku' | 'xiangqi'
 }
 
-export function AILevelPicker({ className, level, llmEnabled, llmModel, onChange, palette = 'dark' }: AILevelPickerProps) {
+export function AILevelPicker({ className, level, llmEnabled, onChange, palette = 'dark' }: AILevelPickerProps) {
   const { locale, t } = useI18n()
 
   return (
@@ -26,7 +25,7 @@ export function AILevelPicker({ className, level, llmEnabled, llmModel, onChange
       >
         {AI_LEVELS.map(option => (
           <option key={option} className="text-[#171411]" disabled={option === 'ai' && !llmEnabled} value={option}>
-            {option === 'ai' && llmModel ? `AI: ${llmModel}` : getAILevelLabel(option, locale)}
+            {getAILevelLabel(option, locale)}
           </option>
         ))}
       </select>

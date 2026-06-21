@@ -65,10 +65,6 @@ func (p *OpenAIProvider) Enabled() bool {
 	return p.api != "" && p.model != "" && p.token != ""
 }
 
-func (p *OpenAIProvider) ModelName() string {
-	return p.model
-}
-
 func (p *OpenAIProvider) Decide(ctx context.Context, input DecisionInput) (Decision, error) {
 	if !p.Enabled() {
 		return Decision{}, errors.New("llm provider is not configured")

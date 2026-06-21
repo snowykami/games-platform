@@ -34,7 +34,6 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
   const [message, setMessage] = useState(() => t('room.defaultMessage'))
   const [pendingAI, setPendingAI] = useState(false)
   const [llmEnabled, setLLMEnabled] = useState(false)
-  const [llmModel, setLLMModel] = useState('')
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
   const loadCurrentRoom = useCallback(() => getCurrentSocialRoom(game), [game])
   const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
@@ -42,7 +41,6 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
       setLLMEnabled(capabilities.llmEnabled)
-      setLLMModel(capabilities.model ?? '')
     })
   }, [])
 
@@ -185,7 +183,7 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
               </button>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex min-h-10 items-center rounded-lg border border-white/16 bg-white/10 px-3 text-xs font-black text-[#fff8e8]/86">
-                  {llmEnabled ? `AI: ${llmModel || t('common.ai')}` : t('social.llmRequired')}
+                  {llmEnabled ? t('common.ai') : t('social.llmRequired')}
                 </span>
                 <button
                   className={cn(socialButton(config), pendingAI && 'opacity-70')}
@@ -203,7 +201,7 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
             </div>
           </div>
 
-          <PlayerGrid actions={actions} config={config} isHost={isHost} llmModel={llmModel} room={room} />
+          <PlayerGrid actions={actions} config={config} isHost={isHost} room={room} />
           {game === 'undercover' && <UndercoverLobbyConfig actions={actions} config={config} isHost={isHost} room={room} />}
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -360,7 +358,7 @@ function SocialGamePage({
           <div className="grid min-h-0 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_260px]">
             <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden">
               <SelfIntel className="hidden md:block" config={config} game={game} room={room} you={you} />
-              <PlayerGrid actions={actions} className="min-h-0" config={config} isHost={false} llmModel="" room={room} compact />
+              <PlayerGrid actions={actions} className="min-h-0" config={config} isHost={false} room={room} compact />
             </div>
 
             <div className="hidden min-h-0 overflow-auto pr-1 lg:block">

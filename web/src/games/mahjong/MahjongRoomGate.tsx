@@ -28,7 +28,6 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
   const [pendingAI, setPendingAI] = useState(false)
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
-  const [llmModel, setLLMModel] = useState('')
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
   const loadCurrentRoom = useCallback(() => getCurrentMahjongRoom(), [])
   const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
@@ -36,7 +35,6 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
       setLLMEnabled(capabilities.llmEnabled)
-      setLLMModel(capabilities.model ?? '')
       if (!capabilities.llmEnabled && aiLevel === 'ai') {
         setAILevel('normal')
       }
@@ -174,7 +172,7 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
                 <Copy className="size-4" />
                 复制链接
               </button>
-              <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} llmModel={llmModel} palette="dark" onChange={setAILevel} />
+              <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} palette="dark" onChange={setAILevel} />
               <button
                 className={cn('mahjong-action', pendingAI && 'loading')}
                 disabled={pendingAI || !isHost || !room || room.players.length >= 4}
@@ -208,7 +206,6 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
                             disabled={!isHost || room.phase !== 'lobby'}
                             level={player.ai.level}
                             llmEnabled={llmEnabled}
-                            llmModel={llmModel}
                             palette="mahjong"
                             onChange={level => void actions.updateAI(player.id, level)}
                           />
