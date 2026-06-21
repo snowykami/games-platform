@@ -252,6 +252,12 @@ func (m *Manager) removeRoomAgents(roomID string) {
 }
 
 func (m *Manager) aiSpeechState(room *Room, player *Player) map[string]any {
+	if room.Game == GameWerewolf {
+		state := werewolfAIState(room, player)
+		state["speechGuide"] = "像真实狼人杀玩家一样自然短句回应。lastNight 是公开且权威的昨夜结果；如果 lastNight 写着有人在夜晚出局，就绝不能说平安夜、没人死、狼没动刀或被挡了。不要泄露隐藏身份、验人、用药、守护或狼队信息。"
+		state["publicFacts"] = werewolfPublicFacts(room)
+		return state
+	}
 	return map[string]any{
 		"phase":        room.Phase,
 		"role":         player.Role,
@@ -259,6 +265,30 @@ func (m *Manager) aiSpeechState(room *Room, player *Player) map[string]any {
 		"recentSpeech": aiSpeeches(room),
 		"speechGuide":  "像真实玩家一样自然短句回应，可以观察、质疑、接话；没有必要说话就跳过。不要泄露隐藏身份或秘密词。",
 	}
+}
+
+func werewolfPublicFacts(room *Room) []string {
+	facts := []string{}
+	if room.Werewolf.LastNight != "" {
+		facts = append(facts, "昨夜公开结果："+room.Werewolf.LastNight)
+	}
+	outPlayers := []string{}
+	alivePlayers := []string{}
+	for _, player := range playersBySeat(room) {
+		label := fmt.Sprintf("%s:%s", aiPlayerRef(room, player), player.Name)
+		if player.Alive {
+			alivePlayers = append(alivePlayers, label)
+		} else {
+			outPlayers = append(outPlayers, label)
+		}
+	}
+	if len(outPlayers) > 0 {
+		facts = append(facts, "已出局玩家："+strings.Join(outPlayers, "、"))
+	}
+	if len(alivePlayers) > 0 {
+		facts = append(facts, "存活玩家："+strings.Join(alivePlayers, "、"))
+	}
+	return facts
 }
 
 func (m *Manager) rememberAI(room *Room, player *Player, event string) {

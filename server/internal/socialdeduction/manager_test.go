@@ -395,6 +395,34 @@ func TestWerewolfSeerCanOnlyCheckOncePerNight(t *testing.T) {
 	}
 }
 
+func TestWerewolfOptionalSpeechStateIncludesNightResultAndDeaths(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFSPEECHFACTS", PhaseWerewolfDay, []*Player{
+		testPlayer("dead", "u_dead", "Dead Player", RoleVillager, AlignmentGood),
+		testAIPlayer("speaker", "Speaker Bot", RoleVillager, AlignmentGood),
+		testPlayer("wolf", "u_wolf", "Wolf", RoleWerewolf, AlignmentEvil),
+	})
+	room.Players[0].Alive = false
+	room.Werewolf.LastNight = "Dead Player 在夜晚出局。"
+
+	state := manager.aiSpeechState(room, room.Players[1])
+	if state["lastNight"] != room.Werewolf.LastNight {
+		t.Fatalf("expected optional speech state to include lastNight, got %+v", state["lastNight"])
+	}
+	facts, ok := state["publicFacts"].([]string)
+	if !ok {
+		t.Fatalf("expected publicFacts in optional speech state, got %+v", state["publicFacts"])
+	}
+	joinedFacts := strings.Join(facts, "\n")
+	if !strings.Contains(joinedFacts, "Dead Player 在夜晚出局") || !strings.Contains(joinedFacts, "已出局玩家") {
+		t.Fatalf("expected public facts to include death result and out players, got %q", joinedFacts)
+	}
+	guide := fmt.Sprint(state["speechGuide"])
+	if !strings.Contains(guide, "绝不能说平安夜") {
+		t.Fatalf("expected speech guide to forbid false peaceful night claims, got %q", guide)
+	}
+}
+
 func TestWerewolfLLMInputDoesNotExposeAIOrHumanIDPrefixes(t *testing.T) {
 	provider := &fakeDecisionProvider{
 		enabled: true,
