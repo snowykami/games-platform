@@ -158,14 +158,16 @@ function SocialPlayerBadges({ player }: { player: SocialPlayer }) {
 }
 
 export function TableLogLine({ entry, room }: { entry: SocialRoom['log'][number], room: SocialRoom }) {
-  const speaker = logSpeaker(room, entry.text)
+  const speaker = entry.playerId ? room.players.find(player => player.id === entry.playerId) : undefined
 
   if (!speaker) {
     return <p className="rounded-lg bg-black/24 px-3 py-2 text-sm font-bold leading-6 text-[#fff8e8]/76">{entry.text}</p>
   }
 
   const accent = playerAccent(room, speaker.id)
-  const rest = entry.text.slice(speaker.name.length)
+  const rest = entry.playerName && entry.text.startsWith(entry.playerName)
+    ? entry.text.slice(entry.playerName.length)
+    : entry.text
 
   return (
     <p className="rounded-lg bg-black/24 px-3 py-2 text-sm font-bold leading-6 text-[#fff8e8]/78">
@@ -180,15 +182,6 @@ export function TableLogLine({ entry, room }: { entry: SocialRoom['log'][number]
       <span>{rest}</span>
     </p>
   )
-}
-
-function logSpeaker(room: SocialRoom, text: string) {
-  return [...room.players]
-    .sort((left, right) => right.name.length - left.name.length)
-    .find(player => text === player.name
-      || text.startsWith(`${player.name} `)
-      || text.startsWith(`${player.name}:`)
-      || text.startsWith(`${player.name}：`))
 }
 
 function playerAccent(room: SocialRoom, playerId?: string): PlayerAccent {

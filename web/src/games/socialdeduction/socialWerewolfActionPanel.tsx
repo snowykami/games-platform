@@ -13,14 +13,12 @@ import { Panel } from './socialUi'
 export function WerewolfActionPanel({
   actions,
   config,
-  isHost,
   room,
   setMessage,
   you,
 }: {
   actions: ReturnType<typeof useSocialRoom>['actions']
   config: typeof GAME_COPY[SocialGameSlug]
-  isHost: boolean
   room: SocialRoom
   setMessage: (message: string) => void
   you: SocialPlayer
@@ -35,6 +33,7 @@ export function WerewolfActionPanel({
   if (room.phase === 'night') {
     const canAct = ['werewolf', 'seer', 'guard', 'witch'].includes(you.role ?? '')
     const witchVictim = room.players.find(player => player.id === room.werewolf.witchVictimId)
+    const nightTargets = werewolfNightTargets(room, you)
 
     return (
       <Panel config={config}>
@@ -71,9 +70,9 @@ export function WerewolfActionPanel({
             </button>
           </>
         )}
-        {canAct && you.role !== 'witch' && livingTargets.map(player => (
+        {canAct && you.role !== 'witch' && nightTargets.map(player => (
           <button key={player.id} className={socialButton(config)} type="button" onClick={() => void actions.nightAction(`target:${player.id}`).then(() => setMessage(t('werewolf.actionSubmitted')))}>
-            <Shield className="size-4" />
+            <WerewolfNightRelationBadge player={player} you={you} />
             <PlayerRefLabel player={player} room={room} />
           </button>
         ))}
@@ -124,14 +123,15 @@ export function WerewolfActionPanel({
   }
 
   if (room.phase === 'day') {
+    const voterCount = room.players.filter(player => player.alive && !room.werewolf.revealedIdiots?.[player.id]).length
+    const speakerCount = Object.keys(room.werewolf.daySpeakers ?? {}).length
     return (
       <Panel config={config}>
         <h2 className="text-xl font-black">{t('werewolf.dayDiscussion')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">{room.werewolf.lastNight || t('werewolf.dayHint')}</p>
-        <button className={socialButton(config, true)} disabled={!isHost} type="button" onClick={() => void actions.advanceDay().then(() => setMessage(t('werewolf.voteStarted')))}>
-          <Vote className="size-4" />
-          {t('werewolf.startVote')}
-        </button>
+        <div className="rounded-lg border border-white/12 bg-white/8 p-3 text-sm font-black text-[#fff8e8]/82">
+          {t('werewolf.autoVoteHint', { count: speakerCount, total: voterCount })}
+        </div>
       </Panel>
     )
   }
@@ -152,6 +152,11 @@ export function WerewolfActionPanel({
             icon={<Vote className="size-4" />}
             selected={activeWerewolfVoteTarget === player.id}
             onClick={() => {
+              if (activeWerewolfVoteTarget === player.id) {
+                setSelectedWerewolfVote('')
+                void actions.werewolfVote('', false)
+                return
+              }
               setSelectedWerewolfVote(player.id)
               void actions.werewolfVote(player.id, false)
             }}
@@ -161,8 +166,8 @@ export function WerewolfActionPanel({
         ))}
         <ConfirmChoiceButton
           config={config}
-          disabled={!activeWerewolfVoteTarget || hasVoted}
-          label={hasVoted ? t('werewolf.voted') : t('social.confirmVote')}
+          disabled={!activeWerewolfVoteTarget}
+          label={t('social.confirmVote')}
           selectedLabel={selectedPlayer ? <PlayerRefLabel player={selectedPlayer} room={room} /> : undefined}
           onConfirm={() => void actions.werewolfVote(activeWerewolfVoteTarget, true).then(() => setMessage(t('werewolf.voted')))}
         />
@@ -171,4 +176,39 @@ export function WerewolfActionPanel({
   }
 
   return <Panel config={config}>{t('social.waiting')}</Panel>
+}
+
+function werewolfNightTargets(room: SocialRoom, you: SocialPlayer) {
+  return room.players.filter((player) => {
+    if (!player.alive) {
+      return false
+    }
+    if (you.role === 'seer') {
+      return player.id !== you.id
+    }
+    return true
+  })
+}
+
+function WerewolfNightRelationBadge({ player, you }: { player: SocialPlayer, you: SocialPlayer }) {
+  if (you.role !== 'werewolf') {
+    return (
+      <span className="inline-flex min-h-6 shrink-0 items-center rounded-full bg-white/12 px-2 text-xs font-black leading-none text-[#fff8e8]/76">
+        目标
+      </span>
+    )
+  }
+  const relation = player.role === 'werewolf' ? 'friend' : 'enemy'
+  return (
+    <span
+      className={cn(
+        'inline-flex min-h-6 shrink-0 items-center rounded-full px-2 text-xs font-black leading-none ring-1',
+        relation === 'friend'
+          ? 'bg-[#123729] text-[#9fffd0] ring-[#36d399]/40'
+          : 'bg-[#4a1424] text-[#ffd6df] ring-[#ff7a9a]/45',
+      )}
+    >
+      {relation === 'friend' ? '友' : '敌'}
+    </span>
+  )
 }

@@ -47,16 +47,17 @@ export function SocialShell({
     <main className={cn('relative text-[#fff8e8] transition-colors duration-700 ease-in-out', fixedViewport ? 'h-svh overflow-hidden' : 'min-h-svh overflow-y-auto', shellTheme.bg)}>
       <div className={cn('pointer-events-none absolute inset-0 transition-[background,opacity] duration-700 ease-in-out', shellTheme.overlay)} />
       <div className={cn('relative mx-auto grid w-[min(1240px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)] gap-3 py-3', fixedViewport ? 'h-svh min-h-0' : 'min-h-svh')}>
-        <header className="flex items-end justify-between gap-4">
+        <header className="flex items-end justify-between gap-3">
           <div>
             <p className="mb-1 text-xs font-black tracking-normal text-[#fff8e8]/72">{t(GAME_COPY[game].subtitleKey)}</p>
-            <h1 className="text-[clamp(40px,8vw,84px)] font-black leading-[0.82] tracking-normal [text-shadow:0_8px_0_rgba(0,0,0,0.34)]">
+            <h1 className="text-[clamp(30px,8vw,84px)] font-black leading-[0.82] tracking-normal [text-shadow:0_8px_0_rgba(0,0,0,0.34)]">
               {t(GAME_COPY[game].titleKey)}
             </h1>
           </div>
-          <Link className={cn('inline-grid min-h-10 place-items-center rounded-full border px-4 text-sm font-bold transition', config.button)} to="/">
+          <Link className={cn('inline-flex min-h-10 shrink-0 items-center justify-center rounded-full border px-3 text-sm font-bold transition sm:px-4', config.button)} to="/">
             <ArrowLeft className="mr-2 inline size-4" />
-            {t('common.backToLobby')}
+            <span className="hidden sm:inline">{t('common.backToLobby')}</span>
+            <span className="sm:hidden">{t('catalog.back')}</span>
           </Link>
         </header>
         {children}
@@ -97,9 +98,9 @@ export function Panel({ children, config }: { children: ReactNode, config: typeo
   return <aside className={cn('grid content-start gap-3 rounded-lg border p-4', config.panel)}>{children}</aside>
 }
 
-export function StatusPill({ children }: { children: ReactNode }) {
+export function StatusPill({ children, className }: { children: ReactNode, className?: string }) {
   return (
-    <span className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-white/16 bg-white/10 px-3 text-xs font-black text-[#fff8e8]/86 sm:text-sm">
+    <span className={cn('inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-white/16 bg-white/10 px-3 text-xs font-black text-[#fff8e8]/86 sm:text-sm', className)}>
       {children}
     </span>
   )

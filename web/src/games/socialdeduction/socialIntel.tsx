@@ -6,14 +6,26 @@ import { PlayerRefLabel } from './socialPlayers'
 import { alignmentClass } from './socialStyle'
 import { RoleBadge } from './socialUi'
 
-export function SelfIntel({ config, game, room, you }: { config: typeof GAME_COPY[SocialGameSlug], game: SocialGameSlug, room: SocialRoom, you?: SocialPlayer }) {
+export function SelfIntel({
+  className,
+  config,
+  game,
+  room,
+  you,
+}: {
+  className?: string
+  config: typeof GAME_COPY[SocialGameSlug]
+  game: SocialGameSlug
+  room: SocialRoom
+  you?: SocialPlayer
+}) {
   const { t } = useI18n()
   const visiblePlayers = room.players.filter(player => player.visibleToYou && player.id !== you?.id && player.role)
   const seerChecks = Object.entries(room.werewolf.seerChecks ?? {})
   const yourWord = undercoverWord(room, you)
   const shouldCenterIntel = game === 'undercover'
   return (
-    <section className={cn('rounded-lg border p-4', config.panel, shouldCenterIntel && 'text-center')}>
+    <section className={cn('rounded-lg border p-4', config.panel, shouldCenterIntel && 'text-center', className)}>
       <h2 className={cn('text-xl font-black', config.accent)}>{t('social.yourIntel')}</h2>
       <div className={cn('mt-3 flex flex-wrap gap-2', shouldCenterIntel && 'justify-center')}>
         {you?.role ? <RoleBadge dead={you.alive === false} role={you.role} size="large" /> : <span className="inline-flex min-h-8 items-center rounded-full bg-white/12 px-3 text-sm font-black leading-none">{t('social.hiddenRole')}</span>}

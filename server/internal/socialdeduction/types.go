@@ -97,8 +97,10 @@ type PublicPlayer struct {
 }
 
 type LogEntry struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	ID         string `json:"id"`
+	Text       string `json:"text"`
+	PlayerID   string `json:"playerId,omitempty"`
+	PlayerName string `json:"playerName,omitempty"`
 }
 
 type SpeechEntry struct {
@@ -125,6 +127,7 @@ type WerewolfState struct {
 	NightActions      map[string]string             `json:"-"`
 	SeerChecks        map[string]Alignment          `json:"-"`
 	Votes             map[string]WerewolfVoteIntent `json:"votes"`
+	DaySpeakers       map[string]bool               `json:"-"`
 	LastNight         string                        `json:"lastNight,omitempty"`
 	WitchAntidoteUsed bool                          `json:"-"`
 	WitchPoisonUsed   bool                          `json:"-"`
@@ -242,24 +245,26 @@ type Room struct {
 }
 
 type PublicRoom struct {
-	ID            string         `json:"id"`
-	Game          GameKind       `json:"game"`
-	HostUserID    string         `json:"-"`
-	HostPlayerID  string         `json:"hostPlayerId,omitempty"`
-	Phase         Phase          `json:"phase"`
-	Players       []PublicPlayer `json:"players"`
-	YouPlayerID   string         `json:"youPlayerId,omitempty"`
-	MinPlayers    int            `json:"minPlayers"`
-	MaxPlayers    int            `json:"maxPlayers"`
-	Werewolf      WerewolfView   `json:"werewolf,omitempty"`
-	Avalon        AvalonView     `json:"avalon,omitempty"`
-	Undercover    UndercoverView `json:"undercover,omitempty"`
-	Winner        Alignment      `json:"winner,omitempty"`
-	WinnerMessage string         `json:"winnerMessage,omitempty"`
-	Log           []LogEntry     `json:"log"`
-	Speeches      []SpeechEntry  `json:"speeches"`
-	ActionSeq     int            `json:"actionSeq"`
-	RecentActions []PublicAction `json:"recentActions"`
+	ID               string         `json:"id"`
+	Game             GameKind       `json:"game"`
+	HostUserID       string         `json:"-"`
+	HostPlayerID     string         `json:"hostPlayerId,omitempty"`
+	Phase            Phase          `json:"phase"`
+	Players          []PublicPlayer `json:"players"`
+	YouPlayerID      string         `json:"youPlayerId,omitempty"`
+	MinPlayers       int            `json:"minPlayers"`
+	MaxPlayers       int            `json:"maxPlayers"`
+	GodViewAvailable bool           `json:"godViewAvailable,omitempty"`
+	GodViewEnabled   bool           `json:"godViewEnabled,omitempty"`
+	Werewolf         WerewolfView   `json:"werewolf,omitempty"`
+	Avalon           AvalonView     `json:"avalon,omitempty"`
+	Undercover       UndercoverView `json:"undercover,omitempty"`
+	Winner           Alignment      `json:"winner,omitempty"`
+	WinnerMessage    string         `json:"winnerMessage,omitempty"`
+	Log              []LogEntry     `json:"log"`
+	Speeches         []SpeechEntry  `json:"speeches"`
+	ActionSeq        int            `json:"actionSeq"`
+	RecentActions    []PublicAction `json:"recentActions"`
 }
 
 type WerewolfView struct {
@@ -268,6 +273,7 @@ type WerewolfView struct {
 	RolePresets       []WerewolfRolePreset          `json:"rolePresets,omitempty"`
 	SeerChecks        map[string]Alignment          `json:"seerChecks,omitempty"`
 	Votes             map[string]WerewolfVoteIntent `json:"votes"`
+	DaySpeakers       map[string]bool               `json:"daySpeakers,omitempty"`
 	LastNight         string                        `json:"lastNight,omitempty"`
 	WitchVictimID     string                        `json:"witchVictimId,omitempty"`
 	WitchAntidoteUsed bool                          `json:"witchAntidoteUsed,omitempty"`

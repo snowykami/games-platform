@@ -64,12 +64,15 @@ export interface SocialRoom {
   youPlayerId?: string
   minPlayers: number
   maxPlayers: number
+  godViewAvailable?: boolean
+  godViewEnabled?: boolean
   werewolf: {
     day: number
     roleConfig: WerewolfRoleConfig
     rolePresets: WerewolfRolePreset[]
     seerChecks?: Record<string, SocialAlignment>
     votes: Record<string, { targetId: string, confirmed: boolean }>
+    daySpeakers?: Record<string, boolean>
     lastNight?: string
     witchVictimId?: string
     witchAntidoteUsed?: boolean
@@ -118,7 +121,7 @@ export interface SocialRoom {
   }
   winner?: SocialAlignment
   winnerMessage?: string
-  log: Array<{ id: string, text: string }>
+  log: Array<{ id: string, playerId?: string, playerName?: string, text: string }>
   speeches: GameSpeechEntry[]
   actionSeq: number
   recentActions: Array<{
@@ -210,6 +213,8 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
   youPlayerId: z.string().optional(),
   minPlayers: z.number(),
   maxPlayers: z.number(),
+  godViewAvailable: z.boolean().optional(),
+  godViewEnabled: z.boolean().optional(),
   werewolf: z.object({
     day: z.number().default(0),
     roleConfig: werewolfRoleConfigSchema.catch(defaultWerewolfRoleConfig),
@@ -219,6 +224,7 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
       targetId: z.string(),
       confirmed: z.boolean().default(false),
     })).default({}),
+    daySpeakers: z.record(z.string(), z.boolean()).optional(),
     lastNight: z.string().optional(),
     witchVictimId: z.string().optional(),
     witchAntidoteUsed: z.boolean().optional(),
@@ -260,7 +266,12 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
   }).default({ described: {}, includeBlank: false, presetId: '', round: 0, votes: {} }),
   winner: alignmentSchema.optional(),
   winnerMessage: z.string().optional(),
-  log: z.array(z.object({ id: z.string(), text: z.string() })),
+  log: z.array(z.object({
+    id: z.string(),
+    playerId: z.string().optional(),
+    playerName: z.string().optional(),
+    text: z.string(),
+  })),
   speeches: z.array(speechSchema),
   actionSeq: z.number(),
   recentActions: z.array(z.object({
@@ -274,105 +285,114 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
 })
 
 const roomResponseSchema = z.object({ room: roomSchema })
+const currentRoomResponseSchema = z.object({ room: roomSchema.nullable() })
 
 export function parseSocialRoom(value: unknown): SocialRoom {
   return roomSchema.parse(value)
 }
 
-export async function createSocialRoom(game: SocialGameSlug) {
-  return requestRoom(game, '/rooms', { method: 'POST' })
+export interface SocialRequestOptions {
+  godView?: boolean
 }
 
-export async function joinSocialRoom(game: SocialGameSlug, roomId: string) {
-  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/join`, { method: 'POST' })
+export async function createSocialRoom(game: SocialGameSlug, options?: SocialRequestOptions) {
+  return requestRoom(game, '/rooms', { method: 'POST' }, options)
 }
 
-export async function addSocialAI(game: SocialGameSlug, roomId: string, level: string) {
+export async function joinSocialRoom(game: SocialGameSlug, roomId: string, options?: SocialRequestOptions) {
+  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/join`, { method: 'POST' }, options)
+}
+
+export async function getCurrentSocialRoom(game: SocialGameSlug, options?: SocialRequestOptions) {
+  return requestCurrentRoom(game, '/rooms/current', undefined, options)
+}
+
+export async function addSocialAI(game: SocialGameSlug, roomId: string, level: string, options?: SocialRequestOptions) {
   return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/ai`, {
     body: JSON.stringify({ level }),
     headers: { 'Content-Type': 'application/json' },
     method: 'POST',
-  })
+  }, options)
 }
 
-export async function updateSocialAI(game: SocialGameSlug, roomId: string, playerId: string, level: string) {
+export async function updateSocialAI(game: SocialGameSlug, roomId: string, playerId: string, level: string, options?: SocialRequestOptions) {
   return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/ai/${encodeURIComponent(playerId)}`, {
     body: JSON.stringify({ level }),
     headers: { 'Content-Type': 'application/json' },
     method: 'PATCH',
-  })
+  }, options)
 }
 
-export async function removeSocialPlayer(game: SocialGameSlug, roomId: string, playerId: string) {
-  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/players/${encodeURIComponent(playerId)}`, { method: 'DELETE' })
+export async function removeSocialPlayer(game: SocialGameSlug, roomId: string, playerId: string, options?: SocialRequestOptions) {
+  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/players/${encodeURIComponent(playerId)}`, { method: 'DELETE' }, options)
 }
 
-export async function saySocial(game: SocialGameSlug, roomId: string, text: string) {
+export async function saySocial(game: SocialGameSlug, roomId: string, text: string, options?: SocialRequestOptions) {
   return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/speech`, {
     body: JSON.stringify({ text }),
     headers: { 'Content-Type': 'application/json' },
     method: 'POST',
-  })
+  }, options)
 }
 
-export async function renameSocialPlayer(game: SocialGameSlug, roomId: string, name: string) {
-  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/name`, jsonPatch({ name }))
+export async function renameSocialPlayer(game: SocialGameSlug, roomId: string, name: string, options?: SocialRequestOptions) {
+  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/name`, jsonPatch({ name }), options)
 }
 
-export async function updateSocialPlayerNote(game: SocialGameSlug, roomId: string, playerId: string, note: string) {
-  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/notes/${encodeURIComponent(playerId)}`, jsonPatch({ note }))
+export async function updateSocialPlayerNote(game: SocialGameSlug, roomId: string, playerId: string, note: string, options?: SocialRequestOptions) {
+  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/notes/${encodeURIComponent(playerId)}`, jsonPatch({ note }), options)
 }
 
-export async function startSocialRoom(game: SocialGameSlug, roomId: string) {
-  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/start`, { method: 'POST' })
+export async function startSocialRoom(game: SocialGameSlug, roomId: string, options?: SocialRequestOptions) {
+  return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/start`, { method: 'POST' }, options)
 }
 
-export async function updateUndercoverConfig(roomId: string, presetId: string, includeBlank: boolean) {
-  return requestRoom('undercover', `/rooms/${encodeURIComponent(roomId)}/undercover-config`, jsonPatch({ includeBlank, presetId }))
+export async function updateUndercoverConfig(roomId: string, presetId: string, includeBlank: boolean, options?: SocialRequestOptions) {
+  return requestRoom('undercover', `/rooms/${encodeURIComponent(roomId)}/undercover-config`, jsonPatch({ includeBlank, presetId }), options)
 }
 
-export async function describeUndercover(roomId: string, text: string) {
-  return requestRoom('undercover', `/rooms/${encodeURIComponent(roomId)}/describe`, jsonPost({ text }))
+export async function describeUndercover(roomId: string, text: string, options?: SocialRequestOptions) {
+  return requestRoom('undercover', `/rooms/${encodeURIComponent(roomId)}/describe`, jsonPost({ text }), options)
 }
 
-export async function voteUndercover(roomId: string, targetId: string, confirmed: boolean) {
-  return requestRoom('undercover', `/rooms/${encodeURIComponent(roomId)}/undercover-vote`, jsonPost({ confirmed, targetId }))
+export async function voteUndercover(roomId: string, targetId: string, confirmed: boolean, options?: SocialRequestOptions) {
+  return requestRoom('undercover', `/rooms/${encodeURIComponent(roomId)}/undercover-vote`, jsonPost({ confirmed, targetId }), options)
 }
 
-export async function updateWerewolfRoles(roomId: string, config: WerewolfRoleConfig) {
-  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/werewolf-roles`, jsonPost({ config }))
+export async function updateWerewolfRoles(roomId: string, config: WerewolfRoleConfig, options?: SocialRequestOptions) {
+  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/werewolf-roles`, jsonPost({ config }), options)
 }
 
-export async function werewolfNightAction(roomId: string, actionId: string) {
-  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/night-action`, jsonPost({ actionId }))
+export async function werewolfNightAction(roomId: string, actionId: string, options?: SocialRequestOptions) {
+  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/night-action`, jsonPost({ actionId }), options)
 }
 
-export async function werewolfHunterShot(roomId: string, targetId: string) {
-  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/hunter-shot`, jsonPost({ targetId }))
+export async function werewolfHunterShot(roomId: string, targetId: string, options?: SocialRequestOptions) {
+  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/hunter-shot`, jsonPost({ targetId }), options)
 }
 
-export async function advanceWerewolfDay(roomId: string) {
-  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/advance-day`, { method: 'POST' })
+export async function advanceWerewolfDay(roomId: string, options?: SocialRequestOptions) {
+  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/advance-day`, { method: 'POST' }, options)
 }
 
-export async function werewolfVote(roomId: string, targetId: string, confirmed: boolean) {
-  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/werewolf-vote`, jsonPost({ confirmed, targetId }))
+export async function werewolfVote(roomId: string, targetId: string, confirmed: boolean, options?: SocialRequestOptions) {
+  return requestRoom('werewolf', `/rooms/${encodeURIComponent(roomId)}/werewolf-vote`, jsonPost({ confirmed, targetId }), options)
 }
 
-export async function proposeAvalonTeam(roomId: string, team: string[]) {
-  return requestRoom('avalon', `/rooms/${encodeURIComponent(roomId)}/team`, jsonPost({ team }))
+export async function proposeAvalonTeam(roomId: string, team: string[], options?: SocialRequestOptions) {
+  return requestRoom('avalon', `/rooms/${encodeURIComponent(roomId)}/team`, jsonPost({ team }), options)
 }
 
-export async function voteAvalonTeam(roomId: string, approve: boolean) {
-  return requestRoom('avalon', `/rooms/${encodeURIComponent(roomId)}/team-vote`, jsonPost({ approve }))
+export async function voteAvalonTeam(roomId: string, approve: boolean, options?: SocialRequestOptions) {
+  return requestRoom('avalon', `/rooms/${encodeURIComponent(roomId)}/team-vote`, jsonPost({ approve }), options)
 }
 
-export async function playAvalonQuest(roomId: string, card: 'success' | 'fail') {
-  return requestRoom('avalon', `/rooms/${encodeURIComponent(roomId)}/quest`, jsonPost({ card }))
+export async function playAvalonQuest(roomId: string, card: 'success' | 'fail', options?: SocialRequestOptions) {
+  return requestRoom('avalon', `/rooms/${encodeURIComponent(roomId)}/quest`, jsonPost({ card }), options)
 }
 
-export async function assassinateAvalon(roomId: string, targetId: string) {
-  return requestRoom('avalon', `/rooms/${encodeURIComponent(roomId)}/assassinate`, jsonPost({ targetId }))
+export async function assassinateAvalon(roomId: string, targetId: string, options?: SocialRequestOptions) {
+  return requestRoom('avalon', `/rooms/${encodeURIComponent(roomId)}/assassinate`, jsonPost({ targetId }), options)
 }
 
 function jsonPost(body: unknown): RequestInit {
@@ -391,11 +411,28 @@ function jsonPatch(body: unknown): RequestInit {
   }
 }
 
-async function requestRoom(game: SocialGameSlug, path: string, init?: RequestInit) {
-  const response = await fetchWithAuthRedirect(`/api/${game}${path}`, init)
+async function requestRoom(game: SocialGameSlug, path: string, init?: RequestInit, options?: SocialRequestOptions) {
+  const url = new URL(`/api/${game}${path}`, window.location.origin)
+  if (options?.godView) {
+    url.searchParams.set('godView', '1')
+  }
+  const response = await fetchWithAuthRedirect(`${url.pathname}${url.search}`, init)
   if (!response.ok) {
     const error = await response.json().catch(() => undefined)
     throw new Error(error?.error ?? `Request failed: ${response.status}`)
   }
   return roomResponseSchema.parse(await response.json()).room
+}
+
+async function requestCurrentRoom(game: SocialGameSlug, path: string, init?: RequestInit, options?: SocialRequestOptions) {
+  const url = new URL(`/api/${game}${path}`, window.location.origin)
+  if (options?.godView) {
+    url.searchParams.set('godView', '1')
+  }
+  const response = await fetchWithAuthRedirect(`${url.pathname}${url.search}`, init)
+  if (!response.ok) {
+    const error = await response.json().catch(() => undefined)
+    throw new Error(error?.error ?? `Request failed: ${response.status}`)
+  }
+  return currentRoomResponseSchema.parse(await response.json()).room
 }

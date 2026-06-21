@@ -24,9 +24,11 @@ const (
 )
 
 type Subscriber struct {
-	roomID string
-	userID string
-	conn   *websocket.Conn
+	roomID           string
+	userID           string
+	godViewAvailable bool
+	godView          bool
+	conn             *websocket.Conn
 }
 
 type Hub struct {
@@ -62,6 +64,9 @@ func NewHub(manager *Manager) *Hub {
 				room, changed, err = manager.RunAIOptionalSpeech(roomID)
 				return err
 			})
+			if changed && socialPhaseHasRequiredAIAction(room) {
+				go hub.ScheduleAIAction(room.ID)
+			}
 			return gameactor.AIOptionalSpeechResult{
 				RoomID:   room.ID,
 				Changed:  changed,
@@ -73,8 +78,8 @@ func NewHub(manager *Manager) *Hub {
 	return hub
 }
 
-func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, conn *websocket.Conn) {
-	sub := &Subscriber{roomID: roomID, userID: userID, conn: conn}
+func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, godViewAvailable bool, godView bool, conn *websocket.Conn) {
+	sub := &Subscriber{roomID: roomID, userID: userID, godViewAvailable: godViewAvailable, godView: godView, conn: conn}
 
 	h.mu.Lock()
 	h.subscribers[sub] = struct{}{}
@@ -124,7 +129,10 @@ func (h *Hub) Broadcast(roomID string) {
 	h.mu.Unlock()
 
 	for _, sub := range subscribers {
-		room, err := h.manager.Public(roomID, sub.userID)
+		room, err := h.manager.PublicWithOptions(roomID, sub.userID, PublicRoomOptions{
+			GodViewAvailable: sub.godViewAvailable,
+			GodView:          sub.godView,
+		})
 		if err != nil {
 			continue
 		}
@@ -233,7 +241,10 @@ func (h *Hub) ScheduleAIOptionalSpeech(roomID string) {
 
 func shouldContinueSocialAIOptionalSpeech(room PublicRoom) bool {
 	if len(room.Speeches) == 0 {
-		return false
+		return werewolfDayHasPendingAISpeaker(room)
+	}
+	if werewolfDayHasPendingAISpeaker(room) {
+		return true
 	}
 	aiPlayers := map[string]struct{}{}
 	for _, player := range room.Players {
@@ -249,6 +260,27 @@ func shouldContinueSocialAIOptionalSpeech(room PublicRoom) bool {
 		streak++
 	}
 	return streak > 0 && streak < maxSocialAIOptionalSpeechStreak
+}
+
+func socialPhaseHasRequiredAIAction(room PublicRoom) bool {
+	switch room.Phase {
+	case PhaseWerewolfNight, PhaseWerewolfVote, PhaseWerewolfHunter, PhaseAvalonTeam, PhaseAvalonVote, PhaseAvalonQuest, PhaseAssassination, PhaseUndercoverDescribe, PhaseUndercoverVote:
+		return true
+	default:
+		return false
+	}
+}
+
+func werewolfDayHasPendingAISpeaker(room PublicRoom) bool {
+	if room.Game != GameWerewolf || room.Phase != PhaseWerewolfDay {
+		return false
+	}
+	for _, player := range room.Players {
+		if player.IsAI && player.Alive && !room.Werewolf.RevealedIdiots[player.ID] && !room.Werewolf.DaySpeakers[player.ID] {
+			return true
+		}
+	}
+	return false
 }
 
 func writeWSError(ctx context.Context, conn *websocket.Conn, message string) {

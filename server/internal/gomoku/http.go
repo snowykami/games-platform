@@ -44,6 +44,7 @@ func NewHandler(manager *Manager) *Handler {
 func (h *Handler) Routes() http.Handler {
 	router := chi.NewRouter()
 	router.Post("/rooms", h.createRoom)
+	router.Get("/rooms/current", h.currentRoom)
 	router.Get("/rooms/{roomID}", h.getRoom)
 	router.Post("/rooms/{roomID}/join", h.joinRoom)
 	router.Post("/rooms/{roomID}/ai", h.addAI)
@@ -89,6 +90,16 @@ func (h *Handler) WebSocket(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createRoom(w http.ResponseWriter, r *http.Request) {
 	user := mustUser(r)
 	room := h.manager.CreateRoom(toUserView(user))
+	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
+}
+
+func (h *Handler) currentRoom(w http.ResponseWriter, r *http.Request) {
+	user := mustUser(r)
+	room, ok := h.manager.CurrentRoomForUser(user.ID)
+	if !ok {
+		httpx.WriteJSON(w, http.StatusOK, map[string]*PublicRoom{"room": nil})
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
 }
 

@@ -2,16 +2,18 @@ import type { FormEvent, ReactNode } from 'react'
 import type { MahjongClaimOption, MahjongOnlinePlayer, MahjongOnlineRoom, MahjongOnlineTile, MahjongOnlineWinResult, MahjongSpeechEntry, MahjongWind } from './online'
 import type { AILevel } from '@/games/ai'
 import { ArrowLeft, Bot, CircleDot, Copy, DoorOpen, Hand, Plus, RefreshCw, ScrollText, Sparkles, UserMinus } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { getAICapabilities, getAILevelLabel } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { AILevelPicker } from '@/games/AILevelPicker'
+import { ContinueRoomEntry } from '@/games/ContinueRoomEntry'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
+import { useCurrentRoom } from '@/games/useCurrentRoom'
 import { cn } from '@/shared/lib/utils'
-import { createMahjongRoom } from './online'
+import { createMahjongRoom, getCurrentMahjongRoom } from './online'
 import { useMahjongRoom } from './useMahjongRoom'
 
 interface MahjongRoomGateProps {
@@ -28,6 +30,8 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
   const [llmEnabled, setLLMEnabled] = useState(false)
   const [llmModel, setLLMModel] = useState('')
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
+  const loadCurrentRoom = useCallback(() => getCurrentMahjongRoom(), [])
+  const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
 
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
@@ -75,6 +79,13 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
     setMessage('链接已复制。')
   }
 
+  function enterCurrentRoom() {
+    if (!currentRoom) {
+      return
+    }
+    navigate(`/games/mahjong?room=${encodeURIComponent(currentRoom.id)}`)
+  }
+
   async function addAIPlayer() {
     if (pendingAI || !room) {
       return
@@ -116,6 +127,14 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
               <Plus className="size-4" />
               创建并进入
             </button>
+            {currentRoom && (
+              <ContinueRoomEntry
+                buttonClassName="mahjong-action w-full"
+                className="mt-4 border-[#d8b66a]/25 bg-[#10251f]/62 text-[#fff8e8]"
+                room={currentRoom}
+                onEnter={enterCurrentRoom}
+              />
+            )}
             <label className="mt-4 grid gap-2 text-sm font-black" htmlFor="mahjong-room-code">
               房间号
               <input

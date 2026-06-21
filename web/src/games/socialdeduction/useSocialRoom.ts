@@ -25,7 +25,7 @@ import {
   werewolfVote,
 } from './online'
 
-export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined) {
+export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined, godView = false) {
   const { t } = useI18n()
   const [room, setRoom] = useState<SocialRoom>()
   const [error, setError] = useState<string>()
@@ -40,7 +40,7 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined) 
     setIsLoading(true)
     setError(undefined)
     try {
-      setRoom(await joinSocialRoom(game, roomId))
+      setRoom(await joinSocialRoom(game, roomId, { godView }))
     }
     catch (err) {
       setError(err instanceof Error ? err.message : t('room.loadingFailed'))
@@ -48,7 +48,7 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined) 
     finally {
       setIsLoading(false)
     }
-  }, [game, roomId, t])
+  }, [game, godView, roomId, t])
 
   useEffect(() => {
     void refresh()
@@ -59,7 +59,7 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined) 
       return undefined
     }
 
-    const socket = new WebSocket(createWebSocketURL(game, roomId))
+    const socket = new WebSocket(createWebSocketURL(game, roomId, godView))
     socketRef.current = socket
     function handleMessage(event: MessageEvent) {
       const data = JSON.parse(String(event.data))
@@ -87,7 +87,7 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined) 
       socket.removeEventListener('close', handleClose)
       socket.close()
     }
-  }, [game, roomId])
+  }, [game, godView, roomId])
 
   const run = useCallback(async (action: () => Promise<SocialRoom>) => {
     try {
@@ -101,32 +101,37 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined) 
   }, [t])
 
   const actions = useMemo(() => ({
-    addAI: (level: string) => roomId ? run(() => addSocialAI(game, roomId, level)) : Promise.resolve(),
-    advanceDay: () => roomId ? run(() => advanceWerewolfDay(roomId)) : Promise.resolve(),
-    assassinate: (targetId: string) => roomId ? run(() => assassinateAvalon(roomId, targetId)) : Promise.resolve(),
-    hunterShot: (targetId: string) => roomId ? run(() => werewolfHunterShot(roomId, targetId)) : Promise.resolve(),
-    nightAction: (actionId: string) => roomId ? run(() => werewolfNightAction(roomId, actionId)) : Promise.resolve(),
-    playQuest: (card: 'success' | 'fail') => roomId ? run(() => playAvalonQuest(roomId, card)) : Promise.resolve(),
-    proposeTeam: (team: string[]) => roomId ? run(() => proposeAvalonTeam(roomId, team)) : Promise.resolve(),
+    addAI: (level: string) => roomId ? run(() => addSocialAI(game, roomId, level, { godView })) : Promise.resolve(),
+    advanceDay: () => roomId ? run(() => advanceWerewolfDay(roomId, { godView })) : Promise.resolve(),
+    assassinate: (targetId: string) => roomId ? run(() => assassinateAvalon(roomId, targetId, { godView })) : Promise.resolve(),
+    hunterShot: (targetId: string) => roomId ? run(() => werewolfHunterShot(roomId, targetId, { godView })) : Promise.resolve(),
+    nightAction: (actionId: string) => roomId ? run(() => werewolfNightAction(roomId, actionId, { godView })) : Promise.resolve(),
+    playQuest: (card: 'success' | 'fail') => roomId ? run(() => playAvalonQuest(roomId, card, { godView })) : Promise.resolve(),
+    proposeTeam: (team: string[]) => roomId ? run(() => proposeAvalonTeam(roomId, team, { godView })) : Promise.resolve(),
     refresh,
-    removePlayer: (playerId: string) => roomId ? run(() => removeSocialPlayer(game, roomId, playerId)) : Promise.resolve(),
-    renamePlayer: (name: string) => roomId ? run(() => renameSocialPlayer(game, roomId, name)) : Promise.resolve(),
-    say: (text: string) => roomId ? run(() => saySocial(game, roomId, text)) : Promise.resolve(),
-    start: () => roomId ? run(() => startSocialRoom(game, roomId)) : Promise.resolve(),
-    teamVote: (approve: boolean) => roomId ? run(() => voteAvalonTeam(roomId, approve)) : Promise.resolve(),
-    undercoverConfig: (presetId: string, includeBlank: boolean) => roomId ? run(() => updateUndercoverConfig(roomId, presetId, includeBlank)) : Promise.resolve(),
-    undercoverDescribe: (text: string) => roomId ? run(() => describeUndercover(roomId, text)) : Promise.resolve(),
-    undercoverVote: (targetId: string, confirmed: boolean) => roomId ? run(() => voteUndercover(roomId, targetId, confirmed)) : Promise.resolve(),
-    updateAI: (playerId: string, level: string) => roomId ? run(() => updateSocialAI(game, roomId, playerId, level)) : Promise.resolve(),
-    updatePlayerNote: (playerId: string, note: string) => roomId ? run(() => updateSocialPlayerNote(game, roomId, playerId, note)) : Promise.resolve(),
-    updateWerewolfRoles: (config: WerewolfRoleConfig) => roomId ? run(() => updateWerewolfRoles(roomId, config)) : Promise.resolve(),
-    werewolfVote: (targetId: string, confirmed: boolean) => roomId ? run(() => werewolfVote(roomId, targetId, confirmed)) : Promise.resolve(),
-  }), [game, refresh, roomId, run])
+    removePlayer: (playerId: string) => roomId ? run(() => removeSocialPlayer(game, roomId, playerId, { godView })) : Promise.resolve(),
+    renamePlayer: (name: string) => roomId ? run(() => renameSocialPlayer(game, roomId, name, { godView })) : Promise.resolve(),
+    say: (text: string) => roomId ? run(() => saySocial(game, roomId, text, { godView })) : Promise.resolve(),
+    start: () => roomId ? run(() => startSocialRoom(game, roomId, { godView })) : Promise.resolve(),
+    teamVote: (approve: boolean) => roomId ? run(() => voteAvalonTeam(roomId, approve, { godView })) : Promise.resolve(),
+    undercoverConfig: (presetId: string, includeBlank: boolean) => roomId ? run(() => updateUndercoverConfig(roomId, presetId, includeBlank, { godView })) : Promise.resolve(),
+    undercoverDescribe: (text: string) => roomId ? run(() => describeUndercover(roomId, text, { godView })) : Promise.resolve(),
+    undercoverVote: (targetId: string, confirmed: boolean) => roomId ? run(() => voteUndercover(roomId, targetId, confirmed, { godView })) : Promise.resolve(),
+    updateAI: (playerId: string, level: string) => roomId ? run(() => updateSocialAI(game, roomId, playerId, level, { godView })) : Promise.resolve(),
+    updatePlayerNote: (playerId: string, note: string) => roomId ? run(() => updateSocialPlayerNote(game, roomId, playerId, note, { godView })) : Promise.resolve(),
+    updateWerewolfRoles: (config: WerewolfRoleConfig) => roomId ? run(() => updateWerewolfRoles(roomId, config, { godView })) : Promise.resolve(),
+    werewolfVote: (targetId: string, confirmed: boolean) => roomId ? run(() => werewolfVote(roomId, targetId, confirmed, { godView })) : Promise.resolve(),
+  }), [game, godView, refresh, roomId, run])
 
   return { actions, error, isLoading, room, setRoom }
 }
 
-function createWebSocketURL(game: SocialGameSlug, roomId: string) {
+function createWebSocketURL(game: SocialGameSlug, roomId: string, godView: boolean) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/ws/${game}?room=${encodeURIComponent(roomId)}`
+  const url = new URL(`${protocol}//${window.location.host}/ws/${game}`)
+  url.searchParams.set('room', roomId)
+  if (godView) {
+    url.searchParams.set('godView', '1')
+  }
+  return url.toString()
 }

@@ -1,18 +1,20 @@
 import type { FormEvent, ReactNode } from 'react'
 import type { AILevel } from '@/games/ai'
 import { ArrowLeft, Bot, Copy, DoorOpen, Plus, Sparkles, UserMinus } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { getAICapabilities, getAILevelLabel } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { AILevelPicker } from '@/games/AILevelPicker'
+import { ContinueRoomEntry } from '@/games/ContinueRoomEntry'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
+import { useCurrentRoom } from '@/games/useCurrentRoom'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
-import { createUnoRoom } from './online'
+import { createUnoRoom, getCurrentUnoRoom } from './online'
 import { UnoPage } from './UnoPage'
 import { UnoVariantInfoButton } from './UnoVariantInfo'
 import { useUnoRoom } from './useUnoRoom'
@@ -51,6 +53,8 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   const [variantKey, setVariantKey] = useState('classic')
   const [themeKey, setThemeKey] = useState('classic')
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
+  const loadCurrentRoom = useCallback(() => getCurrentUnoRoom(), [])
+  const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
 
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
@@ -99,6 +103,13 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
     setMessage(t('room.copied'))
   }
 
+  function enterCurrentRoom() {
+    if (!currentRoom) {
+      return
+    }
+    navigate(`/games/uno?room=${encodeURIComponent(currentRoom.id)}`)
+  }
+
   async function addAIPlayer() {
     if (pendingAI || !room) {
       return
@@ -142,6 +153,14 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                 <Plus className="size-4" />
                 {t('common.createAndEnter')}
               </button>
+              {currentRoom && (
+                <ContinueRoomEntry
+                  buttonClassName="uno-button w-full"
+                  className="border-white/24 bg-[#141310]/38 text-[#fff8e8]"
+                  room={currentRoom}
+                  onEnter={enterCurrentRoom}
+                />
+              )}
             </div>
 
             <div className="grid min-h-0 content-start gap-4 overflow-y-auto pr-1">

@@ -133,12 +133,14 @@ func (m *Manager) runAIAction(room *Room, player *Player) bool {
 		if vote, ok := room.Undercover.Votes[player.ID]; ok && vote.Confirmed {
 			return false
 		}
-		target := m.chooseUndercoverVote(room, player)
+		target, speech := m.chooseUndercoverVote(room, player)
 		if target == nil {
 			return false
 		}
 		room.Undercover.Votes[player.ID] = UndercoverVoteIntent{TargetID: target.ID, Confirmed: true}
-		recordSpeech(room, player, "我先票这个位置。")
+		if speech != "" {
+			recordSpeech(room, player, speech)
+		}
 		recordAction(room, PublicAction{Type: "undercover_vote", ActorID: player.ID, ActorName: player.Name, TargetID: target.ID, Message: fmt.Sprintf("%s 已确认投票。", player.Name)})
 		resolveUndercoverVote(room)
 		return true

@@ -141,6 +141,7 @@ const roomSchema: z.ZodType<XiangqiOnlineRoom> = z.object({
   })),
 })
 const roomResponseSchema = z.object({ room: roomSchema })
+const currentRoomResponseSchema = z.object({ room: roomSchema.nullable() })
 
 export async function createXiangqiRoom() {
   return requestRoom('/api/xiangqi/rooms', { method: 'POST' })
@@ -148,6 +149,10 @@ export async function createXiangqiRoom() {
 
 export async function joinXiangqiRoom(roomId: string) {
   return requestRoom(`/api/xiangqi/rooms/${encodeURIComponent(roomId)}/join`, { method: 'POST' })
+}
+
+export async function getCurrentXiangqiRoom() {
+  return requestCurrentRoom('/api/xiangqi/rooms/current')
 }
 
 export async function addXiangqiAI(roomId: string, level: string) {
@@ -206,4 +211,14 @@ async function requestRoom(input: RequestInfo | URL, init?: RequestInit) {
   }
 
   return roomResponseSchema.parse(await response.json()).room
+}
+
+async function requestCurrentRoom(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetchWithAuthRedirect(input, init)
+  if (!response.ok) {
+    const error = await response.json().catch(() => undefined)
+    throw new Error(error?.error ?? `Request failed: ${response.status}`)
+  }
+
+  return currentRoomResponseSchema.parse(await response.json()).room
 }

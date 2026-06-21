@@ -222,10 +222,15 @@ func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, e
 	if player == nil {
 		return PublicRoom{}, errors.New("not_in_room")
 	}
+	previousPhase := room.Phase
 	if !recordSpeech(room, player, text) {
 		return PublicRoom{}, errors.New("invalid_speech")
 	}
-	touchSpeech(room)
+	if room.Phase != previousPhase {
+		touchRuleAndSpeech(room)
+	} else {
+		touchSpeech(room)
+	}
 	return m.publicRoom(room, actorID), nil
 }
 

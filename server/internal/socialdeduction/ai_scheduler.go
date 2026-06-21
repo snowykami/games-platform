@@ -19,22 +19,28 @@ func (m *Manager) RunAIOptionalSpeech(roomID string) (PublicRoom, bool, error) {
 	if err != nil {
 		return PublicRoom{}, false, err
 	}
-	if room.Phase == PhaseLobby || room.Phase == PhaseFinished || len(room.Speeches) == 0 {
+	if room.Phase == PhaseLobby || room.Phase == PhaseFinished {
 		return m.publicRoom(room, ""), false, nil
 	}
 	if hasPendingAIRequiredAction(room) {
 		return m.publicRoom(room, ""), false, nil
 	}
-	lastSpeech := room.Speeches[len(room.Speeches)-1]
-	if lastSpeech.ID == room.LastAISpeechSourceID {
+	sourceID := fmt.Sprintf("%s:%s:%d", room.Game, room.Phase, room.ActionSeq)
+	lastSpeakerID := ""
+	if len(room.Speeches) > 0 {
+		lastSpeech := room.Speeches[len(room.Speeches)-1]
+		sourceID = lastSpeech.ID
+		lastSpeakerID = lastSpeech.PlayerID
+	}
+	if sourceID == room.LastAISpeechSourceID {
 		return m.publicRoom(room, ""), false, nil
 	}
-	player := nextAISpeechPlayer(room, lastSpeech.PlayerID)
+	player := nextAISpeechPlayer(room, lastSpeakerID)
 	if player == nil {
-		room.LastAISpeechSourceID = lastSpeech.ID
+		room.LastAISpeechSourceID = sourceID
 		return m.publicRoom(room, ""), false, nil
 	}
-	room.LastAISpeechSourceID = lastSpeech.ID
+	room.LastAISpeechSourceID = sourceID
 	state := m.aiSpeechState(room, player)
 	decision, err := m.socialSpeechDecision(room, player, state, speechActions())
 	if err != nil {
@@ -47,10 +53,15 @@ func (m *Manager) RunAIOptionalSpeech(roomID string) (PublicRoom, bool, error) {
 	if player == nil || !player.IsAI || !player.Alive {
 		return m.publicRoom(room, ""), false, nil
 	}
+	previousPhase := room.Phase
 	if !recordSpeech(room, player, decision.Speech) {
 		return m.publicRoom(room, ""), false, nil
 	}
-	touchSpeech(room)
+	if room.Phase != previousPhase {
+		touchRuleAndSpeech(room)
+	} else {
+		touchSpeech(room)
+	}
 	return m.publicRoom(room, ""), true, nil
 }
 

@@ -13,7 +13,6 @@ export function ActionPanel({
   actions,
   config,
   game,
-  isHost,
   room,
   setMessage,
   you,
@@ -21,7 +20,6 @@ export function ActionPanel({
   actions: ReturnType<typeof useSocialRoom>['actions']
   config: typeof GAME_COPY[SocialGameSlug]
   game: SocialGameSlug
-  isHost: boolean
   room: SocialRoom
   setMessage: (message: string) => void
   you?: SocialPlayer
@@ -48,7 +46,7 @@ export function ActionPanel({
   }
 
   if (game === 'werewolf') {
-    return <WerewolfActionPanel actions={actions} config={config} isHost={isHost} room={room} setMessage={setMessage} you={you} />
+    return <WerewolfActionPanel actions={actions} config={config} room={room} setMessage={setMessage} you={you} />
   }
 
   if (game === 'undercover') {

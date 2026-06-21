@@ -1,19 +1,21 @@
 import type { FormEvent, ReactNode } from 'react'
 import type { AILevel } from '@/games/ai'
 import { ArrowLeft, Bot, Copy, DoorOpen, Plus, Sparkles, UserMinus } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { getAICapabilities, getAILevelLabel } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { AILevelPicker } from '@/games/AILevelPicker'
+import { ContinueRoomEntry } from '@/games/ContinueRoomEntry'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
+import { useCurrentRoom } from '@/games/useCurrentRoom'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { GomokuPage } from './GomokuPage'
-import { createGomokuRoom } from './online'
+import { createGomokuRoom, getCurrentGomokuRoom } from './online'
 import { useGomokuRoom } from './useGomokuRoom'
 
 interface GomokuRoomGateProps {
@@ -31,6 +33,8 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
   const [llmEnabled, setLLMEnabled] = useState(false)
   const [llmModel, setLLMModel] = useState('')
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
+  const loadCurrentRoom = useCallback(() => getCurrentGomokuRoom(), [])
+  const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
 
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
@@ -78,6 +82,13 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
     setMessage(t('room.copied'))
   }
 
+  function enterCurrentRoom() {
+    if (!currentRoom) {
+      return
+    }
+    navigate(`/games/gomoku?room=${encodeURIComponent(currentRoom.id)}`)
+  }
+
   async function addAIPlayer() {
     if (pendingAI || !room) {
       return
@@ -122,6 +133,14 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
               <Plus className="size-4" />
               {t('common.createAndEnter')}
             </button>
+            {currentRoom && (
+              <ContinueRoomEntry
+                buttonClassName="gomoku-button w-full"
+                className="border-white/22 bg-[#0b1110]/52 text-[#f4f0e4]"
+                room={currentRoom}
+                onEnter={enterCurrentRoom}
+              />
+            )}
             <label className="grid gap-2 text-sm font-black" htmlFor="gomoku-room-code">
               {t('common.roomCode')}
               <input

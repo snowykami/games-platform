@@ -3,6 +3,7 @@ package mahjong
 import (
 	"errors"
 	"strings"
+	"time"
 )
 
 func (m *Manager) Public(roomID string, viewerID string) (PublicRoom, error) {
@@ -14,6 +15,35 @@ func (m *Manager) Public(roomID string, viewerID string) (PublicRoom, error) {
 		return PublicRoom{}, err
 	}
 	return publicRoom(room, viewerID), nil
+}
+
+func (m *Manager) CurrentRoomForUser(userID string) (PublicRoom, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var current PublicRoom
+	var currentUpdatedAt time.Time
+	var found bool
+	for _, room := range m.rooms {
+		if room.Phase == PhaseFinished || !roomHasHumanUser(room, userID) {
+			continue
+		}
+		if !found || room.UpdatedAt.After(currentUpdatedAt) {
+			current = publicRoom(room, userID)
+			currentUpdatedAt = room.UpdatedAt
+			found = true
+		}
+	}
+	return current, found
+}
+
+func roomHasHumanUser(room *Room, userID string) bool {
+	for _, player := range room.Players {
+		if player.UserID == userID && !player.IsAI {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) currentHuman(roomID string, actorID string) (*Room, *Player, error) {

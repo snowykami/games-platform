@@ -145,6 +145,7 @@ const roomSchema: z.ZodType<UnoOnlineRoom> = z.object({
 })
 
 const roomResponseSchema = z.object({ room: roomSchema })
+const currentRoomResponseSchema = z.object({ room: roomSchema.nullable() })
 
 export async function createUnoRoom(options: { themeKey: string, variantKey: string }) {
   return requestRoom('/api/uno/rooms', {
@@ -160,6 +161,10 @@ export async function joinUnoRoom(roomId: string) {
 
 export async function getUnoRoom(roomId: string) {
   return requestRoom(`/api/uno/rooms/${encodeURIComponent(roomId)}`)
+}
+
+export async function getCurrentUnoRoom() {
+  return requestCurrentRoom('/api/uno/rooms/current')
 }
 
 export async function addUnoAI(roomId: string, level: string) {
@@ -234,4 +239,14 @@ async function requestRoom(input: RequestInfo | URL, init?: RequestInit) {
   }
 
   return roomResponseSchema.parse(await response.json()).room
+}
+
+async function requestCurrentRoom(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetchWithAuthRedirect(input, init)
+  if (!response.ok) {
+    const error = await response.json().catch(() => undefined)
+    throw new Error(error?.error ?? `Request failed: ${response.status}`)
+  }
+
+  return currentRoomResponseSchema.parse(await response.json()).room
 }

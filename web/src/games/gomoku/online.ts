@@ -132,6 +132,7 @@ const roomSchema: z.ZodType<GomokuOnlineRoom> = z.object({
 })
 
 const roomResponseSchema = z.object({ room: roomSchema })
+const currentRoomResponseSchema = z.object({ room: roomSchema.nullable() })
 
 export async function createGomokuRoom() {
   return requestRoom('/api/gomoku/rooms', { method: 'POST' })
@@ -143,6 +144,10 @@ export async function joinGomokuRoom(roomId: string) {
 
 export async function getGomokuRoom(roomId: string) {
   return requestRoom(`/api/gomoku/rooms/${encodeURIComponent(roomId)}`)
+}
+
+export async function getCurrentGomokuRoom() {
+  return requestCurrentRoom('/api/gomoku/rooms/current')
 }
 
 export async function addGomokuAI(roomId: string, level: string) {
@@ -201,4 +206,14 @@ async function requestRoom(input: RequestInfo | URL, init?: RequestInit) {
   }
 
   return roomResponseSchema.parse(await response.json()).room
+}
+
+async function requestCurrentRoom(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetchWithAuthRedirect(input, init)
+  if (!response.ok) {
+    const error = await response.json().catch(() => undefined)
+    throw new Error(error?.error ?? `Request failed: ${response.status}`)
+  }
+
+  return currentRoomResponseSchema.parse(await response.json()).room
 }

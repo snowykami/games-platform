@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 func (m *Manager) Start(roomID string, actorID string) (PublicRoom, error) {
@@ -37,6 +38,10 @@ func (m *Manager) Start(roomID string, actorID string) (PublicRoom, error) {
 }
 
 func (m *Manager) Public(roomID string, viewerID string) (PublicRoom, error) {
+	return m.PublicWithOptions(roomID, viewerID, PublicRoomOptions{})
+}
+
+func (m *Manager) PublicWithOptions(roomID string, viewerID string, options PublicRoomOptions) (PublicRoom, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -44,7 +49,36 @@ func (m *Manager) Public(roomID string, viewerID string) (PublicRoom, error) {
 	if err != nil {
 		return PublicRoom{}, err
 	}
-	return m.publicRoom(room, viewerID), nil
+	return m.publicRoomWithOptions(room, viewerID, options), nil
+}
+
+func (m *Manager) CurrentRoomForUser(userID string, options PublicRoomOptions) (PublicRoom, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var current PublicRoom
+	var currentUpdatedAt time.Time
+	var found bool
+	for _, room := range m.rooms {
+		if room.Phase == PhaseFinished || !roomHasHumanUser(room, userID) {
+			continue
+		}
+		if !found || room.UpdatedAt.After(currentUpdatedAt) {
+			current = m.publicRoomWithOptions(room, userID, options)
+			currentUpdatedAt = room.UpdatedAt
+			found = true
+		}
+	}
+	return current, found
+}
+
+func roomHasHumanUser(room *Room, userID string) bool {
+	for _, player := range room.Players {
+		if player.UserID == userID && !player.IsAI {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) minPlayers() int {

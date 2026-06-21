@@ -202,6 +202,7 @@ const roomSchema: z.ZodType<MahjongOnlineRoom> = z.object({
 })
 
 const roomResponseSchema = z.object({ room: roomSchema })
+const currentRoomResponseSchema = z.object({ room: roomSchema.nullable() })
 
 export async function createMahjongRoom() {
   return requestRoom('/api/mahjong/rooms', { method: 'POST' })
@@ -209,6 +210,10 @@ export async function createMahjongRoom() {
 
 export async function joinMahjongRoom(roomId: string) {
   return requestRoom(`/api/mahjong/rooms/${encodeURIComponent(roomId)}/join`, { method: 'POST' })
+}
+
+export async function getCurrentMahjongRoom() {
+  return requestCurrentRoom('/api/mahjong/rooms/current')
 }
 
 export async function addMahjongAI(roomId: string, level: string) {
@@ -287,4 +292,14 @@ async function requestRoom(input: RequestInfo | URL, init?: RequestInit) {
   }
 
   return roomResponseSchema.parse(await response.json()).room
+}
+
+async function requestCurrentRoom(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetchWithAuthRedirect(input, init)
+  if (!response.ok) {
+    const error = await response.json().catch(() => undefined)
+    throw new Error(error?.error ?? `Request failed: ${response.status}`)
+  }
+
+  return currentRoomResponseSchema.parse(await response.json()).room
 }

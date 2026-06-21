@@ -1,10 +1,20 @@
 package socialdeduction
 
+type PublicRoomOptions struct {
+	GodViewAvailable bool
+	GodView          bool
+}
+
 func (m *Manager) publicRoom(room *Room, viewerUserID string) PublicRoom {
+	return m.publicRoomWithOptions(room, viewerUserID, PublicRoomOptions{})
+}
+
+func (m *Manager) publicRoomWithOptions(room *Room, viewerUserID string, options PublicRoomOptions) PublicRoom {
 	viewer := findPlayerByUserID(room, viewerUserID)
+	godView := options.GodViewAvailable && options.GodView
 	players := make([]PublicPlayer, 0, len(room.Players))
 	for _, player := range room.Players {
-		visible := roleVisible(room, viewer, player)
+		visible := godView || roleVisible(room, viewer, player)
 		publicPlayer := PublicPlayer{
 			ID:             player.ID,
 			UserID:         player.UserID,
@@ -37,24 +47,26 @@ func (m *Manager) publicRoom(room *Room, viewerUserID string) PublicRoom {
 	}
 
 	return PublicRoom{
-		ID:            room.ID,
-		Game:          room.Game,
-		HostUserID:    room.HostUserID,
-		HostPlayerID:  playerIDForUser(room, room.HostUserID),
-		Phase:         room.Phase,
-		Players:       players,
-		YouPlayerID:   youPlayerID,
-		MinPlayers:    m.minPlayers(),
-		MaxPlayers:    m.maxPlayers(),
-		Werewolf:      werewolfViewForViewer(room, viewer),
-		Avalon:        avalonViewForViewer(room),
-		Undercover:    undercoverViewForViewer(room, viewer),
-		Winner:        room.Winner,
-		WinnerMessage: room.WinnerMessage,
-		Log:           append([]LogEntry{}, logs...),
-		Speeches:      append([]SpeechEntry{}, room.Speeches...),
-		ActionSeq:     room.ActionSeq,
-		RecentActions: append([]PublicAction{}, room.RecentActions...),
+		ID:               room.ID,
+		Game:             room.Game,
+		HostUserID:       room.HostUserID,
+		HostPlayerID:     playerIDForUser(room, room.HostUserID),
+		Phase:            room.Phase,
+		Players:          players,
+		YouPlayerID:      youPlayerID,
+		MinPlayers:       m.minPlayers(),
+		MaxPlayers:       m.maxPlayers(),
+		Werewolf:         werewolfViewForViewer(room, viewer),
+		Avalon:           avalonViewForViewer(room),
+		Undercover:       undercoverViewForViewer(room, viewer),
+		Winner:           room.Winner,
+		WinnerMessage:    room.WinnerMessage,
+		GodViewAvailable: options.GodViewAvailable,
+		GodViewEnabled:   godView,
+		Log:              append([]LogEntry{}, logs...),
+		Speeches:         append([]SpeechEntry{}, room.Speeches...),
+		ActionSeq:        room.ActionSeq,
+		RecentActions:    append([]PublicAction{}, room.RecentActions...),
 	}
 }
 
@@ -97,6 +109,7 @@ func werewolfViewForViewer(room *Room, viewer *Player) WerewolfView {
 		RolePresets:     werewolfRolePresets(len(room.Players)),
 		SeerChecks:      seerChecksForViewer(room, viewer),
 		Votes:           cloneWerewolfVotes(room.Werewolf.Votes),
+		DaySpeakers:     cloneBoolMap(room.Werewolf.DaySpeakers),
 		LastNight:       room.Werewolf.LastNight,
 		HunterPendingID: room.Werewolf.HunterPendingID,
 		RevealedIdiots:  cloneBoolMap(room.Werewolf.RevealedIdiots),

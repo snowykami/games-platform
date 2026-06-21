@@ -24,6 +24,7 @@ func startWerewolf(room *Room) {
 	room.Werewolf.NightActions = map[string]string{}
 	room.Werewolf.SeerChecks = map[string]Alignment{}
 	room.Werewolf.Votes = map[string]WerewolfVoteIntent{}
+	room.Werewolf.DaySpeakers = map[string]bool{}
 	room.Werewolf.RevealedIdiots = map[string]bool{}
 	room.Werewolf.LastNight = ""
 	room.Log = append(room.Log, createLog(fmt.Sprintf("狼人杀开始，角色组：%s。天黑请闭眼。", room.Werewolf.RoleConfig.Name)))
@@ -95,10 +96,7 @@ func (m *Manager) advanceWerewolfNight(room *Room) {
 	if checkWerewolfWin(room) {
 		return
 	}
-	room.Phase = PhaseWerewolfDay
-	room.Werewolf.NightActions = map[string]string{}
-	room.Werewolf.Votes = map[string]WerewolfVoteIntent{}
-	recordAction(room, PublicAction{Type: "day_started", Message: room.Werewolf.LastNight})
+	startWerewolfDay(room)
 }
 
 func allRequiredNightActions(room *Room) bool {
@@ -204,10 +202,7 @@ func resolveHunterShot(room *Room, targetID string) error {
 		return nil
 	}
 	if afterPhase == PhaseWerewolfDay {
-		room.Phase = PhaseWerewolfDay
-		room.Werewolf.NightActions = map[string]string{}
-		room.Werewolf.Votes = map[string]WerewolfVoteIntent{}
-		recordAction(room, PublicAction{Type: "day_started", Message: room.Werewolf.LastNight})
+		startWerewolfDay(room)
 		return nil
 	}
 	startNextWerewolfNight(room)
@@ -231,6 +226,69 @@ func werewolfVoterCount(room *Room) int {
 		}
 	}
 	return count
+}
+
+func startWerewolfDay(room *Room) {
+	room.Phase = PhaseWerewolfDay
+	room.Werewolf.NightActions = map[string]string{}
+	room.Werewolf.Votes = map[string]WerewolfVoteIntent{}
+	room.Werewolf.DaySpeakers = map[string]bool{}
+	recordAction(room, PublicAction{Type: "day_started", Message: room.Werewolf.LastNight})
+}
+
+func markWerewolfDaySpeech(room *Room, player *Player) {
+	if room.Game != GameWerewolf || room.Phase != PhaseWerewolfDay || player == nil || !player.Alive || room.Werewolf.RevealedIdiots[player.ID] {
+		return
+	}
+	if room.Werewolf.DaySpeakers == nil {
+		room.Werewolf.DaySpeakers = map[string]bool{}
+	}
+	room.Werewolf.DaySpeakers[player.ID] = true
+	if allWerewolfDaySpeakersReady(room) {
+		advanceWerewolfDayToVote(room)
+	}
+}
+
+func allWerewolfDaySpeakersReady(room *Room) bool {
+	if werewolfVoterCount(room) == 0 {
+		return false
+	}
+	for _, player := range room.Players {
+		if player.Alive && !room.Werewolf.RevealedIdiots[player.ID] && !room.Werewolf.DaySpeakers[player.ID] {
+			return false
+		}
+	}
+	return true
+}
+
+func nextPendingWerewolfDayAISpeaker(room *Room, lastSpeakerID string) *Player {
+	if room.Game != GameWerewolf || room.Phase != PhaseWerewolfDay {
+		return nil
+	}
+	start := 0
+	for i, player := range room.Players {
+		if player.ID == lastSpeakerID {
+			start = i + 1
+			break
+		}
+	}
+	for offset := range room.Players {
+		player := room.Players[(start+offset)%len(room.Players)]
+		if player.IsAI && player.Alive && player.ID != lastSpeakerID && player.AI != nil && !room.Werewolf.RevealedIdiots[player.ID] && !room.Werewolf.DaySpeakers[player.ID] {
+			return player
+		}
+	}
+	return nil
+}
+
+func advanceWerewolfDayToVote(room *Room) {
+	if room.Game != GameWerewolf || room.Phase != PhaseWerewolfDay {
+		return
+	}
+	room.Phase = PhaseWerewolfVote
+	room.Werewolf.Votes = map[string]WerewolfVoteIntent{}
+	room.Log = append(room.Log, createLog("白天发言结束，自动进入放逐投票。"))
+	recordAction(room, PublicAction{Type: "vote_started", Message: "所有可投票玩家已发言，开始放逐投票。"})
 }
 
 func (m *Manager) resolveWerewolfVote(room *Room) {
@@ -282,6 +340,7 @@ func confirmedWerewolfVotes(room *Room) map[string]string {
 func startNextWerewolfNight(room *Room) {
 	room.Werewolf.Day++
 	room.Werewolf.Votes = map[string]WerewolfVoteIntent{}
+	room.Werewolf.DaySpeakers = map[string]bool{}
 	room.Werewolf.NightActions = map[string]string{}
 	room.Phase = PhaseWerewolfNight
 	room.Log = append(room.Log, createLog("夜幕再次降临。"))

@@ -107,16 +107,20 @@ func recordSpeech(room *Room, player *Player, text string) bool {
 		Text:       text,
 		SpokenAt:   time.Now().UTC(),
 	})
-	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 说：%s", player.Name, text)))
+	room.Log = append(room.Log, createPlayerLog(player, fmt.Sprintf("%s 说：%s", player.Name, text)))
 	if len(room.Speeches) > 18 {
 		room.Speeches = room.Speeches[len(room.Speeches)-18:]
 	}
+	markWerewolfDaySpeech(room, player)
 	return true
 }
 
 func nextAISpeechPlayer(room *Room, lastSpeakerID string) *Player {
 	if room == nil || len(room.Players) == 0 {
 		return nil
+	}
+	if player := nextPendingWerewolfDayAISpeaker(room, lastSpeakerID); player != nil {
+		return player
 	}
 	start := 0
 	for i, player := range room.Players {
@@ -174,6 +178,15 @@ func reconcileLobbyConfig(room *Room) {
 
 func createLog(text string) LogEntry {
 	return LogEntry{ID: "log_" + randomToken(8), Text: text}
+}
+
+func createPlayerLog(player *Player, text string) LogEntry {
+	entry := createLog(text)
+	if player != nil {
+		entry.PlayerID = player.ID
+		entry.PlayerName = player.Name
+	}
+	return entry
 }
 
 func createRoomID(game GameKind) string {

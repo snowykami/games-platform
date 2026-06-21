@@ -102,10 +102,7 @@ func (m *Manager) AdvanceDay(roomID string, actorID string) (PublicRoom, error) 
 	if room.HostUserID != actorID {
 		return PublicRoom{}, errors.New("only_host_advance")
 	}
-	room.Phase = PhaseWerewolfVote
-	room.Werewolf.Votes = map[string]WerewolfVoteIntent{}
-	room.Log = append(room.Log, createLog("白天讨论结束，开始放逐投票。"))
-	recordAction(room, PublicAction{Type: "vote_started", Message: "开始放逐投票。"})
+	advanceWerewolfDayToVote(room)
 	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
@@ -120,6 +117,12 @@ func (m *Manager) WerewolfVote(roomID string, actorID string, targetID string, c
 	}
 	if room.Werewolf.RevealedIdiots[player.ID] {
 		return PublicRoom{}, errors.New("idiot_cannot_vote_after_reveal")
+	}
+	if strings.TrimSpace(targetID) == "" && !confirmed {
+		delete(room.Werewolf.Votes, player.ID)
+		recordAction(room, PublicAction{Type: "vote_cancel", ActorID: player.ID, ActorName: player.Name, Message: fmt.Sprintf("%s 取消了投票选择。", player.Name)})
+		touchRule(room)
+		return m.publicRoom(room, actorID), nil
 	}
 	target := findPlayerByID(room, targetID)
 	if target == nil || !target.Alive {

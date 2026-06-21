@@ -1,18 +1,20 @@
 import type { FormEvent, ReactNode } from 'react'
 import type { AILevel } from '@/games/ai'
 import { ArrowLeft, Bot, Copy, DoorOpen, Plus, Sparkles, UserMinus } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { getAICapabilities, getAILevelLabel } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { AILevelPicker } from '@/games/AILevelPicker'
+import { ContinueRoomEntry } from '@/games/ContinueRoomEntry'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
+import { useCurrentRoom } from '@/games/useCurrentRoom'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
-import { createXiangqiRoom } from './online'
+import { createXiangqiRoom, getCurrentXiangqiRoom } from './online'
 import { useXiangqiRoom } from './useXiangqiRoom'
 import { XiangqiPage } from './XiangqiPage'
 
@@ -31,6 +33,8 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
   const [llmEnabled, setLLMEnabled] = useState(false)
   const [llmModel, setLLMModel] = useState('')
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
+  const loadCurrentRoom = useCallback(() => getCurrentXiangqiRoom(), [])
+  const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
 
   useEffect(() => {
     let active = true
@@ -83,6 +87,13 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
     setMessage(t('room.copied'))
   }
 
+  function enterCurrentRoom() {
+    if (!currentRoom) {
+      return
+    }
+    navigate(`/games/xiangqi?room=${encodeURIComponent(currentRoom.id)}`)
+  }
+
   async function addAIPlayer() {
     if (pendingAI || !room) {
       return
@@ -125,6 +136,14 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
               <Plus className="size-4" />
               {t('common.createAndEnter')}
             </button>
+            {currentRoom && (
+              <ContinueRoomEntry
+                buttonClassName="xiangqi-button w-full"
+                className="border-[#fff8e8]/22 bg-[#10100d]/52 text-[#fff8e8]"
+                room={currentRoom}
+                onEnter={enterCurrentRoom}
+              />
+            )}
             <label className="grid gap-2 text-sm font-black" htmlFor="xiangqi-room-code">
               {t('common.roomCode')}
               <input

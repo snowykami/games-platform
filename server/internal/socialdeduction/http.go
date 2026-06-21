@@ -74,6 +74,7 @@ func NewHandler(manager *Manager) *Handler {
 func (h *Handler) Routes() http.Handler {
 	router := chi.NewRouter()
 	router.Post("/rooms", h.createRoom)
+	router.Get("/rooms/current", h.currentRoom)
 	router.Get("/rooms/{roomID}", h.getRoom)
 	router.Post("/rooms/{roomID}/join", h.joinRoom)
 	router.Post("/rooms/{roomID}/ai", h.addAI)
@@ -110,6 +111,7 @@ func (h *Handler) WebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	roomID := r.URL.Query().Get("room")
+	publicOptions := publicRoomOptionsForRequest(r)
 	var room PublicRoom
 	err := h.manager.RunRoomCommand(r.Context(), roomID, gameactor.EventPlayerConnected, gameactor.LanePresence, func() error {
 		var err error
@@ -125,18 +127,31 @@ func (h *Handler) WebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	h.hub.Subscribe(r.Context(), room.ID, user.ID, conn)
+	h.hub.Subscribe(r.Context(), room.ID, user.ID, publicOptions.GodViewAvailable, publicOptions.GodView, conn)
 }
 
 func (h *Handler) createRoom(w http.ResponseWriter, r *http.Request) {
 	user := mustUser(r)
 	room := h.manager.CreateRoom(toUserView(user))
+	if view, err := h.manager.PublicWithOptions(room.ID, user.ID, publicRoomOptionsForRequest(r)); err == nil {
+		room = view
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
+}
+
+func (h *Handler) currentRoom(w http.ResponseWriter, r *http.Request) {
+	user := mustUser(r)
+	room, ok := h.manager.CurrentRoomForUser(user.ID, publicRoomOptionsForRequest(r))
+	if !ok {
+		httpx.WriteJSON(w, http.StatusOK, map[string]*PublicRoom{"room": nil})
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
 }
 
 func (h *Handler) getRoom(w http.ResponseWriter, r *http.Request) {
 	user := mustUser(r)
-	room, err := h.manager.Public(chi.URLParam(r, "roomID"), user.ID)
+	room, err := h.manager.PublicWithOptions(chi.URLParam(r, "roomID"), user.ID, publicRoomOptionsForRequest(r))
 	if err != nil {
 		httpx.WriteErrorKey(w, r, http.StatusNotFound, err.Error())
 		return
@@ -147,6 +162,7 @@ func (h *Handler) getRoom(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) joinRoom(w http.ResponseWriter, r *http.Request) {
 	user := mustUser(r)
 	roomID := chi.URLParam(r, "roomID")
+	publicOptions := publicRoomOptionsForRequest(r)
 	var room PublicRoom
 	err := h.manager.RunRoomCommand(r.Context(), roomID, gameactor.EventPlayerConnected, gameactor.LanePresence, func() error {
 		var err error
@@ -160,6 +176,11 @@ func (h *Handler) joinRoom(w http.ResponseWriter, r *http.Request) {
 	h.hub.Broadcast(room.ID)
 	h.hub.ScheduleAIAction(room.ID)
 	h.hub.ScheduleAIOptionalSpeech(room.ID)
+	if publicOptions.GodView {
+		if view, err := h.manager.PublicWithOptions(room.ID, user.ID, publicOptions); err == nil {
+			room = view
+		}
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
 }
 
@@ -268,6 +289,11 @@ func (h *Handler) mutateRoomWithEvent(w http.ResponseWriter, r *http.Request, ev
 	}
 	h.hub.Broadcast(room.ID)
 	h.hub.ScheduleAIAction(room.ID)
+	if options := publicRoomOptionsForRequest(r); options.GodView {
+		if view, err := h.manager.PublicWithOptions(room.ID, user.ID, options); err == nil {
+			room = view
+		}
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
 }
 
@@ -278,6 +304,15 @@ func mustUser(r *http.Request) *auth.User {
 
 func toUserView(user *auth.User) UserView {
 	return UserView{ID: user.ID, DisplayName: user.DisplayName, Role: string(user.Role), Kind: string(user.Kind)}
+}
+
+func publicRoomOptionsForRequest(r *http.Request) PublicRoomOptions {
+	user := mustUser(r)
+	isAdmin := user != nil && user.Role == auth.RoleAdmin
+	return PublicRoomOptions{
+		GodViewAvailable: isAdmin,
+		GodView:          isAdmin && r.URL.Query().Get("godView") == "1",
+	}
 }
 
 func playerUserID(players []PublicPlayer, playerID string) string {

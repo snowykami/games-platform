@@ -1,13 +1,15 @@
-import type { FormEvent } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import type { SocialGameSlug, SocialRoom } from './online'
-import { Bot, Copy, DoorOpen, Plus, Sparkles } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Bot, ClipboardList, Copy, DoorOpen, Eye, EyeOff, Plus, ScrollText, ShieldQuestion, Sparkles, X } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { getAICapabilities } from '@/games/ai'
+import { ContinueRoomEntry } from '@/games/ContinueRoomEntry'
 import { useAutoFollowScroll } from '@/games/useAutoFollowScroll'
+import { useCurrentRoom } from '@/games/useCurrentRoom'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
-import { createSocialRoom } from './online'
+import { createSocialRoom, getCurrentSocialRoom } from './online'
 import { ActionPanel } from './socialActionPanel'
 import { SelfIntel } from './socialIntel'
 import { UndercoverLobbyConfig, WerewolfRoleSetup } from './socialLobbyConfig'
@@ -26,13 +28,16 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
   const config = GAME_COPY[game]
   const navigate = useNavigate()
   const { t, ta } = useI18n()
-  const { actions, error, isLoading, room } = useSocialRoom(game, roomId)
+  const [godView, setGodView] = useState(false)
+  const { actions, error, isLoading, room } = useSocialRoom(game, roomId, godView)
   const [joinCode, setJoinCode] = useState(roomId ?? '')
   const [message, setMessage] = useState(() => t('room.defaultMessage'))
   const [pendingAI, setPendingAI] = useState(false)
   const [llmEnabled, setLLMEnabled] = useState(false)
   const [llmModel, setLLMModel] = useState('')
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
+  const loadCurrentRoom = useCallback(() => getCurrentSocialRoom(game), [game])
+  const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
 
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
@@ -68,6 +73,13 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
   function copyLink() {
     navigator.clipboard?.writeText(window.location.href)
     setMessage(t('room.copied'))
+  }
+
+  function enterCurrentRoom() {
+    if (!currentRoom) {
+      return
+    }
+    navigate(`/games/${game}?room=${encodeURIComponent(currentRoom.id)}`)
   }
 
   async function addAIPlayer() {
@@ -110,6 +122,14 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
               <Plus className="size-4" />
               {t('common.createAndEnter')}
             </button>
+            {currentRoom && (
+              <ContinueRoomEntry
+                buttonClassName={socialButton(config)}
+                className="border-white/18 bg-black/20 text-[#fff8e8]"
+                room={currentRoom}
+                onEnter={enterCurrentRoom}
+              />
+            )}
             <label className="grid gap-2 text-sm font-black" htmlFor={`${game}-room-code`}>
               {t('common.roomCode')}
               <input
@@ -142,7 +162,7 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
   }
 
   if (room.phase !== 'lobby') {
-    return <SocialGamePage actions={actions} config={config} error={error} game={game} room={room} />
+    return <SocialGamePage actions={actions} config={config} error={error} game={game} godView={godView} room={room} setGodView={setGodView} />
   }
 
   return (
@@ -191,27 +211,57 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
           </div>
         </div>
 
-        <aside className={cn('grid content-start gap-3 rounded-lg border p-5 shadow-[0_22px_64px_rgba(0,0,0,0.28)]', config.panel)}>
+        <details className={cn('rounded-lg border p-4 shadow-[0_22px_64px_rgba(0,0,0,0.28)] lg:hidden', config.panel)}>
+          <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-lg font-black">
+            <Sparkles className="size-5" />
+            {t(config.rulesTitleKey)}
+          </summary>
+          <LobbyRulesContent actions={actions} config={config} game={game} isHost={isHost} room={room} rules={ta(config.rulesKey)} />
+        </details>
+
+        <aside className={cn('hidden content-start gap-3 rounded-lg border p-5 shadow-[0_22px_64px_rgba(0,0,0,0.28)] lg:grid', config.panel)}>
           <h2 className="flex items-center gap-2 text-xl font-black">
             <Sparkles className="size-5" />
             {t(config.rulesTitleKey)}
           </h2>
-          {game === 'werewolf' && (
-            <WerewolfRoleSetup
-              key={`${room.players.length}:${room.werewolf.roleConfig.mode}:${room.werewolf.roleConfig.presetId}:${roleTotal(room.werewolf.roleConfig.counts)}`}
-              actions={actions}
-              config={config}
-              isHost={isHost}
-              room={room}
-            />
-          )}
-          <RoleList game={game} />
-          {ta(config.rulesKey).map(rule => (
-            <p key={rule} className="rounded-lg bg-black/24 px-3 py-2 text-sm leading-6 text-[#fff8e8]/78">{rule}</p>
-          ))}
+          <LobbyRulesContent actions={actions} config={config} game={game} isHost={isHost} room={room} rules={ta(config.rulesKey)} />
         </aside>
       </section>
     </SocialShell>
+  )
+}
+
+function LobbyRulesContent({
+  actions,
+  config,
+  game,
+  isHost,
+  room,
+  rules,
+}: {
+  actions: ReturnType<typeof useSocialRoom>['actions']
+  config: typeof GAME_COPY[SocialGameSlug]
+  game: SocialGameSlug
+  isHost: boolean
+  room: SocialRoom
+  rules: string[]
+}) {
+  return (
+    <div className="mt-3 grid content-start gap-3 lg:mt-0">
+      {game === 'werewolf' && (
+        <WerewolfRoleSetup
+          key={`${room.players.length}:${room.werewolf.roleConfig.mode}:${room.werewolf.roleConfig.presetId}:${roleTotal(room.werewolf.roleConfig.counts)}`}
+          actions={actions}
+          config={config}
+          isHost={isHost}
+          room={room}
+        />
+      )}
+      <RoleList game={game} />
+      {rules.map(rule => (
+        <p key={rule} className="rounded-lg bg-black/24 px-3 py-2 text-sm leading-6 text-[#fff8e8]/78">{rule}</p>
+      ))}
+    </div>
   )
 }
 
@@ -220,20 +270,47 @@ function SocialGamePage({
   config,
   error,
   game,
+  godView,
   room,
+  setGodView,
 }: {
   actions: ReturnType<typeof useSocialRoom>['actions']
   config: typeof GAME_COPY[SocialGameSlug]
   error?: string
   game: SocialGameSlug
+  godView: boolean
   room: SocialRoom
+  setGodView: (enabled: boolean) => void
 }) {
   const { t } = useI18n()
   const [message, setMessage] = useState(() => t('social.connected'))
+  const [mobilePanel, setMobilePanel] = useState<SocialMobilePanel>(null)
   const tableLogScroll = useAutoFollowScroll<HTMLDivElement>()
   const you = room.players.find(player => player.id === room.youPlayerId)
   const leader = room.players.find(player => player.id === room.avalon.leaderId)
   const isHost = Boolean(room.hostPlayerId && room.hostPlayerId === room.youPlayerId)
+  const renderActionPanel = () => (
+    <ActionPanel
+      key={`${room.phase}:${room.avalon.round}:${room.werewolf.day}`}
+      actions={actions}
+      config={config}
+      game={game}
+      room={room}
+      setMessage={setMessage}
+      you={you}
+    />
+  )
+  const renderTableLog = (withAutoScroll: boolean) => (
+    <div
+      ref={withAutoScroll ? tableLogScroll.containerRef : undefined}
+      className="grid min-h-0 content-start gap-2 overflow-auto pr-1"
+      onScroll={withAutoScroll ? tableLogScroll.handleScroll : undefined}
+    >
+      {room.log.map(entry => (
+        <TableLogLine key={entry.id} entry={entry} room={room} />
+      ))}
+    </div>
+  )
 
   async function copyLink() {
     await navigator.clipboard?.writeText(window.location.href)
@@ -247,58 +324,56 @@ function SocialGamePage({
 
   return (
     <SocialShell config={config} fixedViewport game={game} phase={room.phase}>
-      <section className="grid h-full min-h-0 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_340px]">
+      <section className="relative grid h-full min-h-0 gap-3 overflow-hidden pb-[72px] lg:grid-cols-[minmax(0,1fr)_340px] lg:pb-0">
         <div className={cn('grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden rounded-lg border p-3 shadow-[0_22px_64px_rgba(0,0,0,0.28)] sm:p-4', config.panel)}>
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-white/14 bg-black/24 p-2">
-            <button className={socialButton(config, true)} type="button" onClick={copyLink}>
+          <div className="flex items-center gap-2 overflow-x-auto rounded-lg border border-white/14 bg-black/24 p-2">
+            <button className={cn(socialButton(config, true), 'shrink-0')} type="button" onClick={copyLink}>
               <Copy className="size-4" />
-              {t('common.copyLink')}
+              <span className="hidden sm:inline">{t('common.copyLink')}</span>
             </button>
-            <StatusPill>{t(`social.phases.${room.phase}`)}</StatusPill>
-            <StatusPill>
+            <StatusPill className="shrink-0">{t(`social.phases.${room.phase}`)}</StatusPill>
+            <StatusPill className="shrink-0">
               {game === 'werewolf' ? t('werewolf.dayCount', { day: room.werewolf.day || 1 }) : t('avalon.roundCount', { round: room.avalon.round || 1 })}
             </StatusPill>
-            {game === 'avalon' && <StatusPill>{t('avalon.leader', { name: leader?.name ?? '-' })}</StatusPill>}
-            <StatusPill>
+            {game === 'avalon' && <StatusPill className="shrink-0">{t('avalon.leader', { name: leader?.name ?? '-' })}</StatusPill>}
+            <StatusPill className="hidden shrink-0 sm:inline-flex">
               {t('common.room')}
               {' '}
               {room.id}
             </StatusPill>
-            <button className={cn(socialButton(config), 'ml-auto')} disabled={!isHost} type="button" onClick={restart}>
+            {room.godViewAvailable && (
+              <button
+                className={cn(socialButton(config, godView), 'shrink-0', godView && 'ring-2 ring-[#fff8e8]/70')}
+                title="仅平台管理员可用"
+                type="button"
+                onClick={() => setGodView(!godView)}
+              >
+                {godView ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+                上帝视角
+              </button>
+            )}
+            <button className={cn(socialButton(config), 'shrink-0 lg:ml-auto')} disabled={!isHost} type="button" onClick={restart}>
               {t('social.restart')}
             </button>
           </div>
 
           <div className="grid min-h-0 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_260px]">
             <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden">
-              <SelfIntel config={config} game={game} room={room} you={you} />
+              <SelfIntel className="hidden md:block" config={config} game={game} room={room} you={you} />
               <PlayerGrid actions={actions} className="min-h-0" config={config} isHost={false} llmModel="" room={room} compact />
             </div>
 
-            <div className="min-h-0 overflow-auto pr-1">
-              <ActionPanel
-                key={`${room.phase}:${room.avalon.round}:${room.werewolf.day}`}
-                actions={actions}
-                config={config}
-                game={game}
-                isHost={isHost}
-                room={room}
-                setMessage={setMessage}
-                you={you}
-              />
+            <div className="hidden min-h-0 overflow-auto pr-1 lg:block">
+              {renderActionPanel()}
             </div>
           </div>
 
           <p className="min-h-6 text-sm font-bold text-[#fff8e8]/75">{error ?? message}</p>
         </div>
 
-        <aside className={cn('grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden rounded-lg border p-4 shadow-[0_22px_64px_rgba(0,0,0,0.28)]', config.panel)}>
+        <aside className={cn('hidden min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden rounded-lg border p-4 shadow-[0_22px_64px_rgba(0,0,0,0.28)] lg:grid', config.panel)}>
           <h2 className="text-xl font-black">{t('social.tableLog')}</h2>
-          <div ref={tableLogScroll.containerRef} className="grid min-h-0 content-start gap-2 overflow-auto pr-1" onScroll={tableLogScroll.handleScroll}>
-            {room.log.map(entry => (
-              <TableLogLine key={entry.id} entry={entry} room={room} />
-            ))}
-          </div>
+          {renderTableLog(true)}
           {room.phase === 'finished' && (
             <div className="rounded-lg bg-[#fff8e8] p-3 text-[#171411]">
               <p className="text-xs font-black">{t('social.result')}</p>
@@ -306,7 +381,106 @@ function SocialGamePage({
             </div>
           )}
         </aside>
+
+        <SocialMobileDock config={config} openPanel={setMobilePanel} />
+        <SocialMobileDrawer config={config} panel={mobilePanel} room={room} onClose={() => setMobilePanel(null)}>
+          {mobilePanel === 'intel' && <SelfIntel config={config} game={game} room={room} you={you} />}
+          {mobilePanel === 'action' && renderActionPanel()}
+          {mobilePanel === 'log' && (
+            <div className="grid min-h-[55svh] grid-rows-[minmax(0,1fr)_auto] gap-3">
+              {renderTableLog(false)}
+              {room.phase === 'finished' && (
+                <div className="rounded-lg bg-[#fff8e8] p-3 text-[#171411]">
+                  <p className="text-xs font-black">{t('social.result')}</p>
+                  <strong>{room.winnerMessage}</strong>
+                </div>
+              )}
+            </div>
+          )}
+        </SocialMobileDrawer>
       </section>
     </SocialShell>
   )
+}
+
+type SocialMobilePanel = 'intel' | 'action' | 'log' | null
+
+function SocialMobileDock({
+  config,
+  openPanel,
+}: {
+  config: typeof GAME_COPY[SocialGameSlug]
+  openPanel: (panel: Exclude<SocialMobilePanel, null>) => void
+}) {
+  const { t } = useI18n()
+
+  return (
+    <nav className={cn('fixed inset-x-3 bottom-3 z-30 grid grid-cols-3 gap-2 rounded-lg border bg-black/58 p-2 shadow-[0_18px_60px_rgba(0,0,0,0.42)] backdrop-blur lg:hidden', config.panel)} aria-label="social game panels">
+      <button className={socialButton(config, true)} type="button" onClick={() => openPanel('action')}>
+        <ClipboardList className="size-4" />
+        {t('social.mobileActions')}
+      </button>
+      <button className={socialButton(config)} type="button" onClick={() => openPanel('intel')}>
+        <ShieldQuestion className="size-4" />
+        {t('social.mobileIntel')}
+      </button>
+      <button className={socialButton(config)} type="button" onClick={() => openPanel('log')}>
+        <ScrollText className="size-4" />
+        {t('social.mobileLog')}
+      </button>
+    </nav>
+  )
+}
+
+function SocialMobileDrawer({
+  children,
+  config,
+  onClose,
+  panel,
+  room,
+}: {
+  children: ReactNode
+  config: typeof GAME_COPY[SocialGameSlug]
+  onClose: () => void
+  panel: SocialMobilePanel
+  room: SocialRoom
+}) {
+  const { t } = useI18n()
+
+  if (!panel) {
+    return null
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label={mobilePanelTitle(panel, t)}>
+      <button className="absolute inset-0 size-full cursor-default bg-black/62" aria-label={t('common.close')} type="button" onClick={onClose} />
+      <div className={cn('absolute inset-x-0 bottom-0 grid max-h-[86svh] min-h-[42svh] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-t-lg border p-4 shadow-[0_-24px_80px_rgba(0,0,0,0.5)]', config.panel)}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-black text-[#fff8e8]/62">
+              {t(`social.phases.${room.phase}`)}
+            </p>
+            <h2 className="truncate text-xl font-black">{mobilePanelTitle(panel, t)}</h2>
+          </div>
+          <button className={cn(socialButton(config), 'min-h-9 shrink-0 px-2')} type="button" onClick={onClose}>
+            <X className="size-4" />
+            <span className="sr-only">{t('common.close')}</span>
+          </button>
+        </div>
+        <div className="min-h-0 overflow-auto pr-1">
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function mobilePanelTitle(panel: Exclude<SocialMobilePanel, null>, t: (key: string) => string) {
+  if (panel === 'action') {
+    return t('social.mobileActions')
+  }
+  if (panel === 'intel') {
+    return t('social.mobileIntel')
+  }
+  return t('social.mobileLog')
 }

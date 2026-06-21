@@ -40,6 +40,37 @@ func TestPublicRoomHidesWerewolfRoles(t *testing.T) {
 	}
 }
 
+func TestPublicRoomGodViewRevealsAllRoles(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := &Room{
+		ID:         "WWFGOD",
+		Game:       GameWerewolf,
+		HostUserID: "u1",
+		Phase:      PhaseWerewolfNight,
+		Players: []*Player{
+			testPlayer("p1", "u1", "Host", RoleVillager, AlignmentGood),
+			testPlayer("p2", "u2", "Wolf", RoleWerewolf, AlignmentEvil),
+			testPlayer("p3", "u3", "Seer", RoleSeer, AlignmentGood),
+		},
+		Werewolf: WerewolfState{Day: 1, NightActions: map[string]string{}, Votes: map[string]WerewolfVoteIntent{}},
+	}
+
+	normalView := manager.publicRoom(room, "u1")
+	if normalView.Players[1].Role != "" || normalView.Players[1].VisibleToYou {
+		t.Fatalf("expected normal villager view to hide wolf role, got %+v", normalView.Players[1])
+	}
+
+	godView := manager.publicRoomWithOptions(room, "u1", PublicRoomOptions{GodViewAvailable: true, GodView: true})
+	if !godView.GodViewAvailable || !godView.GodViewEnabled {
+		t.Fatalf("expected god view flags to be enabled, got available=%v enabled=%v", godView.GodViewAvailable, godView.GodViewEnabled)
+	}
+	for _, player := range godView.Players {
+		if player.Role == "" || player.Alignment == "" || !player.VisibleToYou {
+			t.Fatalf("expected god view to reveal player identity, got %+v", player)
+		}
+	}
+}
+
 func TestPublicRoomDoesNotSerializeStableUserIDs(t *testing.T) {
 	manager := NewManager(GameWerewolf, nil)
 	room := &Room{
@@ -784,6 +815,78 @@ func TestWerewolfVoteRequiresConfirmationAndAllowsChanges(t *testing.T) {
 	}
 }
 
+func TestWerewolfVoteCanBeCanceledBeforeConfirmation(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFCANCEL", PhaseWerewolfVote, []*Player{
+		testPlayer("p1", "u1", "Villager A", RoleVillager, AlignmentGood),
+		testPlayer("p2", "u2", "Wolf", RoleWerewolf, AlignmentEvil),
+		testPlayer("p3", "u3", "Villager B", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.WerewolfVote(room.ID, "u1", "p2", false); err != nil {
+		t.Fatalf("select vote: %v", err)
+	}
+	if _, err := manager.WerewolfVote(room.ID, "u1", "", false); err != nil {
+		t.Fatalf("cancel vote: %v", err)
+	}
+	if _, ok := room.Werewolf.Votes["p1"]; ok {
+		t.Fatalf("expected canceled vote to be removed, got %+v", room.Werewolf.Votes["p1"])
+	}
+	if room.Phase != PhaseWerewolfVote {
+		t.Fatalf("canceling vote should not resolve phase, got %q", room.Phase)
+	}
+}
+
+func TestWerewolfDayAutoAdvancesAfterAllVotersSpeak(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFAUTOVOTE", PhaseWerewolfDay, []*Player{
+		testPlayer("p1", "u1", "Villager A", RoleVillager, AlignmentGood),
+		testPlayer("p2", "u2", "Wolf", RoleWerewolf, AlignmentEvil),
+		testPlayer("p3", "u3", "Villager B", RoleVillager, AlignmentGood),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.Say(room.ID, "u1", "我先发言。"); err != nil {
+		t.Fatalf("first speech: %v", err)
+	}
+	if room.Phase != PhaseWerewolfDay {
+		t.Fatalf("expected day to continue until all voters speak, got %q", room.Phase)
+	}
+	if _, err := manager.Say(room.ID, "u2", "我跟一手。"); err != nil {
+		t.Fatalf("second speech: %v", err)
+	}
+	if _, err := manager.Say(room.ID, "u3", "我也发言。"); err != nil {
+		t.Fatalf("final speech: %v", err)
+	}
+	if room.Phase != PhaseWerewolfVote {
+		t.Fatalf("expected all speeches to auto-start vote, got %q", room.Phase)
+	}
+	if len(room.Werewolf.Votes) != 0 {
+		t.Fatalf("expected fresh vote map after auto-start, got %+v", room.Werewolf.Votes)
+	}
+}
+
+func TestSpeechLogKeepsStablePlayerID(t *testing.T) {
+	manager := NewManager(GameWerewolf, nil)
+	room := testWerewolfRoom("WWFLOGID", PhaseWerewolfDay, []*Player{
+		testPlayer("p1", "u1", "同名", RoleVillager, AlignmentGood),
+		testPlayer("p2", "u2", "同名", RoleWerewolf, AlignmentEvil),
+	})
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.Say(room.ID, "u2", "我发一条。"); err != nil {
+		t.Fatalf("say: %v", err)
+	}
+	if len(room.Log) == 0 {
+		t.Fatal("expected speech log")
+	}
+	entry := room.Log[len(room.Log)-1]
+	if entry.PlayerID != "p2" || entry.PlayerName != "同名" {
+		t.Fatalf("expected stable speech log identity, got %+v", entry)
+	}
+}
+
 func TestWerewolfIdiotSurvivesFirstExile(t *testing.T) {
 	manager := NewManager(GameWerewolf, nil)
 	room := testWerewolfRoom("WWFIDIOT", PhaseWerewolfVote, []*Player{
@@ -909,10 +1012,88 @@ func TestUndercoverAIContextUsesSeatAliasesAndMapsVoteBack(t *testing.T) {
 	}
 
 	manager.mu.Lock()
-	target := manager.chooseUndercoverVote(room, room.Players[0])
+	target, speech := manager.chooseUndercoverVote(room, room.Players[0])
 	manager.mu.Unlock()
 	if target == nil || target.ID != "raw_undercover_id" {
 		t.Fatalf("expected vote alias to map back to raw_undercover_id, got %+v", target)
+	}
+	if speech != "" {
+		t.Fatalf("expected empty speech when LLM did not provide a reason, got %q", speech)
+	}
+}
+
+func TestUndercoverVoteDoesNotRecordGenericTemplateSpeech(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled: true,
+		decision: aiplayer.Decision{
+			ActionID: "vote:seat_2",
+			Speech:   "我先票这个位置。",
+			Source:   "llm",
+		},
+	}
+	manager := NewManager(GameUndercover, provider)
+	room := &Room{
+		ID:    "UNDVOTETPL",
+		Game:  GameUndercover,
+		Phase: PhaseUndercoverVote,
+		Players: []*Player{
+			testAIPlayer("p1", "北风", RoleCivilian, AlignmentGood),
+			testAIPlayer("p2", "南星", RoleUndercover, AlignmentEvil),
+			testPlayer("p3", "u3", "阿澈", RoleCivilian, AlignmentGood),
+		},
+		Undercover: UndercoverState{
+			Round:     1,
+			WordPair:  UndercoverWordPair{CivilianWord: "苹果", UndercoverWord: "梨"},
+			Described: map[string]bool{"p1": true, "p2": true, "p3": true},
+			Votes:     map[string]UndercoverVoteIntent{},
+		},
+	}
+	manager.rooms[room.ID] = room
+
+	if _, _, err := manager.RunAIAction(room.ID); err != nil {
+		t.Fatalf("run ai vote: %v", err)
+	}
+	if vote := room.Undercover.Votes["p1"]; vote.TargetID != "p2" || !vote.Confirmed {
+		t.Fatalf("expected confirmed vote p2, got %+v", vote)
+	}
+	if len(room.Speeches) != 0 {
+		t.Fatalf("expected generic vote speech to be skipped, got %+v", room.Speeches)
+	}
+}
+
+func TestUndercoverVoteRecordsNaturalReasonSpeech(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled: true,
+		decision: aiplayer.Decision{
+			ActionID: "vote:seat_2",
+			Speech:   "他刚才那个甜味方向和前面几个人不太搭。",
+			Source:   "llm",
+		},
+	}
+	manager := NewManager(GameUndercover, provider)
+	room := &Room{
+		ID:    "UNDVOTEREASON",
+		Game:  GameUndercover,
+		Phase: PhaseUndercoverVote,
+		Players: []*Player{
+			testAIPlayer("p1", "北风", RoleCivilian, AlignmentGood),
+			testAIPlayer("p2", "南星", RoleUndercover, AlignmentEvil),
+			testPlayer("p3", "u3", "阿澈", RoleCivilian, AlignmentGood),
+		},
+		Undercover: UndercoverState{
+			Round:     1,
+			WordPair:  UndercoverWordPair{CivilianWord: "苹果", UndercoverWord: "梨"},
+			Described: map[string]bool{"p1": true, "p2": true, "p3": true},
+			Votes:     map[string]UndercoverVoteIntent{},
+		},
+	}
+	manager.rooms[room.ID] = room
+
+	if _, _, err := manager.RunAIAction(room.ID); err != nil {
+		t.Fatalf("run ai vote: %v", err)
+	}
+	if len(room.Speeches) != 1 || room.Speeches[0].Text != "他刚才那个甜味方向和前面几个人不太搭。" {
+		t.Fatalf("expected natural vote reason speech, got %+v", room.Speeches)
 	}
 }
 
@@ -1163,6 +1344,7 @@ func testWerewolfRoom(id string, phase Phase, players []*Player) *Room {
 			NightActions:   map[string]string{},
 			SeerChecks:     map[string]Alignment{},
 			Votes:          map[string]WerewolfVoteIntent{},
+			DaySpeakers:    map[string]bool{},
 			RevealedIdiots: map[string]bool{},
 		},
 	}
