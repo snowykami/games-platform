@@ -2,6 +2,8 @@ package httpx
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -11,6 +13,10 @@ import (
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
+
+const MaxJSONBodyBytes int64 = 1 << 20
+
+var ErrBodyTooLarge = errors.New("json_body_too_large")
 
 func WriteJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -31,5 +37,26 @@ func WriteErrorKey(w http.ResponseWriter, r *http.Request, status int, key strin
 
 func DecodeJSON(r *http.Request, value any) error {
 	defer r.Body.Close()
-	return json.NewDecoder(r.Body).Decode(value)
+	limited := &io.LimitedReader{R: r.Body, N: MaxJSONBodyBytes + 1}
+	decoder := json.NewDecoder(limited)
+	if err := decoder.Decode(value); err != nil {
+		if limited.N <= 0 {
+			return ErrBodyTooLarge
+		}
+		return err
+	}
+	if limited.N <= 0 {
+		return ErrBodyTooLarge
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if limited.N <= 0 {
+			return ErrBodyTooLarge
+		}
+		if err != nil {
+			return err
+		}
+		return errors.New("invalid_json_body")
+	}
+	return nil
 }

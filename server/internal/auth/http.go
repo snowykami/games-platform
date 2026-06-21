@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-chi/chi/v5"
@@ -14,11 +15,14 @@ import (
 )
 
 type Handler struct {
-	store     *Store
-	oidc      map[string]*oidcProviderRuntime
-	stateMu   sync.Mutex
-	oidcState map[string]string
+	store         *Store
+	oidc          map[string]*oidcProviderRuntime
+	secureCookies bool
+	stateMu       sync.Mutex
+	oidcState     map[string]oidcStateEntry
 }
+
+const maxOIDCStates = 1024
 
 type guestLoginRequest struct {
 	GuestUUID string `json:"guestUuid"`
@@ -41,6 +45,11 @@ type oidcProviderRuntime struct {
 	verifier    *oidc.IDTokenVerifier
 }
 
+type oidcStateEntry struct {
+	ReturnTo  string
+	ExpiresAt time.Time
+}
+
 type oidcClaims struct {
 	Subject           string `json:"sub"`
 	Name              string `json:"name"`
@@ -48,11 +57,12 @@ type oidcClaims struct {
 	Email             string `json:"email"`
 }
 
-func NewHandler(store *Store, providers []config.OIDCProviderConfig) *Handler {
+func NewHandler(store *Store, providers []config.OIDCProviderConfig, secureCookies bool) *Handler {
 	return &Handler{
-		store:     store,
-		oidc:      initOIDCProviders(providers),
-		oidcState: map[string]string{},
+		store:         store,
+		oidc:          initOIDCProviders(providers),
+		secureCookies: secureCookies,
+		oidcState:     map[string]oidcStateEntry{},
 	}
 }
 
@@ -98,12 +108,12 @@ func (h *Handler) guest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	SetSessionCookie(w, session)
+	h.setSessionCookie(w, session)
 	httpx.WriteJSON(w, http.StatusOK, meResponse{User: user})
 }
 
 func (h *Handler) logout(w http.ResponseWriter, _ *http.Request) {
-	ClearSessionCookie(w)
+	h.clearSessionCookie(w)
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -131,7 +141,13 @@ func (h *Handler) oidcLogin(w http.ResponseWriter, r *http.Request) {
 	returnTo := safeReturnTo(r.URL.Query().Get("returnTo"))
 
 	h.stateMu.Lock()
-	h.oidcState[state] = returnTo
+	h.cleanupOIDCStateLocked(time.Now())
+	if len(h.oidcState) >= maxOIDCStates {
+		h.stateMu.Unlock()
+		httpx.WriteErrorKey(w, r, http.StatusTooManyRequests, "too_many_oidc_logins")
+		return
+	}
+	h.oidcState[state] = oidcStateEntry{ReturnTo: returnTo, ExpiresAt: time.Now().Add(10 * time.Minute)}
 	h.stateMu.Unlock()
 
 	http.Redirect(w, r, provider.oauth.AuthCodeURL(state), http.StatusFound)
@@ -180,7 +196,7 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	SetSessionCookie(w, session)
+	h.setSessionCookie(w, session)
 	_ = user
 	http.Redirect(w, r, returnTo, http.StatusFound)
 }
@@ -189,9 +205,28 @@ func (h *Handler) takeOIDCState(state string) (string, bool) {
 	h.stateMu.Lock()
 	defer h.stateMu.Unlock()
 
-	returnTo, ok := h.oidcState[state]
+	entry, ok := h.oidcState[state]
 	delete(h.oidcState, state)
-	return returnTo, ok
+	if !ok || time.Now().After(entry.ExpiresAt) {
+		return "", false
+	}
+	return entry.ReturnTo, true
+}
+
+func (h *Handler) cleanupOIDCStateLocked(now time.Time) {
+	for state, entry := range h.oidcState {
+		if now.After(entry.ExpiresAt) {
+			delete(h.oidcState, state)
+		}
+	}
+}
+
+func (h *Handler) setSessionCookie(w http.ResponseWriter, session Session) {
+	setSessionCookie(w, session, h.secureCookies)
+}
+
+func (h *Handler) clearSessionCookie(w http.ResponseWriter) {
+	clearSessionCookie(w, h.secureCookies)
 }
 
 func (h *Handler) listUsers(w http.ResponseWriter, _ *http.Request) {

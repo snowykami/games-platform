@@ -281,7 +281,7 @@ func TestWerewolfNightUsesLLMDecision(t *testing.T) {
 	}
 	manager.rooms[room.ID] = room
 
-	if _, _, err := manager.RunNextAI(room.ID); err != nil {
+	if _, _, err := manager.RunAIAction(room.ID); err != nil {
 		t.Fatalf("run ai: %v", err)
 	}
 	if provider.input.Game != "werewolf" {
@@ -328,7 +328,7 @@ func TestWerewolfLLMInputDoesNotExposeAIOrHumanIDPrefixes(t *testing.T) {
 	}
 	manager.rooms[room.ID] = room
 
-	if _, _, err := manager.RunNextAI(room.ID); err != nil {
+	if _, _, err := manager.RunAIAction(room.ID); err != nil {
 		t.Fatalf("run ai: %v", err)
 	}
 	payload, err := json.Marshal(provider.input)
@@ -401,12 +401,12 @@ func TestUndercoverLLMDescriptionRejectsUnsafeSpeech(t *testing.T) {
 			WordPair:         UndercoverWordPair{CivilianWord: "苹果", UndercoverWord: "梨"},
 			CurrentSpeakerID: "p1",
 			Described:        map[string]bool{},
-			Votes:            map[string]string{},
+			Votes:            map[string]UndercoverVoteIntent{},
 		},
 	}
 	manager.rooms[room.ID] = room
 
-	if _, _, err := manager.RunNextAI(room.ID); err != nil {
+	if _, _, err := manager.RunAIAction(room.ID); err != nil {
 		t.Fatalf("run ai: %v", err)
 	}
 	if len(room.Speeches) != 1 {
@@ -452,7 +452,7 @@ func TestWerewolfVoteUsesLLMDecision(t *testing.T) {
 	}
 	manager.rooms[room.ID] = room
 
-	if _, _, err := manager.RunNextAI(room.ID); err != nil {
+	if _, _, err := manager.RunAIAction(room.ID); err != nil {
 		t.Fatalf("run ai: %v", err)
 	}
 	if provider.input.Game != "werewolf" {
@@ -649,6 +649,291 @@ func TestWerewolfIdiotSurvivesFirstExile(t *testing.T) {
 	}
 }
 
+func TestSocialAIContextUsesSeatAliasesAndHidesIdentityFields(t *testing.T) {
+	room := &Room{
+		ID:    "AVLCTX",
+		Game:  GameAvalon,
+		Phase: PhaseAvalonTeam,
+		Players: []*Player{
+			testAIPlayer("raw_merlin_id", "梅林", RoleMerlin, AlignmentGood),
+			testAIPlayer("raw_assassin_id", "刺客", RoleAssassin, AlignmentEvil),
+			testAIPlayer("raw_loyal_id", "忠臣", RoleLoyal, AlignmentGood),
+			testAIPlayer("raw_minion_id", "爪牙", RoleMinion, AlignmentEvil),
+			testAIPlayer("raw_loyal_two_id", "忠臣二", RoleLoyal, AlignmentGood),
+		},
+		Avalon: AvalonState{
+			Round:         1,
+			LeaderID:      "raw_merlin_id",
+			Team:          []string{"raw_merlin_id", "raw_loyal_id"},
+			TeamVotes:     map[string]bool{"raw_merlin_id": true, "raw_assassin_id": false},
+			QuestCards:    map[string]string{},
+			RequiredTeam:  2,
+			RequiredFails: 1,
+		},
+		Speeches: []SpeechEntry{{ID: "speech_1", PlayerID: "raw_assassin_id", PlayerName: "刺客", Text: "我先听队长安排。", SpokenAt: time.Now().UTC()}},
+	}
+
+	state := avalonAIState(room, room.Players[2], "team")
+	actions, _ := avalonTeamActionsForLLM(room, avalonTeamActions(room, room.Players[0]))
+	payload, err := json.Marshal(map[string]any{"state": state, "actions": actions})
+	if err != nil {
+		t.Fatalf("marshal ai context: %v", err)
+	}
+	assertAIContextDoesNotLeak(t, string(payload), []string{
+		"raw_merlin_id",
+		"raw_assassin_id",
+		"raw_loyal_id",
+		"raw_minion_id",
+		"raw_loyal_two_id",
+		"ai_raw_",
+		"isAI",
+		"kind",
+		"userId",
+		"connected",
+		"aiProfile",
+		"assassin",
+		"minion",
+	})
+	if !strings.Contains(string(payload), "seat_1") || !strings.Contains(string(payload), "seat_2") {
+		t.Fatalf("expected seat aliases in AI context: %s", string(payload))
+	}
+}
+
+func TestUndercoverAIContextUsesSeatAliasesAndMapsVoteBack(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled:  true,
+		decision: aiplayer.Decision{ActionID: "vote:seat_2", Source: "llm"},
+	}
+	manager := NewManager(GameUndercover, provider)
+	room := &Room{
+		ID:    "UNDCTX",
+		Game:  GameUndercover,
+		Phase: PhaseUndercoverVote,
+		Players: []*Player{
+			testAIPlayer("raw_civilian_id", "平民", RoleCivilian, AlignmentGood),
+			testAIPlayer("raw_undercover_id", "卧底", RoleUndercover, AlignmentEvil),
+			testAIPlayer("raw_blank_id", "白板", RoleBlank, AlignmentNeutral),
+		},
+		Undercover: UndercoverState{
+			Round:     1,
+			WordPair:  UndercoverWordPair{CivilianWord: "苹果", UndercoverWord: "梨"},
+			Described: map[string]bool{"raw_civilian_id": true, "raw_undercover_id": true},
+			Votes:     map[string]UndercoverVoteIntent{"raw_undercover_id": {TargetID: "raw_civilian_id", Confirmed: true}},
+		},
+		Speeches: []SpeechEntry{{ID: "speech_1", PlayerID: "raw_undercover_id", PlayerName: "卧底", Text: "我说一个偏甜的方向。", SpokenAt: time.Now().UTC()}},
+	}
+
+	state := undercoverAIState(room, room.Players[0], "vote")
+	actions, _ := playerTargetActionsForLLM(room, undercoverVoteActions(room, room.Players[0]), []string{"vote:"})
+	payload, err := json.Marshal(map[string]any{"state": state, "actions": actions})
+	if err != nil {
+		t.Fatalf("marshal ai context: %v", err)
+	}
+	assertAIContextDoesNotLeak(t, string(payload), []string{
+		"raw_civilian_id",
+		"raw_undercover_id",
+		"raw_blank_id",
+		"ai_raw_",
+		"isAI",
+		"kind",
+		"userId",
+		"connected",
+		"aiProfile",
+	})
+	if strings.Contains(string(payload), `"role":"undercover"`) || strings.Contains(string(payload), `"role":"blank"`) {
+		t.Fatalf("undercover context leaked other hidden roles: %s", string(payload))
+	}
+
+	manager.mu.Lock()
+	target := manager.chooseUndercoverVote(room, room.Players[0])
+	manager.mu.Unlock()
+	if target == nil || target.ID != "raw_undercover_id" {
+		t.Fatalf("expected vote alias to map back to raw_undercover_id, got %+v", target)
+	}
+}
+
+func TestUndercoverVoteRequiresConfirmationAndAllowsChanges(t *testing.T) {
+	manager := NewManager(GameUndercover, nil)
+	room := &Room{
+		ID:         "UNDREVOTE",
+		Game:       GameUndercover,
+		HostUserID: "u1",
+		Phase:      PhaseUndercoverVote,
+		Players: []*Player{
+			testPlayer("p1", "u1", "玩家一", RoleCivilian, AlignmentGood),
+			testPlayer("p2", "u2", "玩家二", RoleUndercover, AlignmentEvil),
+			testPlayer("p3", "u3", "玩家三", RoleCivilian, AlignmentGood),
+			testPlayer("p4", "u4", "玩家四", RoleCivilian, AlignmentGood),
+		},
+		Undercover: UndercoverState{
+			Round:     1,
+			Described: map[string]bool{"p1": true, "p2": true, "p3": true, "p4": true},
+			Votes:     map[string]UndercoverVoteIntent{},
+		},
+	}
+	manager.rooms[room.ID] = room
+
+	if _, err := manager.UndercoverVote(room.ID, "u1", "p2", false); err != nil {
+		t.Fatalf("select vote: %v", err)
+	}
+	if vote := room.Undercover.Votes["p1"]; vote.TargetID != "p2" || vote.Confirmed {
+		t.Fatalf("expected unconfirmed selection p2, got %+v", vote)
+	}
+	if room.Phase != PhaseUndercoverVote {
+		t.Fatalf("unconfirmed vote should not resolve, got phase %q", room.Phase)
+	}
+
+	if _, err := manager.UndercoverVote(room.ID, "u1", "p3", false); err != nil {
+		t.Fatalf("change vote: %v", err)
+	}
+	if vote := room.Undercover.Votes["p1"]; vote.TargetID != "p3" || vote.Confirmed {
+		t.Fatalf("expected changed unconfirmed selection p3, got %+v", vote)
+	}
+
+	if _, err := manager.UndercoverVote(room.ID, "u1", "p3", true); err != nil {
+		t.Fatalf("confirm vote: %v", err)
+	}
+	if _, err := manager.UndercoverVote(room.ID, "u2", "p3", true); err != nil {
+		t.Fatalf("second vote: %v", err)
+	}
+	if _, err := manager.UndercoverVote(room.ID, "u3", "p2", true); err != nil {
+		t.Fatalf("third vote: %v", err)
+	}
+	if room.Phase != PhaseUndercoverVote {
+		t.Fatalf("not all voters confirmed yet, got phase %q", room.Phase)
+	}
+	if _, err := manager.UndercoverVote(room.ID, "u4", "p2", true); err != nil {
+		t.Fatalf("final vote: %v", err)
+	}
+	if room.Phase == PhaseUndercoverVote {
+		t.Fatalf("expected vote to resolve after all living voters confirm")
+	}
+}
+
+func TestSocialDecisionDoesNotBecomeStaleFromSpeechUpdate(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled:  true,
+		decision: aiplayer.Decision{ActionID: "skip:witch", Source: "llm"},
+	}
+	manager := NewManager(GameWerewolf, provider)
+	room := testWerewolfRoom("WWFSTALE", PhaseWerewolfNight, []*Player{
+		testPlayer("human_villager", "u_human", "真人", RoleVillager, AlignmentGood),
+		testAIPlayer("ai_witch", "女巫", RoleWitch, AlignmentGood),
+		testAIPlayer("ai_wolf", "狼人", RoleWerewolf, AlignmentEvil),
+	})
+	manager.rooms[room.ID] = room
+	provider.onDecide = func(aiplayer.DecisionInput) {
+		if _, err := manager.Say(room.ID, "u_human", "我插一句，不应该打断夜晚行动。"); err != nil {
+			t.Fatalf("say during decision: %v", err)
+		}
+	}
+
+	manager.mu.Lock()
+	actionID, _ := manager.chooseWerewolfNightAction(room, room.Players[1])
+	manager.mu.Unlock()
+
+	if actionID != "skip:witch" {
+		t.Fatalf("expected speech-only update not to stale required action, got %q", actionID)
+	}
+}
+
+func TestSocialDecisionDoesNotBecomeStaleFromPresenceUpdate(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled:  true,
+		decision: aiplayer.Decision{ActionID: "skip:witch", Source: "llm"},
+	}
+	manager := NewManager(GameWerewolf, provider)
+	room := testWerewolfRoom("WWFPRESENCE", PhaseWerewolfNight, []*Player{
+		testPlayer("human_villager", "u_human", "真人", RoleVillager, AlignmentGood),
+		testAIPlayer("ai_witch", "女巫", RoleWitch, AlignmentGood),
+		testAIPlayer("ai_wolf", "狼人", RoleWerewolf, AlignmentEvil),
+	})
+	manager.rooms[room.ID] = room
+	provider.onDecide = func(aiplayer.DecisionInput) {
+		touchPresence(room)
+	}
+
+	manager.mu.Lock()
+	actionID, _ := manager.chooseWerewolfNightAction(room, room.Players[1])
+	manager.mu.Unlock()
+
+	if actionID != "skip:witch" {
+		t.Fatalf("expected presence-only update not to stale required action, got %q", actionID)
+	}
+}
+
+func TestSocialDecisionBecomesStaleFromRuleUpdate(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled:  true,
+		decision: aiplayer.Decision{ActionID: "skip:witch", Source: "llm"},
+	}
+	manager := NewManager(GameWerewolf, provider)
+	room := testWerewolfRoom("WWFRULE", PhaseWerewolfNight, []*Player{
+		testPlayer("human_villager", "u_human", "真人", RoleVillager, AlignmentGood),
+		testAIPlayer("ai_witch", "女巫", RoleWitch, AlignmentGood),
+		testAIPlayer("ai_wolf", "狼人", RoleWerewolf, AlignmentEvil),
+	})
+	touchRule(room)
+	manager.rooms[room.ID] = room
+	provider.onDecide = func(aiplayer.DecisionInput) {
+		touchRule(room)
+	}
+
+	manager.mu.Lock()
+	actionID, _ := manager.chooseWerewolfNightAction(room, room.Players[1])
+	manager.mu.Unlock()
+
+	if actionID != "" {
+		t.Fatalf("expected rule update to stale required action, got %q", actionID)
+	}
+}
+
+func TestSocialOptionalSpeechBecomesStaleFromSpeechUpdate(t *testing.T) {
+	provider := &fakeDecisionProvider{
+		enabled: true,
+		decision: aiplayer.Decision{
+			ActionID: "speak",
+			Speech:   "我插一句自己的判断。",
+			Source:   "llm",
+		},
+	}
+	manager := NewManager(GameWerewolf, provider)
+	room := testWerewolfRoom("WWFSPEECH", PhaseWerewolfDay, []*Player{
+		testPlayer("human_villager", "u_human", "真人", RoleVillager, AlignmentGood),
+		testAIPlayer("ai_villager", "北风", RoleVillager, AlignmentGood),
+	})
+	now := time.Now().UTC()
+	room.RuleUpdatedAt = now
+	room.SpeechUpdatedAt = now
+	room.Speeches = []SpeechEntry{{ID: "speech_1", PlayerID: "human_villager", PlayerName: "真人", Text: "先听听大家。", SpokenAt: now}}
+	manager.rooms[room.ID] = room
+	provider.onDecide = func(aiplayer.DecisionInput) {
+		if _, err := manager.Say(room.ID, "u_human", "我又补一句。"); err != nil {
+			t.Fatalf("say during optional speech: %v", err)
+		}
+	}
+
+	_, changed, err := manager.RunAIOptionalSpeech(room.ID)
+	if err == nil {
+		t.Fatal("expected optional speech to become stale")
+	}
+	if changed {
+		t.Fatal("stale optional speech should not be broadcast as changed")
+	}
+	if len(room.Speeches) != 2 || room.Speeches[1].PlayerName != "真人" {
+		t.Fatalf("expected only human follow-up speech to be recorded, got %+v", room.Speeches)
+	}
+}
+
+func assertAIContextDoesNotLeak(t *testing.T, payload string, forbidden []string) {
+	t.Helper()
+	for _, token := range forbidden {
+		if strings.Contains(payload, token) {
+			t.Fatalf("AI context leaked %q: %s", token, payload)
+		}
+	}
+}
+
 func testPlayer(id string, userID string, name string, role Role, alignment Alignment) *Player {
 	return &Player{
 		ID:        id,
@@ -696,6 +981,7 @@ type fakeDecisionProvider struct {
 	enabled  bool
 	decision aiplayer.Decision
 	input    aiplayer.DecisionInput
+	onDecide func(aiplayer.DecisionInput)
 }
 
 func (p *fakeDecisionProvider) Enabled() bool {
@@ -704,5 +990,8 @@ func (p *fakeDecisionProvider) Enabled() bool {
 
 func (p *fakeDecisionProvider) Decide(_ context.Context, input aiplayer.DecisionInput) (aiplayer.Decision, error) {
 	p.input = input
+	if p.onDecide != nil {
+		p.onDecide(input)
+	}
 	return p.decision, nil
 }

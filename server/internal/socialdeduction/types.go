@@ -181,15 +181,20 @@ type AvalonState struct {
 }
 
 type UndercoverState struct {
-	Round            int                `json:"round"`
-	PresetID         string             `json:"presetId"`
-	Presets          []UndercoverPreset `json:"presets,omitempty"`
-	WordPair         UndercoverWordPair `json:"wordPair,omitempty"`
-	IncludeBlank     bool               `json:"includeBlank"`
-	CurrentSpeakerID string             `json:"currentSpeakerId,omitempty"`
-	Described        map[string]bool    `json:"described"`
-	Votes            map[string]string  `json:"votes"`
-	LastEliminatedID string             `json:"lastEliminatedId,omitempty"`
+	Round            int                             `json:"round"`
+	PresetID         string                          `json:"presetId"`
+	Presets          []UndercoverPreset              `json:"presets,omitempty"`
+	WordPair         UndercoverWordPair              `json:"wordPair,omitempty"`
+	IncludeBlank     bool                            `json:"includeBlank"`
+	CurrentSpeakerID string                          `json:"currentSpeakerId,omitempty"`
+	Described        map[string]bool                 `json:"described"`
+	Votes            map[string]UndercoverVoteIntent `json:"votes"`
+	LastEliminatedID string                          `json:"lastEliminatedId,omitempty"`
+}
+
+type UndercoverVoteIntent struct {
+	TargetID  string `json:"targetId"`
+	Confirmed bool   `json:"confirmed"`
 }
 
 type UndercoverPreset struct {
@@ -231,6 +236,9 @@ type Room struct {
 	RecentActions        []PublicAction
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+	RuleUpdatedAt        time.Time
+	SpeechUpdatedAt      time.Time
+	PresenceUpdatedAt    time.Time
 }
 
 type PublicRoom struct {
@@ -283,15 +291,15 @@ type AvalonView struct {
 }
 
 type UndercoverView struct {
-	Round            int                `json:"round"`
-	PresetID         string             `json:"presetId"`
-	Presets          []UndercoverPreset `json:"presets,omitempty"`
-	WordPair         UndercoverWordPair `json:"wordPair,omitempty"`
-	IncludeBlank     bool               `json:"includeBlank"`
-	CurrentSpeakerID string             `json:"currentSpeakerId,omitempty"`
-	Described        map[string]bool    `json:"described"`
-	Votes            map[string]string  `json:"votes"`
-	LastEliminatedID string             `json:"lastEliminatedId,omitempty"`
+	Round            int                             `json:"round"`
+	PresetID         string                          `json:"presetId"`
+	Presets          []UndercoverPreset              `json:"presets,omitempty"`
+	WordPair         UndercoverWordPair              `json:"wordPair,omitempty"`
+	IncludeBlank     bool                            `json:"includeBlank"`
+	CurrentSpeakerID string                          `json:"currentSpeakerId,omitempty"`
+	Described        map[string]bool                 `json:"described"`
+	Votes            map[string]UndercoverVoteIntent `json:"votes"`
+	LastEliminatedID string                          `json:"lastEliminatedId,omitempty"`
 }
 
 type UserView struct {

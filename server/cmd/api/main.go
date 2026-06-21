@@ -59,7 +59,7 @@ func main() {
 
 func routes(cfg config.Config) http.Handler {
 	authStore := auth.NewStore()
-	authHandler := auth.NewHandler(authStore, cfg.OIDC)
+	authHandler := auth.NewHandler(authStore, cfg.OIDC, cfg.HTTP.SecureSessionCookie)
 	aiProvider := aiplayer.NewOpenAIProvider(cfg.AI)
 	aiHandler := aiplayer.NewHandler(aiProvider)
 	gomokuHandler := gomoku.NewHandler(gomoku.NewManager(aiProvider))
@@ -75,6 +75,7 @@ func routes(cfg config.Config) http.Handler {
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
+	router.Use(securityHeaders)
 	router.Use(auth.Middleware(authStore))
 
 	router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -120,4 +121,18 @@ func routes(cfg config.Config) http.Handler {
 	})
 
 	return router
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'")
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
 }

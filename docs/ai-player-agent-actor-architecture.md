@@ -2,7 +2,7 @@
 
 ## 目标
 
-当前 AI 玩家由房间调度器按需调用，例如 `RunNextAI` 执行正式动作，`RunAISpeech` 执行主动发言。这个模型简单，但 AI 更像一段被动函数，不像持续存在的玩家。它也容易遇到两个问题：
+当前 AI 玩家由房间调度器按需调用，例如 `RunAIAction` 执行正式动作，`RunAIOptionalSpeech` 执行主动发言。这个模型简单，但 AI 更像一段被动函数，不像持续存在的玩家。它也容易遇到两个问题：
 
 - 正式动作和主动发言并发触发，互相更新房间版本，导致 stale decision。
 - 社交推理游戏缺少长期个人状态，AI 容易忘记自己刚才说过什么、怀疑谁、为什么投票。
@@ -14,7 +14,7 @@
 - 房间仍然保持服务端权威，AI 只能提交意图，不能直接改权威状态。
 - 支持不同游戏复用同一套 AI Agent 管线。
 
-本项目当前尚未正式上线，因此本计划按 **重构优先** 执行，不以保留旧内部接口为目标。可以破坏现有 manager / hub / AI 调度内部结构，只要最终 HTTP/WebSocket 对前端的行为清晰、实现更简单、更一致即可。避免为了短期兼容保留双套调度逻辑，避免让旧 `RunNextAI` / `RunAISpeech` 和新 Actor 模型长期并存。
+本项目当前尚未正式上线，因此本计划按 **重构优先** 执行，不以保留旧内部接口为目标。可以破坏现有 manager / hub / AI 调度内部结构，只要最终 HTTP/WebSocket 对前端的行为清晰、实现更简单、更一致即可。避免为了短期兼容保留双套调度逻辑，避免让旧 `RunAIAction` / `RunAIOptionalSpeech` 和新 Actor 模型长期并存。
 
 ## 核心结论
 
@@ -768,6 +768,25 @@ error
 
 ## 重构实施计划
 
+### 当前落地状态
+
+- 已新增 `server/internal/gameactor`，包含 `RoomEvent`、`AgentEvent`、`PlayerIntent`、`ActiveAgentRequest`、`RoomVersion`、legal action hash、轻量 `RoomActor` 串行 inbox 和 `RoomCommandRegistry` 同步命令层。
+- 已新增 `gameactor.RoomAIScheduler`，把各游戏 Hub 里重复的旧 AI goroutine 去重集中；它只是迁移过渡层，不是最终 Agent Actor。
+- 已新增 `server/internal/aiagent`，包含每个 AI session 可复用的 `Runner`、`Memory`、persona 输入、LLM request lifecycle、常驻 `Agent` inbox loop、`Registry` 生命周期管理，以及面向各游戏 manager 的 `Controller`。
+- 已调整 `gameactor.RoomAIScheduler`：同一房间 required action 链运行时不并发 optional speech，发言会延后到正式动作链结束，避免可选发言干扰正式决策。
+- Uno、五子棋、象棋、麻将、狼人杀、阿瓦隆和谁是卧底的 HTTP / WebSocket / AI scheduler 写入口已迁入 `RoomCommandRegistry`。同一 room 的加入/离开、发言、开始、出牌/落子/移动、社交推理行动、AI 正式动作和 AI 可选发言会按 room actor 队列串行执行。
+- Uno 的后台 tick 超时自动行动和离线销毁也已逐房间进入 `RoomCommandRegistry`，避免 ticker 绕过 room actor。
+- 所有游戏的 LLM 决策已统一经由 `aiagent.Controller` 投递给对应 AI 玩家自己的 `aiagent.Agent` goroutine；Agent 串行处理该玩家的 LLM 请求，并通过 intent 回传给 manager 做最终规则校验和 stale 判断。
+- 游戏 manager 不再直接调用 `aiProvider.Decide`，也不再直接维护 LLM request broker / agent registry。规则 AI 和 fallback 策略仍保留在各游戏规则层。
+- 非社交推理游戏释放锁等待 LLM 后会做 stale 校验：required action 绑定 `Phase + ActionSeq`，发言不会让正式动作过期；optional speech 绑定 `UpdatedAt`，桌面出现新发言或状态更新后旧发言会被丢弃。
+- 已将社交推理 required action stale 判定收窄到规则版本：speech / presence / view 更新不得让正式动作过期。
+- 已将社交推理 optional speech 判定绑定到发言版本：AI 主动发言等待期间如果桌面出现新发言，旧发言会被丢弃。
+- 已将社交推理 AI context 中的玩家引用改为 `seat_1` 这类座位别名，并禁止泄露 `kind`、`isAI`、`userId`、`aiProfile`、`connected` 等内部或真实性字段。
+- 已将谁是卧底投票改为 select / change / confirm 模型，只有 confirmed vote 参与结算。
+- 已拆出 `socialdeduction/versions.go`、`ai_context.go`、`rules_undercover.go` 和 `undercover_view.go`，先降低 `manager.go` 对版本、AI context、谁是卧底规则/视图的混杂职责。
+- 已完成旧 AI 调度入口的命名清理：各游戏使用 `RunAIAction` / `RunAIOptionalSpeech` / `ScheduleAIAction` / `ScheduleAIOptionalSpeech` 表达 actor 化调度语义，运行时由 `RoomCommandRegistry` 包裹，不再绕过 room actor 写状态。
+- 尚未完成：继续拆薄大型 manager/http 文件，并在后续迭代中把当前同步命令层进一步收敛为更完整的 `GameAdapter -> RoomActor` 规则应用结构。
+
 ### 阶段 1：抽公共包
 
 新增：
@@ -778,6 +797,7 @@ server/internal/aiagent/
   agent.go
   memory.go
   prompts.go
+  registry.go
   scheduler.go
 ```
 
@@ -804,7 +824,7 @@ server/internal/aiagent/
 - 描述阶段由 required action 触发。
 - 投票阶段支持 select + confirm。
 - optional speech 不影响 required action。
-- 删除谁是卧底旧 `RunNextAI` / `RunAISpeech` 路径，避免同一游戏双轨调度。
+- 删除谁是卧底旧 `RunAIAction` / `RunAIOptionalSpeech` 路径，避免同一游戏双轨调度。
 - 拆出谁是卧底规则、视图投影、AI context 和前端房间组件，避免社交推理大文件继续膨胀。
 
 ### 阶段 3：狼人杀迁移
@@ -845,9 +865,9 @@ server/internal/aiagent/
 
 所有游戏迁移完成后删除共享层面的旧调度概念：
 
-- `RunNextAI`
-- `RunAISpeech`
-- Hub 内的重复 `ScheduleAI` / `ScheduleAISpeech`
+- `RunAIAction`
+- `RunAIOptionalSpeech`
+- Hub 内的重复 `ScheduleAI` / `ScheduleAIOptionalSpeech`
 
 改为 RoomActor 统一调度。
 

@@ -59,7 +59,7 @@ func TestManagerRunsAI(t *testing.T) {
 		t.Fatalf("human move: %v", err)
 	}
 
-	next, _, err := manager.RunNextAI(room.ID)
+	next, _, err := manager.RunAIAction(room.ID)
 	if err != nil {
 		t.Fatalf("run ai: %v", err)
 	}

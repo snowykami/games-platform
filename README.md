@@ -36,7 +36,7 @@
 
 ```text
 .
-├── docs/                    # 需求规格和前端游戏 UI 规范
+├── docs/                    # 项目指引、前端游戏 UI 规范和 AI Actor 重构计划
 ├── server/                  # Go 后端
 │   ├── cmd/api/             # API 服务入口
 │   └── internal/
@@ -63,6 +63,8 @@ cp .env.example .env
 
 ```bash
 PORT=8901
+APP_ENV=development
+SESSION_COOKIE_SECURE=false
 DB_URL=postgres://games_platform:games_platform@localhost:5436/games_platform?sslmode=disable
 REDIS_URL=redis://localhost:6385/0
 LLM_API=
@@ -76,6 +78,8 @@ OIDC_PROVIDERS_JSON=
 ```bash
 OIDC_PROVIDERS_JSON='[{"key":"google","displayName":"Google","issuerUrl":"https://accounts.google.com","clientId":"xxx","clientSecret":"xxx","redirectUrl":"http://localhost:5173/api/auth/oidc/google/callback"}]'
 ```
+
+生产环境建议设置 `APP_ENV=production` 或 `SESSION_COOKIE_SECURE=true`，确保 session cookie 只通过 HTTPS 发送。
 
 ## 本地开发
 
@@ -96,6 +100,8 @@ pnpm dev:infra
 ```bash
 pnpm dev:server
 ```
+
+Go 后端不会热重载；修改 `server/` 下代码后需要停止并重启 `pnpm dev:server`，再进行浏览器验证。
 
 启动前端开发服务器：
 
@@ -177,8 +183,12 @@ BASE_URL=http://127.0.0.1:8901 pnpm --dir web verify:ui
 
 ## 相关文档
 
-- [需求规格](docs/spec.md)
+- [项目指引](docs/project-guidelines.md)
 - [前端游戏 UI 开发规范](docs/frontend-game-ui-guidelines.md)
+- [AI 玩家 Agent Actor 重构计划](docs/ai-player-agent-actor-architecture.md)
+- [新游戏功能检查表](docs/game-feature-checklist.md)
+- [AI Function Calling 规范](docs/ai-function-calling.md)
+- [资产与 UI 指引](docs/assets-and-ui.md)
 
 ## 当前限制
 

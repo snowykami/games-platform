@@ -11,7 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/snowykami/games-platform/server/internal/aiagent"
 	"github.com/snowykami/games-platform/server/internal/aiplayer"
+	"github.com/snowykami/games-platform/server/internal/gameactor"
 	"github.com/snowykami/games-platform/server/internal/roommeta"
 )
 
@@ -25,9 +27,13 @@ const (
 var colors = []Color{ColorRed, ColorYellow, ColorGreen, ColorBlue}
 
 type Manager struct {
+	*gameactor.RoomRuntime
+
 	aiProvider aiplayer.Provider
 	mu         sync.RWMutex
 	rooms      map[string]*Room
+
+	aiController *aiagent.Controller
 }
 
 type TickResult struct {
@@ -37,7 +43,12 @@ type TickResult struct {
 }
 
 func NewManager(aiProvider aiplayer.Provider) *Manager {
-	return &Manager{aiProvider: aiProvider, rooms: map[string]*Room{}}
+	return &Manager{
+		RoomRuntime:  gameactor.NewRoomRuntime(64),
+		aiProvider:   aiProvider,
+		rooms:        map[string]*Room{},
+		aiController: aiagent.NewController("uno", aiProvider, aiplayer.DecisionTimeout),
+	}
 }
 
 func (m *Manager) CreateRoom(user UserView, options RoomOptions) PublicRoom {
@@ -195,9 +206,30 @@ func (m *Manager) RemovePlayer(roomID string, actorID string, playerID string) (
 		return PublicRoom{}, errors.New("cannot_remove_host")
 	}
 	room.Players = slices.Delete(room.Players, index, index+1)
+	if player.IsAI {
+		m.removeAIAgent(room.ID, player.ID)
+	}
 	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 被房主移出了房间。", player.Name)))
 	room.UpdatedAt = time.Now().UTC()
 	return publicRoom(room, actorID), nil
+}
+
+func (m *Manager) Close() {
+	if m.aiController != nil {
+		m.aiController.Close()
+	}
+	if m.RoomRuntime != nil {
+		m.RoomRuntime.Close()
+	}
+	m.mu.RLock()
+	roomIDs := make([]string, 0, len(m.rooms))
+	for roomID := range m.rooms {
+		roomIDs = append(roomIDs, roomID)
+	}
+	m.mu.RUnlock()
+	for _, roomID := range roomIDs {
+		m.removeRoomAgents(roomID)
+	}
 }
 
 func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, error) {
@@ -217,7 +249,7 @@ func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, e
 	return publicRoom(room, actorID), nil
 }
 
-func (m *Manager) RunAISpeech(roomID string) (PublicRoom, bool, error) {
+func (m *Manager) RunAIOptionalSpeech(roomID string) (PublicRoom, bool, error) {
 	if m.aiProvider == nil || !m.aiProvider.Enabled() {
 		return PublicRoom{}, false, nil
 	}
@@ -249,41 +281,25 @@ func (m *Manager) RunAISpeech(roomID string) (PublicRoom, bool, error) {
 		return view, false, nil
 	}
 	room.LastAISpeechSourceID = lastSpeech.ID
-	input := aiplayer.DecisionInput{
-		Game:        "uno",
-		Level:       aiplayer.LevelLLM,
-		SessionID:   player.ID + ":speech",
-		PlayerName:  player.Name,
-		Personality: player.AI.Personality,
-		SpeechStyle: player.AI.SpeechStyle,
-		State: map[string]any{
-			"phase":        room.Phase,
-			"activeColor":  room.ActiveColor,
-			"topCard":      discardTopCard(room),
-			"handCount":    len(player.Hand),
-			"recentSpeech": recentSpeeches(room),
-			"speechGuide":  "像 UNO 朋友局里自然接一句，短句即可；如果没必要回应就跳过。",
-		},
-		Actions: speechActions(),
-	}
 	updatedAt := room.UpdatedAt
 	playerID := player.ID
-	room.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), aiplayer.DecisionTimeout)
-	decision, err := m.aiProvider.Decide(ctx, input)
-	cancel()
+	decision, err := m.decideWithAIAgent(room, player, gameactor.AgentOptionalSpeech, map[string]any{
+		"phase":        room.Phase,
+		"activeColor":  room.ActiveColor,
+		"topCard":      discardTopCard(room),
+		"handCount":    len(player.Hand),
+		"recentSpeech": recentSpeeches(room),
+		"speechGuide":  "像 UNO 朋友局里自然接一句，短句即可；如果没必要回应就跳过。",
+	}, speechActions())
 	if err != nil {
+		room.mu.Unlock()
 		return PublicRoom{}, false, err
 	}
 	if decision.ActionID != "speak" || strings.TrimSpace(decision.Speech) == "" {
+		room.mu.Unlock()
 		return PublicRoom{}, false, nil
 	}
 
-	room, err = m.lockRoom(roomID)
-	if err != nil {
-		return PublicRoom{}, false, err
-	}
 	defer room.mu.Unlock()
 	player = findPlayerByID(room, playerID)
 	if player == nil || !player.IsAI || !room.UpdatedAt.Equal(updatedAt) {
@@ -477,7 +493,7 @@ func (m *Manager) CatchUNO(roomID string, actorID string, targetID string) (Publ
 	return publicRoom(room, actorID), nil
 }
 
-func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
+func (m *Manager) RunAIAction(roomID string) (PublicRoom, bool, error) {
 	startedAt := time.Now()
 
 	room, err := m.lockRoom(roomID)
@@ -547,39 +563,56 @@ func hasPendingAIRequiredAction(room *Room) bool {
 func (m *Manager) Tick(now time.Time) TickResult {
 	now = now.UTC()
 	m.mu.RLock()
-	rooms := make([]*Room, 0, len(m.rooms))
-	for _, room := range m.rooms {
-		rooms = append(rooms, room)
+	roomIDs := make([]string, 0, len(m.rooms))
+	for roomID := range m.rooms {
+		roomIDs = append(roomIDs, roomID)
 	}
 	m.mu.RUnlock()
 
 	result := TickResult{}
-	for _, room := range rooms {
-		room.mu.Lock()
-		roomID := room.ID
-		destroy := shouldDestroyOfflineRoom(room, now)
-		if destroy {
-			room.mu.Unlock()
-			result.DestroyedRoomIDs = append(result.DestroyedRoomIDs, roomID)
-			continue
-		}
+	for _, roomID := range roomIDs {
+		err := m.RunRoomCommand(context.Background(), roomID, gameactor.EventTurnDeadlineReached, gameactor.LaneRule, func() error {
+			room, err := m.room(roomID)
+			if err != nil {
+				return nil
+			}
+			room.mu.Lock()
+			defer room.mu.Unlock()
+			destroy := shouldDestroyOfflineRoom(room, now)
+			if destroy {
+				result.DestroyedRoomIDs = append(result.DestroyedRoomIDs, roomID)
+				return nil
+			}
 
-		if room.Phase == PhasePlaying && len(room.Players) > 0 {
-			result.BroadcastRoomIDs = append(result.BroadcastRoomIDs, roomID)
-			if applyTimeoutTurn(room, now) {
+			if room.Phase == PhasePlaying && len(room.Players) > 0 {
+				result.BroadcastRoomIDs = append(result.BroadcastRoomIDs, roomID)
+				if applyTimeoutTurn(room, now) {
+					result.ScheduleAIRoomIDs = append(result.ScheduleAIRoomIDs, roomID)
+				}
+				if room.Phase == PhasePlaying && len(room.Players) > 0 && room.Players[room.CurrentPlayerIndex].IsAI {
+					result.ScheduleAIRoomIDs = append(result.ScheduleAIRoomIDs, roomID)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			if errors.Is(err, gameactor.ErrActorClosed) {
+				continue
+			}
+			m.mu.RLock()
+			if _, ok := m.rooms[roomID]; ok {
 				result.ScheduleAIRoomIDs = append(result.ScheduleAIRoomIDs, roomID)
 			}
-			if room.Phase == PhasePlaying && len(room.Players) > 0 && room.Players[room.CurrentPlayerIndex].IsAI {
-				result.ScheduleAIRoomIDs = append(result.ScheduleAIRoomIDs, roomID)
-			}
+			m.mu.RUnlock()
 		}
-		room.mu.Unlock()
 	}
 
 	if len(result.DestroyedRoomIDs) > 0 {
 		m.mu.Lock()
 		for _, roomID := range result.DestroyedRoomIDs {
 			delete(m.rooms, roomID)
+			m.removeRoomAgents(roomID)
+			m.RemoveRoom(roomID)
 		}
 		m.mu.Unlock()
 	}
@@ -1231,27 +1264,63 @@ func (m *Manager) decideWithLLM(room *Room, player *Player, actions []aiTurnActi
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), aiplayer.DecisionTimeout)
-	defer cancel()
-	return m.aiProvider.Decide(ctx, aiplayer.DecisionInput{
-		Game:        "uno",
-		Level:       aiplayer.LevelLLM,
-		SessionID:   player.ID,
-		PlayerName:  player.Name,
-		Personality: player.AI.Personality,
-		SpeechStyle: player.AI.SpeechStyle,
-		State: map[string]any{
-			"activeColor":      room.ActiveColor,
-			"direction":        room.Direction,
-			"pendingDrawCount": room.PendingDrawCount,
-			"topCard":          discardTopCard(room),
-			"hand":             player.Hand,
-			"opponents":        publicOpponentCounts(room, player.ID),
-			"recentSpeech":     recentSpeeches(room),
-			"speechGuide":      "UNO 发言像普通朋友局：短句、自然、可以吐槽牌不好或提醒颜色，不要中二台词，不要解释规则。",
+	return m.decideWithAIAgent(room, player, gameactor.AgentRequiredAction, map[string]any{
+		"activeColor":      room.ActiveColor,
+		"direction":        room.Direction,
+		"pendingDrawCount": room.PendingDrawCount,
+		"topCard":          discardTopCard(room),
+		"hand":             player.Hand,
+		"opponents":        publicOpponentCounts(room, player.ID),
+		"recentSpeech":     recentSpeeches(room),
+		"speechGuide":      "UNO 发言像普通朋友局：短句、自然、可以吐槽牌不好或提醒颜色，不要中二台词，不要解释规则。",
+	}, legalActions)
+}
+
+func (m *Manager) decideWithAIAgent(room *Room, player *Player, eventType gameactor.AgentEventType, state map[string]any, actions []aiplayer.LegalAction) (aiplayer.Decision, error) {
+	if m.aiController == nil || !m.aiController.Enabled() {
+		return aiplayer.Decision{}, aiagent.ErrLLMNotConfigured
+	}
+	expectedPhase := room.Phase
+	expectedActionSeq := room.ActionSeq
+	expectedUpdatedAt := room.UpdatedAt
+	return m.aiController.Decide(aiagent.DecisionRequest{
+		RoomID:        room.ID,
+		PlayerID:      player.ID,
+		RequestPrefix: "uno",
+		SessionID:     "uno:" + room.ID + ":" + player.ID,
+		Phase:         string(room.Phase),
+		Type:          eventType,
+		Profile: aiagent.Profile{
+			Name:        player.Name,
+			Personality: player.AI.Personality,
+			SpeechStyle: player.AI.SpeechStyle,
 		},
-		Actions: legalActions,
+		State:   state,
+		Actions: actions,
+		Unlock:  room.mu.Unlock,
+		Lock:    room.mu.Lock,
+		Stale: func(_ aiplayer.Decision) error {
+			if room.Phase != expectedPhase || room.ActionSeq != expectedActionSeq {
+				return errors.New("ai_agent_decision_stale")
+			}
+			if eventType == gameactor.AgentOptionalSpeech && !room.UpdatedAt.Equal(expectedUpdatedAt) {
+				return errors.New("ai_agent_speech_stale")
+			}
+			return nil
+		},
 	})
+}
+
+func (m *Manager) removeAIAgent(roomID string, playerID string) {
+	if m.aiController != nil {
+		m.aiController.Remove(roomID, playerID)
+	}
+}
+
+func (m *Manager) removeRoomAgents(roomID string) {
+	if m.aiController != nil {
+		m.aiController.RemoveRoom(roomID)
+	}
 }
 
 func legalAIActions(room *Room, player *Player) []aiTurnAction {

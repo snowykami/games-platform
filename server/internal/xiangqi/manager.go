@@ -1,7 +1,6 @@
 package xiangqi
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,7 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/snowykami/games-platform/server/internal/aiagent"
 	"github.com/snowykami/games-platform/server/internal/aiplayer"
+	"github.com/snowykami/games-platform/server/internal/gameactor"
 	"github.com/snowykami/games-platform/server/internal/roommeta"
 )
 
@@ -28,13 +29,22 @@ var slidingDirections = []Position{
 }
 
 type Manager struct {
+	*gameactor.RoomRuntime
+
 	mu         sync.Mutex
 	rooms      map[string]*Room
 	aiProvider aiplayer.Provider
+
+	aiController *aiagent.Controller
 }
 
 func NewManager(aiProvider aiplayer.Provider) *Manager {
-	return &Manager{rooms: map[string]*Room{}, aiProvider: aiProvider}
+	return &Manager{
+		RoomRuntime:  gameactor.NewRoomRuntime(64),
+		rooms:        map[string]*Room{},
+		aiProvider:   aiProvider,
+		aiController: aiagent.NewController("xiangqi", aiProvider, aiplayer.DecisionTimeout),
+	}
 }
 
 func (m *Manager) CreateRoom(user UserView) PublicRoom {
@@ -193,11 +203,32 @@ func (m *Manager) RemovePlayer(roomID string, actorID string, playerID string) (
 			return PublicRoom{}, errors.New("cannot_remove_host")
 		}
 		room.Players = append(room.Players[:index], room.Players[index+1:]...)
+		if player.IsAI {
+			m.removeAIAgent(room.ID, player.ID)
+		}
 		room.Log = append(room.Log, createLog(fmt.Sprintf("%s 被房主移出了房间。", player.Name)))
 		room.UpdatedAt = time.Now().UTC()
 		return publicRoom(room, actorID), nil
 	}
 	return PublicRoom{}, errors.New("player_not_found")
+}
+
+func (m *Manager) Close() {
+	if m.aiController != nil {
+		m.aiController.Close()
+	}
+	if m.RoomRuntime != nil {
+		m.RoomRuntime.Close()
+	}
+	m.mu.Lock()
+	roomIDs := make([]string, 0, len(m.rooms))
+	for roomID := range m.rooms {
+		roomIDs = append(roomIDs, roomID)
+	}
+	m.mu.Unlock()
+	for _, roomID := range roomIDs {
+		m.removeRoomAgents(roomID)
+	}
 }
 
 func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, error) {
@@ -219,7 +250,7 @@ func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, e
 	return publicRoom(room, actorID), nil
 }
 
-func (m *Manager) RunAISpeech(roomID string) (PublicRoom, bool, error) {
+func (m *Manager) RunAIOptionalSpeech(roomID string) (PublicRoom, bool, error) {
 	if m.aiProvider == nil || !m.aiProvider.Enabled() {
 		return PublicRoom{}, false, nil
 	}
@@ -253,38 +284,25 @@ func (m *Manager) RunAISpeech(roomID string) (PublicRoom, bool, error) {
 		return view, false, nil
 	}
 	room.LastAISpeechSourceID = lastSpeech.ID
-	input := aiplayer.DecisionInput{
-		Game:        "xiangqi",
-		Level:       aiplayer.LevelLLM,
-		SessionID:   player.ID + ":speech",
-		PlayerName:  player.Name,
-		Personality: player.AI.Personality,
-		SpeechStyle: player.AI.SpeechStyle,
-		State: map[string]any{
-			"phase":        room.Phase,
-			"side":         player.Side,
-			"check":        room.CheckSide,
-			"recentMoves":  recentXiangqiMoves(room),
-			"recentSpeech": recentSpeeches(room),
-			"speechGuide":  "像象棋桌上的自然短句，可以评价局势或回应别人，不要长篇复盘。",
-		},
-		Actions: speechActions(),
-	}
 	updatedAt := room.UpdatedAt
 	playerID := player.ID
-	m.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), aiplayer.DecisionTimeout)
-	decision, err := m.aiProvider.Decide(ctx, input)
-	cancel()
+	decision, err := m.decideWithAIAgent(room, player, gameactor.AgentOptionalSpeech, map[string]any{
+		"phase":        room.Phase,
+		"side":         player.Side,
+		"check":        room.CheckSide,
+		"recentMoves":  recentXiangqiMoves(room),
+		"recentSpeech": recentSpeeches(room),
+		"speechGuide":  "像象棋桌上的自然短句，可以评价局势或回应别人，不要长篇复盘。",
+	}, speechActions())
 	if err != nil {
+		m.mu.Unlock()
 		return PublicRoom{}, false, err
 	}
 	if decision.ActionID != "speak" || strings.TrimSpace(decision.Speech) == "" {
+		m.mu.Unlock()
 		return PublicRoom{}, false, nil
 	}
 
-	m.mu.Lock()
 	defer m.mu.Unlock()
 	room, err = m.room(roomID)
 	if err != nil {
@@ -380,7 +398,7 @@ func (m *Manager) Move(roomID string, actorID string, pieceID string, to Positio
 	return publicRoom(room, actorID), nil
 }
 
-func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
+func (m *Manager) RunAIAction(roomID string) (PublicRoom, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	startedAt := time.Now()
@@ -815,30 +833,13 @@ func (m *Manager) decideXiangqiWithLLM(room *Room, player *Player) (Piece, Posit
 		})
 	}
 
-	personality := ""
-	speechStyle := ""
-	if player.AI != nil {
-		personality = player.AI.Personality
-		speechStyle = player.AI.SpeechStyle
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), aiplayer.DecisionTimeout)
-	defer cancel()
-	decision, err := m.aiProvider.Decide(ctx, aiplayer.DecisionInput{
-		Game:        "xiangqi",
-		Level:       aiplayer.LevelLLM,
-		SessionID:   player.ID,
-		PlayerName:  player.Name,
-		Personality: personality,
-		SpeechStyle: speechStyle,
-		State: map[string]any{
-			"side":         player.Side,
-			"pieces":       room.Pieces,
-			"moves":        recentXiangqiMoves(room),
-			"check":        room.CheckSide,
-			"recentSpeech": recentSpeeches(room),
-		},
-		Actions: actions,
-	})
+	decision, err := m.decideWithAIAgent(room, player, gameactor.AgentRequiredAction, map[string]any{
+		"side":         player.Side,
+		"pieces":       room.Pieces,
+		"moves":        recentXiangqiMoves(room),
+		"check":        room.CheckSide,
+		"recentSpeech": recentSpeeches(room),
+	}, actions)
 	if err != nil {
 		return Piece{}, Position{}, false, "", err
 	}
@@ -849,6 +850,59 @@ func (m *Manager) decideXiangqiWithLLM(room *Room, player *Player) (Piece, Posit
 		}
 	}
 	return Piece{}, Position{}, false, "", errors.New("llm_illegal_action")
+}
+
+func (m *Manager) decideWithAIAgent(room *Room, player *Player, eventType gameactor.AgentEventType, state map[string]any, actions []aiplayer.LegalAction) (aiplayer.Decision, error) {
+	if m.aiController == nil || !m.aiController.Enabled() {
+		return aiplayer.Decision{}, aiagent.ErrLLMNotConfigured
+	}
+	expectedPhase := room.Phase
+	expectedActionSeq := room.ActionSeq
+	expectedUpdatedAt := room.UpdatedAt
+	personality := ""
+	speechStyle := ""
+	if player.AI != nil {
+		personality = player.AI.Personality
+		speechStyle = player.AI.SpeechStyle
+	}
+	return m.aiController.Decide(aiagent.DecisionRequest{
+		RoomID:        room.ID,
+		PlayerID:      player.ID,
+		RequestPrefix: "xiangqi",
+		SessionID:     "xiangqi:" + room.ID + ":" + player.ID,
+		Phase:         string(room.Phase),
+		Type:          eventType,
+		Profile: aiagent.Profile{
+			Name:        player.Name,
+			Personality: personality,
+			SpeechStyle: speechStyle,
+		},
+		State:   state,
+		Actions: actions,
+		Unlock:  m.mu.Unlock,
+		Lock:    m.mu.Lock,
+		Stale: func(_ aiplayer.Decision) error {
+			if room.Phase != expectedPhase || room.ActionSeq != expectedActionSeq {
+				return errors.New("ai_agent_decision_stale")
+			}
+			if eventType == gameactor.AgentOptionalSpeech && !room.UpdatedAt.Equal(expectedUpdatedAt) {
+				return errors.New("ai_agent_speech_stale")
+			}
+			return nil
+		},
+	})
+}
+
+func (m *Manager) removeAIAgent(roomID string, playerID string) {
+	if m.aiController != nil {
+		m.aiController.Remove(roomID, playerID)
+	}
+}
+
+func (m *Manager) removeRoomAgents(roomID string) {
+	if m.aiController != nil {
+		m.aiController.RemoveRoom(roomID)
+	}
 }
 
 func chooseAIMove(room *Room, side Side, level aiplayer.Level) (Piece, Position, bool) {

@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/snowykami/games-platform/server/internal/auth"
+	"github.com/snowykami/games-platform/server/internal/gameactor"
 	"github.com/snowykami/games-platform/server/internal/httpx"
 )
 
@@ -91,12 +92,15 @@ func (h *Handler) WebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	roomID := r.URL.Query().Get("room")
-	if _, err := h.manager.JoinRoom(roomID, toUserView(user)); err != nil {
+	if err := h.manager.RunRoomCommand(r.Context(), roomID, gameactor.EventPlayerConnected, gameactor.LanePresence, func() error {
+		_, err := h.manager.JoinRoom(roomID, toUserView(user))
+		return err
+	}); err != nil {
 		httpx.WriteErrorKey(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
 	}
@@ -132,14 +136,20 @@ func (h *Handler) getRoom(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) joinRoom(w http.ResponseWriter, r *http.Request) {
 	user := mustUser(r)
-	room, err := h.manager.JoinRoom(chi.URLParam(r, "roomID"), toUserView(user))
+	roomID := chi.URLParam(r, "roomID")
+	var room PublicRoom
+	err := h.manager.RunRoomCommand(r.Context(), roomID, gameactor.EventPlayerConnected, gameactor.LanePresence, func() error {
+		var err error
+		room, err = h.manager.JoinRoom(roomID, toUserView(user))
+		return err
+	})
 	if err != nil {
 		httpx.WriteErrorKey(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	h.hub.Broadcast(room.ID)
-	h.hub.ScheduleAI(room.ID)
-	h.hub.ScheduleAISpeech(room.ID)
+	h.hub.ScheduleAIAction(room.ID)
+	h.hub.ScheduleAIOptionalSpeech(room.ID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
 }
 
@@ -177,7 +187,12 @@ func (h *Handler) removePlayer(w http.ResponseWriter, r *http.Request) {
 	if current, err := h.manager.Public(roomID, user.ID); err == nil {
 		targetUserID = playerUserID(current.Players, playerID)
 	}
-	room, err := h.manager.RemovePlayer(roomID, user.ID, playerID)
+	var room PublicRoom
+	err := h.manager.RunRoomCommand(r.Context(), roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+		var err error
+		room, err = h.manager.RemovePlayer(roomID, user.ID, playerID)
+		return err
+	})
 	if err != nil {
 		httpx.WriteErrorKey(w, r, http.StatusBadRequest, err.Error())
 		return
@@ -193,7 +208,7 @@ func (h *Handler) speech(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteErrorKey(w, r, http.StatusBadRequest, "invalid_json_body")
 		return
 	}
-	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
+	h.mutateRoomWithEvent(w, r, gameactor.EventPlayerSpeech, gameactor.LaneSpeech, func(roomID string, userID string) (PublicRoom, error) {
 		return h.manager.Say(roomID, userID, request.Text)
 	})
 }
@@ -252,14 +267,24 @@ func (h *Handler) catchUNO(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) mutateRoom(w http.ResponseWriter, r *http.Request, mutate func(roomID string, userID string) (PublicRoom, error)) {
+	h.mutateRoomWithEvent(w, r, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, mutate)
+}
+
+func (h *Handler) mutateRoomWithEvent(w http.ResponseWriter, r *http.Request, eventType gameactor.RoomEventType, lane gameactor.EventLane, mutate func(roomID string, userID string) (PublicRoom, error)) {
 	user := mustUser(r)
-	room, err := mutate(chi.URLParam(r, "roomID"), user.ID)
+	roomID := chi.URLParam(r, "roomID")
+	var room PublicRoom
+	err := h.manager.RunRoomCommand(r.Context(), roomID, eventType, lane, func() error {
+		var err error
+		room, err = mutate(roomID, user.ID)
+		return err
+	})
 	if err != nil {
 		httpx.WriteErrorKey(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	h.hub.Broadcast(room.ID)
-	h.hub.ScheduleAI(room.ID)
+	h.hub.ScheduleAIAction(room.ID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]PublicRoom{"room": room})
 }
 
@@ -279,20 +304,42 @@ type Subscriber struct {
 }
 
 type Hub struct {
-	manager         *Manager
-	mu              sync.Mutex
-	subscribers     map[*Subscriber]struct{}
-	aiRunning       map[string]struct{}
-	aiSpeechRunning map[string]struct{}
+	manager     *Manager
+	mu          sync.Mutex
+	subscribers map[*Subscriber]struct{}
+	aiScheduler *gameactor.RoomAIScheduler
 }
 
 func NewHub(manager *Manager) *Hub {
 	hub := &Hub{
-		manager:         manager,
-		subscribers:     map[*Subscriber]struct{}{},
-		aiRunning:       map[string]struct{}{},
-		aiSpeechRunning: map[string]struct{}{},
+		manager:     manager,
+		subscribers: map[*Subscriber]struct{}{},
 	}
+	hub.aiScheduler = gameactor.NewRoomAIScheduler(
+		720*time.Millisecond,
+		900*time.Millisecond,
+		func(roomID string) (gameactor.AIActionResult, error) {
+			var room PublicRoom
+			shouldContinue := false
+			err := manager.RunRoomCommand(context.Background(), roomID, gameactor.EventAIIntentSubmitted, gameactor.LaneRule, func() error {
+				var err error
+				room, shouldContinue, err = manager.RunAIAction(roomID)
+				return err
+			})
+			return gameactor.AIActionResult{RoomID: room.ID, Continue: shouldContinue}, err
+		},
+		func(roomID string) (gameactor.AIOptionalSpeechResult, error) {
+			var room PublicRoom
+			changed := false
+			err := manager.RunRoomCommand(context.Background(), roomID, gameactor.EventPlayerSpeech, gameactor.LaneSpeech, func() error {
+				var err error
+				room, changed, err = manager.RunAIOptionalSpeech(roomID)
+				return err
+			})
+			return gameactor.AIOptionalSpeechResult{RoomID: room.ID, Changed: changed}, err
+		},
+		hub.Broadcast,
+	)
 	go hub.runScheduler()
 	return hub
 }
@@ -309,7 +356,10 @@ func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, conn 
 		h.mu.Lock()
 		delete(h.subscribers, sub)
 		h.mu.Unlock()
-		h.manager.Leave(roomID, userID)
+		_ = h.manager.RunRoomCommand(context.Background(), roomID, gameactor.EventPlayerDisconnected, gameactor.LanePresence, func() error {
+			h.manager.Leave(roomID, userID)
+			return nil
+		})
 		h.Broadcast(roomID)
 		conn.Close(websocket.StatusNormalClosure, "bye")
 	}()
@@ -331,8 +381,8 @@ func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, conn 
 			continue
 		}
 		h.Broadcast(roomID)
-		h.ScheduleAI(roomID)
-		h.ScheduleAISpeech(roomID)
+		h.ScheduleAIAction(roomID)
+		h.ScheduleAIOptionalSpeech(roomID)
 	}
 }
 
@@ -414,113 +464,85 @@ func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) err
 				return errors.New("invalid_ai_payload")
 			}
 		}
-		_, err := h.manager.AddAI(roomID, userID, AIOptions{Level: request.Level})
-		return err
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.AddAI(roomID, userID, AIOptions{Level: request.Level})
+			return err
+		})
 	case "room.update_ai":
 		var request updateAIRequest
 		if err := json.Unmarshal(message.Payload, &request); err != nil {
 			return errors.New("invalid_ai_payload")
 		}
-		_, err := h.manager.UpdateAI(roomID, userID, request.PlayerID, AIOptions{Level: request.Level})
-		return err
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.UpdateAI(roomID, userID, request.PlayerID, AIOptions{Level: request.Level})
+			return err
+		})
 	case "room.remove_player":
 		var request updateAIRequest
 		if err := json.Unmarshal(message.Payload, &request); err != nil {
 			return errors.New("invalid_player_payload")
 		}
-		_, err := h.manager.RemovePlayer(roomID, userID, request.PlayerID)
-		return err
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.RemovePlayer(roomID, userID, request.PlayerID)
+			return err
+		})
 	case "room.speech":
 		var request speechRequest
 		if err := json.Unmarshal(message.Payload, &request); err != nil {
 			return errors.New("invalid_speech_payload")
 		}
-		_, err := h.manager.Say(roomID, userID, request.Text)
-		return err
+		return h.runMessageCommand(roomID, gameactor.EventPlayerSpeech, gameactor.LaneSpeech, func() error {
+			_, err := h.manager.Say(roomID, userID, request.Text)
+			return err
+		})
 	case "room.start":
-		_, err := h.manager.Start(roomID, userID)
-		return err
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.Start(roomID, userID)
+			return err
+		})
 	case "room.draw":
-		_, err := h.manager.Draw(roomID, userID)
-		return err
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.Draw(roomID, userID)
+			return err
+		})
 	case "room.play":
 		var request playRequest
 		if err := json.Unmarshal(message.Payload, &request); err != nil {
 			return errors.New("invalid_play_payload")
 		}
-		_, err := h.manager.Play(roomID, userID, request.CardID, request.Color)
-		return err
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.Play(roomID, userID, request.CardID, request.Color)
+			return err
+		})
 	case "room.call_uno":
-		_, err := h.manager.CallUNO(roomID, userID)
-		return err
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.CallUNO(roomID, userID)
+			return err
+		})
 	case "room.catch_uno":
 		var request catchUNORequest
 		if err := json.Unmarshal(message.Payload, &request); err != nil {
 			return errors.New("invalid_catch_uno_payload")
 		}
-		_, err := h.manager.CatchUNO(roomID, userID, request.TargetID)
-		return err
+		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
+			_, err := h.manager.CatchUNO(roomID, userID, request.TargetID)
+			return err
+		})
 	default:
 		return errors.New("unknown_message_type")
 	}
 }
 
-func (h *Hub) ScheduleAI(roomID string) {
-	h.mu.Lock()
-	if _, ok := h.aiRunning[roomID]; ok {
-		h.mu.Unlock()
-		return
-	}
-	h.aiRunning[roomID] = struct{}{}
-	h.mu.Unlock()
-
-	go func() {
-		defer func() {
-			h.mu.Lock()
-			delete(h.aiRunning, roomID)
-			h.mu.Unlock()
-		}()
-
-		for {
-			time.Sleep(720 * time.Millisecond)
-			room, shouldContinue, err := h.manager.RunNextAI(roomID)
-			if err != nil {
-				return
-			}
-			if room.ID != "" {
-				h.Broadcast(room.ID)
-				h.ScheduleAISpeech(room.ID)
-			}
-			if !shouldContinue {
-				return
-			}
-		}
-	}()
+func (h *Hub) runMessageCommand(roomID string, eventType gameactor.RoomEventType, lane gameactor.EventLane, run func() error) error {
+	return h.manager.RunRoomCommand(context.Background(), roomID, eventType, lane, run)
 }
 
-func (h *Hub) ScheduleAISpeech(roomID string) {
-	h.mu.Lock()
-	if _, ok := h.aiSpeechRunning[roomID]; ok {
-		h.mu.Unlock()
-		return
-	}
-	h.aiSpeechRunning[roomID] = struct{}{}
-	h.mu.Unlock()
+func (h *Hub) ScheduleAIAction(roomID string) {
+	h.aiScheduler.ScheduleAction(roomID)
+}
 
-	go func() {
-		defer func() {
-			h.mu.Lock()
-			delete(h.aiSpeechRunning, roomID)
-			h.mu.Unlock()
-		}()
-
-		time.Sleep(900 * time.Millisecond)
-		room, changed, err := h.manager.RunAISpeech(roomID)
-		if err != nil || !changed || room.ID == "" {
-			return
-		}
-		h.Broadcast(room.ID)
-	}()
+func (h *Hub) ScheduleAIOptionalSpeech(roomID string) {
+	h.aiScheduler.ScheduleSpeech(roomID)
 }
 
 func (h *Hub) runScheduler() {
@@ -535,7 +557,7 @@ func (h *Hub) runScheduler() {
 			h.Broadcast(roomID)
 		}
 		for _, roomID := range uniqueRoomIDs(result.ScheduleAIRoomIDs) {
-			h.ScheduleAI(roomID)
+			h.ScheduleAIAction(roomID)
 		}
 	}
 }

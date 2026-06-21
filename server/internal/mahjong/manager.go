@@ -1,7 +1,6 @@
 package mahjong
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -11,7 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/snowykami/games-platform/server/internal/aiagent"
 	"github.com/snowykami/games-platform/server/internal/aiplayer"
+	"github.com/snowykami/games-platform/server/internal/gameactor"
 	"github.com/snowykami/games-platform/server/internal/roommeta"
 )
 
@@ -31,13 +32,22 @@ var (
 )
 
 type Manager struct {
+	*gameactor.RoomRuntime
+
 	aiProvider aiplayer.Provider
 	mu         sync.Mutex
 	rooms      map[string]*Room
+
+	aiController *aiagent.Controller
 }
 
 func NewManager(aiProvider aiplayer.Provider) *Manager {
-	return &Manager{aiProvider: aiProvider, rooms: map[string]*Room{}}
+	return &Manager{
+		RoomRuntime:  gameactor.NewRoomRuntime(64),
+		aiProvider:   aiProvider,
+		rooms:        map[string]*Room{},
+		aiController: aiagent.NewController("mahjong", aiProvider, aiplayer.DecisionTimeout),
+	}
 }
 
 func (m *Manager) CreateRoom(user UserView) PublicRoom {
@@ -193,11 +203,32 @@ func (m *Manager) RemovePlayer(roomID string, actorID string, playerID string) (
 			return PublicRoom{}, errors.New("cannot_remove_host")
 		}
 		room.Players = append(room.Players[:index], room.Players[index+1:]...)
+		if player.IsAI {
+			m.removeAIAgent(room.ID, player.ID)
+		}
 		room.Log = append(room.Log, createLog(fmt.Sprintf("%s 被房主移出了房间。", player.Name)))
 		room.UpdatedAt = time.Now().UTC()
 		return publicRoom(room, actorID), nil
 	}
 	return PublicRoom{}, errors.New("player_not_found")
+}
+
+func (m *Manager) Close() {
+	if m.aiController != nil {
+		m.aiController.Close()
+	}
+	if m.RoomRuntime != nil {
+		m.RoomRuntime.Close()
+	}
+	m.mu.Lock()
+	roomIDs := make([]string, 0, len(m.rooms))
+	for roomID := range m.rooms {
+		roomIDs = append(roomIDs, roomID)
+	}
+	m.mu.Unlock()
+	for _, roomID := range roomIDs {
+		m.removeRoomAgents(roomID)
+	}
 }
 
 func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, error) {
@@ -219,7 +250,7 @@ func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, e
 	return publicRoom(room, actorID), nil
 }
 
-func (m *Manager) RunAISpeech(roomID string) (PublicRoom, bool, error) {
+func (m *Manager) RunAIOptionalSpeech(roomID string) (PublicRoom, bool, error) {
 	if m.aiProvider == nil || !m.aiProvider.Enabled() {
 		return PublicRoom{}, false, nil
 	}
@@ -253,38 +284,25 @@ func (m *Manager) RunAISpeech(roomID string) (PublicRoom, bool, error) {
 		return view, false, nil
 	}
 	room.LastAISpeechSourceID = lastSpeech.ID
-	input := aiplayer.DecisionInput{
-		Game:        "mahjong",
-		Level:       aiplayer.LevelLLM,
-		SessionID:   player.ID + ":speech",
-		PlayerName:  player.Name,
-		Personality: player.AI.Personality,
-		SpeechStyle: player.AI.SpeechStyle,
-		State: map[string]any{
-			"phase":        room.Phase,
-			"wind":         player.Wind,
-			"handCount":    len(player.Hand),
-			"wallCount":    len(room.Wall),
-			"recentSpeech": recentSpeeches(room),
-			"speechGuide":  "像麻将桌上的自然短句，可以闲聊或轻微评价牌局，不要透露隐藏手牌。",
-		},
-		Actions: speechActions(),
-	}
 	updatedAt := room.UpdatedAt
 	playerID := player.ID
-	m.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), aiplayer.DecisionTimeout)
-	decision, err := m.aiProvider.Decide(ctx, input)
-	cancel()
+	decision, err := m.decideWithAIAgent(room, player, gameactor.AgentOptionalSpeech, map[string]any{
+		"phase":        room.Phase,
+		"wind":         player.Wind,
+		"handCount":    len(player.Hand),
+		"wallCount":    len(room.Wall),
+		"recentSpeech": recentSpeeches(room),
+		"speechGuide":  "像麻将桌上的自然短句，可以闲聊或轻微评价牌局，不要透露隐藏手牌。",
+	}, speechActions())
 	if err != nil {
+		m.mu.Unlock()
 		return PublicRoom{}, false, err
 	}
 	if decision.ActionID != "speak" || strings.TrimSpace(decision.Speech) == "" {
+		m.mu.Unlock()
 		return PublicRoom{}, false, nil
 	}
 
-	m.mu.Lock()
 	defer m.mu.Unlock()
 	room, err = m.room(roomID)
 	if err != nil {
@@ -459,7 +477,7 @@ func (m *Manager) SkipClaims(roomID string, actorID string) (PublicRoom, error) 
 	return publicRoom(room, actorID), nil
 }
 
-func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
+func (m *Manager) RunAIAction(roomID string) (PublicRoom, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -485,7 +503,7 @@ func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
 		return publicRoom(room, ""), room.Phase == PhasePlaying && room.Players[room.CurrentPlayerIndex].IsAI, nil
 	}
 
-	tile := chooseAIDiscard(player)
+	tile := m.chooseAIDiscard(room, player)
 	discardTile(room, player, tile.ID)
 	room.UpdatedAt = time.Now().UTC()
 	shouldContinue := room.Phase == PhasePlaying && room.Players[room.CurrentPlayerIndex].IsAI
@@ -999,6 +1017,121 @@ func isSevenPairs(codes []string) bool {
 		}
 	}
 	return pairs == 7
+}
+
+func (m *Manager) chooseAIDiscard(room *Room, player *Player) Tile {
+	level := aiplayer.NormalizeLevel("", false)
+	if player.AI != nil {
+		level = aiplayer.NormalizeLevel(player.AI.Level, m.aiProvider != nil && m.aiProvider.Enabled())
+	}
+	if level == aiplayer.LevelLLM {
+		if tile, err := m.decideDiscardWithLLM(room, player); err == nil {
+			return tile
+		}
+	}
+	return chooseAIDiscard(player)
+}
+
+func (m *Manager) decideDiscardWithLLM(room *Room, player *Player) (Tile, error) {
+	if m.aiProvider == nil || !m.aiProvider.Enabled() {
+		return Tile{}, errors.New("llm_not_configured")
+	}
+	actions := make([]aiplayer.LegalAction, 0, len(player.Hand))
+	for _, tile := range player.Hand {
+		actions = append(actions, aiplayer.LegalAction{
+			ID:          "discard:" + tile.ID,
+			Label:       "打出 " + formatTile(tile),
+			Description: "从手牌中打出这张牌。",
+		})
+	}
+	decision, err := m.decideWithAIAgent(room, player, gameactor.AgentRequiredAction, map[string]any{
+		"wind":         player.Wind,
+		"roundWind":    room.RoundWind,
+		"hand":         append([]Tile{}, player.Hand...),
+		"melds":        append([]Meld{}, player.Melds...),
+		"wallCount":    len(room.Wall),
+		"discards":     publicDiscards(room),
+		"recentSpeech": recentSpeeches(room),
+		"speechGuide":  "麻将发言自然短句，不要透露完整手牌；可以简单说牌型还差点或先安全打。",
+	}, actions)
+	if err != nil {
+		return Tile{}, err
+	}
+	for _, tile := range player.Hand {
+		if decision.ActionID == "discard:"+tile.ID {
+			if strings.TrimSpace(decision.Speech) != "" {
+				recordSpeech(room, player, decision.Speech)
+			}
+			return tile, nil
+		}
+	}
+	return Tile{}, errors.New("llm_illegal_action")
+}
+
+func (m *Manager) decideWithAIAgent(room *Room, player *Player, eventType gameactor.AgentEventType, state map[string]any, actions []aiplayer.LegalAction) (aiplayer.Decision, error) {
+	if m.aiController == nil || !m.aiController.Enabled() {
+		return aiplayer.Decision{}, aiagent.ErrLLMNotConfigured
+	}
+	expectedPhase := room.Phase
+	expectedActionSeq := room.ActionSeq
+	expectedUpdatedAt := room.UpdatedAt
+	personality := ""
+	speechStyle := ""
+	if player.AI != nil {
+		personality = player.AI.Personality
+		speechStyle = player.AI.SpeechStyle
+	}
+	return m.aiController.Decide(aiagent.DecisionRequest{
+		RoomID:        room.ID,
+		PlayerID:      player.ID,
+		RequestPrefix: "mahjong",
+		SessionID:     "mahjong:" + room.ID + ":" + player.ID,
+		Phase:         string(room.Phase),
+		Type:          eventType,
+		Profile: aiagent.Profile{
+			Name:        player.Name,
+			Personality: personality,
+			SpeechStyle: speechStyle,
+		},
+		State:   state,
+		Actions: actions,
+		Unlock:  m.mu.Unlock,
+		Lock:    m.mu.Lock,
+		Stale: func(_ aiplayer.Decision) error {
+			if room.Phase != expectedPhase || room.ActionSeq != expectedActionSeq {
+				return errors.New("ai_agent_decision_stale")
+			}
+			if eventType == gameactor.AgentOptionalSpeech && !room.UpdatedAt.Equal(expectedUpdatedAt) {
+				return errors.New("ai_agent_speech_stale")
+			}
+			return nil
+		},
+	})
+}
+
+func (m *Manager) removeAIAgent(roomID string, playerID string) {
+	if m.aiController != nil {
+		m.aiController.Remove(roomID, playerID)
+	}
+}
+
+func (m *Manager) removeRoomAgents(roomID string) {
+	if m.aiController != nil {
+		m.aiController.RemoveRoom(roomID)
+	}
+}
+
+func publicDiscards(room *Room) []map[string]any {
+	discards := []map[string]any{}
+	for _, player := range room.Players {
+		for _, tile := range player.Discards {
+			discards = append(discards, map[string]any{
+				"playerId": player.ID,
+				"tile":     tile,
+			})
+		}
+	}
+	return discards
 }
 
 func chooseAIDiscard(player *Player) Tile {

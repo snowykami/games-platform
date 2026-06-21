@@ -113,7 +113,7 @@ export interface SocialRoom {
     includeBlank: boolean
     currentSpeakerId?: string
     described: Record<string, boolean>
-    votes: Record<string, string>
+    votes: Record<string, { targetId: string, confirmed: boolean }>
     lastEliminatedId?: string
   }
   winner?: SocialAlignment
@@ -252,7 +252,10 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
     includeBlank: z.boolean().default(false),
     currentSpeakerId: z.string().optional(),
     described: z.record(z.string(), z.boolean()).default({}),
-    votes: z.record(z.string(), z.string()).default({}),
+    votes: z.record(z.string(), z.object({
+      targetId: z.string(),
+      confirmed: z.boolean(),
+    })).default({}),
     lastEliminatedId: z.string().optional(),
   }).default({ described: {}, includeBlank: false, presetId: '', round: 0, votes: {} }),
   winner: alignmentSchema.optional(),
@@ -332,8 +335,8 @@ export async function describeUndercover(roomId: string, text: string) {
   return requestRoom('undercover', `/rooms/${encodeURIComponent(roomId)}/describe`, jsonPost({ text }))
 }
 
-export async function voteUndercover(roomId: string, targetId: string) {
-  return requestRoom('undercover', `/rooms/${encodeURIComponent(roomId)}/undercover-vote`, jsonPost({ targetId }))
+export async function voteUndercover(roomId: string, targetId: string, confirmed: boolean) {
+  return requestRoom('undercover', `/rooms/${encodeURIComponent(roomId)}/undercover-vote`, jsonPost({ confirmed, targetId }))
 }
 
 export async function updateWerewolfRoles(roomId: string, config: WerewolfRoleConfig) {

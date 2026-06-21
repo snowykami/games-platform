@@ -263,7 +263,7 @@ func TestLLMAITurnDoesNotBlockOtherRooms(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := manager.RunNextAI("ROOMA")
+		_, _, err := manager.RunAIAction("ROOMA")
 		done <- err
 	}()
 

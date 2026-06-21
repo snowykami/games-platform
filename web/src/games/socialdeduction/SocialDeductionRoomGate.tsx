@@ -832,27 +832,36 @@ function ActionPanel({
     }
 
     if (room.phase === 'undercover_vote') {
-      const hasVoted = Boolean(room.undercover.votes[you.id])
-      const selectedPlayer = room.players.find(player => player.id === selectedUndercoverVote)
+      const yourUndercoverVote = room.undercover.votes[you.id]
+      const hasVoted = Boolean(yourUndercoverVote?.confirmed)
+      const activeUndercoverVoteTarget = selectedUndercoverVote || yourUndercoverVote?.targetId || ''
+      const selectedPlayer = room.players.find(player => player.id === activeUndercoverVoteTarget)
       return (
         <Panel config={config}>
           <h2 className="text-xl font-black">{t('undercover.voteTitle')}</h2>
           <p className="text-sm leading-6 text-[#fff8e8]/76">{t('undercover.voteHint')}</p>
           {hasVoted && <SubmittedNotice config={config} label={t('undercover.voted')} />}
           {livingTargets.map(player => (
-            <ChoiceButton key={player.id} config={config} disabled={hasVoted} icon={<Vote className="size-4" />} selected={selectedUndercoverVote === player.id} onClick={() => setSelectedUndercoverVote(player.id)}>
+            <ChoiceButton
+              key={player.id}
+              config={config}
+              icon={<Vote className="size-4" />}
+              selected={activeUndercoverVoteTarget === player.id}
+              onClick={() => {
+                setSelectedUndercoverVote(player.id)
+                void actions.undercoverVote(player.id, false)
+              }}
+            >
               {player.name}
             </ChoiceButton>
           ))}
-          {!hasVoted && (
-            <ConfirmChoiceButton
-              config={config}
-              disabled={!selectedUndercoverVote}
-              label={t('social.confirmVote')}
-              selectedLabel={selectedPlayer?.name}
-              onConfirm={() => void actions.undercoverVote(selectedUndercoverVote).then(() => setMessage(t('undercover.voted')))}
-            />
-          )}
+          <ConfirmChoiceButton
+            config={config}
+            disabled={!activeUndercoverVoteTarget || hasVoted}
+            label={hasVoted ? t('undercover.voted') : t('social.confirmVote')}
+            selectedLabel={selectedPlayer?.name}
+            onConfirm={() => void actions.undercoverVote(activeUndercoverVoteTarget, true).then(() => setMessage(t('undercover.voted')))}
+          />
         </Panel>
       )
     }

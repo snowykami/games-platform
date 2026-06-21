@@ -1,18 +1,18 @@
 package socialdeduction
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/snowykami/games-platform/server/internal/aiagent"
 	"github.com/snowykami/games-platform/server/internal/aiplayer"
+	"github.com/snowykami/games-platform/server/internal/gameactor"
 	"github.com/snowykami/games-platform/server/internal/roommeta"
 )
 
@@ -56,15 +56,26 @@ func (err staleAIDecisionError) Error() string {
 }
 
 type Manager struct {
+	*gameactor.RoomRuntime
+
 	aiProvider aiplayer.Provider
 	game       GameKind
 	mu         sync.Mutex
 	rooms      map[string]*Room
 	aiSessions map[string]*socialAISession
+
+	aiController *aiagent.Controller
 }
 
 func NewManager(game GameKind, aiProvider aiplayer.Provider) *Manager {
-	return &Manager{aiProvider: aiProvider, aiSessions: map[string]*socialAISession{}, game: game, rooms: map[string]*Room{}}
+	return &Manager{
+		RoomRuntime:  gameactor.NewRoomRuntime(64),
+		aiProvider:   aiProvider,
+		aiSessions:   map[string]*socialAISession{},
+		game:         game,
+		rooms:        map[string]*Room{},
+		aiController: aiagent.NewController(string(game), aiProvider, socialDecisionTimeout),
+	}
 }
 
 func (m *Manager) CreateRoom(user UserView) PublicRoom {
@@ -73,12 +84,15 @@ func (m *Manager) CreateRoom(user UserView) PublicRoom {
 
 	now := time.Now().UTC()
 	room := &Room{
-		ID:         createRoomID(m.game),
-		Game:       m.game,
-		HostUserID: user.ID,
-		Phase:      PhaseLobby,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:                createRoomID(m.game),
+		Game:              m.game,
+		HostUserID:        user.ID,
+		Phase:             PhaseLobby,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+		RuleUpdatedAt:     now,
+		SpeechUpdatedAt:   now,
+		PresenceUpdatedAt: now,
 	}
 	room.Players = append(room.Players, createHumanPlayer(user, "host", 0))
 	if room.Game == GameWerewolf {
@@ -102,6 +116,7 @@ func (m *Manager) JoinRoom(roomID string, user UserView) (PublicRoom, error) {
 	}
 
 	player := findPlayerByUserID(room, user.ID)
+	joined := false
 	if player == nil {
 		if room.Phase != PhaseLobby {
 			return PublicRoom{}, errors.New("game_already_started")
@@ -113,11 +128,16 @@ func (m *Manager) JoinRoom(roomID string, user UserView) (PublicRoom, error) {
 		room.Players = append(room.Players, player)
 		reconcileLobbyConfig(room)
 		room.Log = append(room.Log, createLog(fmt.Sprintf("%s 加入了房间。", user.DisplayName)))
+		joined = true
 	}
 
 	player.Connected = true
 	player.DisconnectedAt = nil
-	room.UpdatedAt = time.Now().UTC()
+	if joined {
+		touchRule(room)
+	} else {
+		touchPresence(room)
+	}
 	return m.publicRoom(room, user.ID), nil
 }
 
@@ -135,6 +155,7 @@ func (m *Manager) Leave(roomID string, userID string) {
 		if !player.IsAI {
 			player.DisconnectedAt = &now
 		}
+		touchPresence(room)
 	}
 }
 
@@ -177,7 +198,7 @@ func (m *Manager) AddAI(roomID string, actorID string, options AIOptions) (Publi
 	m.ensureAISession(room, player)
 	reconcileLobbyConfig(room)
 	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 加入了房间。", profile.Name)))
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -201,7 +222,7 @@ func (m *Manager) UpdateAI(roomID string, actorID string, playerID string, optio
 	}
 	player.AI.Level = string(aiplayer.LevelLLM)
 	m.ensureAISession(room, player)
-	room.UpdatedAt = time.Now().UTC()
+	touchView(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -227,15 +248,36 @@ func (m *Manager) RemovePlayer(roomID string, actorID string, playerID string) (
 			return PublicRoom{}, errors.New("cannot_remove_host")
 		}
 		room.Players = append(room.Players[:index], room.Players[index+1:]...)
+		if player.IsAI {
+			m.removeSocialAgent(room.ID, player.ID)
+		}
 		for seat, nextPlayer := range room.Players {
 			nextPlayer.Seat = seat
 		}
 		reconcileLobbyConfig(room)
 		room.Log = append(room.Log, createLog(fmt.Sprintf("%s 被房主移出了房间。", player.Name)))
-		room.UpdatedAt = time.Now().UTC()
+		touchRule(room)
 		return m.publicRoom(room, actorID), nil
 	}
 	return PublicRoom{}, errors.New("player_not_found")
+}
+
+func (m *Manager) Close() {
+	if m.aiController != nil {
+		m.aiController.Close()
+	}
+	if m.RoomRuntime != nil {
+		m.RoomRuntime.Close()
+	}
+	m.mu.Lock()
+	roomIDs := make([]string, 0, len(m.rooms))
+	for roomID := range m.rooms {
+		roomIDs = append(roomIDs, roomID)
+	}
+	m.mu.Unlock()
+	for _, roomID := range roomIDs {
+		m.removeRoomAgents(roomID)
+	}
 }
 
 func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, error) {
@@ -253,54 +295,8 @@ func (m *Manager) Say(roomID string, actorID string, text string) (PublicRoom, e
 	if !recordSpeech(room, player, text) {
 		return PublicRoom{}, errors.New("invalid_speech")
 	}
-	room.UpdatedAt = time.Now().UTC()
+	touchSpeech(room)
 	return m.publicRoom(room, actorID), nil
-}
-
-func (m *Manager) RunAISpeech(roomID string) (PublicRoom, bool, error) {
-	if m.aiProvider == nil || !m.aiProvider.Enabled() {
-		return PublicRoom{}, false, nil
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	room, err := m.room(roomID)
-	if err != nil {
-		return PublicRoom{}, false, err
-	}
-	if room.Phase == PhaseLobby || room.Phase == PhaseFinished || len(room.Speeches) == 0 {
-		return m.publicRoom(room, ""), false, nil
-	}
-	if hasPendingAIRequiredAction(room) {
-		return m.publicRoom(room, ""), false, nil
-	}
-	lastSpeech := room.Speeches[len(room.Speeches)-1]
-	if lastSpeech.ID == room.LastAISpeechSourceID {
-		return m.publicRoom(room, ""), false, nil
-	}
-	player := nextAISpeechPlayer(room, lastSpeech.PlayerID)
-	if player == nil {
-		room.LastAISpeechSourceID = lastSpeech.ID
-		return m.publicRoom(room, ""), false, nil
-	}
-	room.LastAISpeechSourceID = lastSpeech.ID
-	state := m.aiSpeechState(room, player)
-	decision, err := m.socialDecision(room, player, state, speechActions())
-	if err != nil {
-		return PublicRoom{}, false, err
-	}
-	if decision.ActionID != "speak" || strings.TrimSpace(decision.Speech) == "" {
-		return PublicRoom{}, false, nil
-	}
-	player = findPlayerByID(room, player.ID)
-	if player == nil || !player.IsAI || !player.Alive {
-		return m.publicRoom(room, ""), false, nil
-	}
-	if !recordSpeech(room, player, decision.Speech) {
-		return m.publicRoom(room, ""), false, nil
-	}
-	room.UpdatedAt = time.Now().UTC()
-	return m.publicRoom(room, ""), true, nil
 }
 
 func (m *Manager) RenamePlayer(roomID string, actorID string, displayName string) (PublicRoom, error) {
@@ -322,7 +318,7 @@ func (m *Manager) RenamePlayer(roomID string, actorID string, displayName string
 	oldName := player.Name
 	player.Name = nextName
 	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 改名为 %s。", oldName, nextName)))
-	room.UpdatedAt = time.Now().UTC()
+	touchView(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -342,7 +338,7 @@ func (m *Manager) UpdatePlayerNote(roomID string, actorID string, targetID strin
 		return PublicRoom{}, errors.New("player_not_found")
 	}
 	setPlayerNote(room, viewer.ID, targetID, note)
-	room.UpdatedAt = time.Now().UTC()
+	touchView(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -370,7 +366,7 @@ func (m *Manager) UpdateWerewolfRoles(roomID string, actorID string, config Were
 	}
 	room.Werewolf.RoleConfig = nextConfig
 	room.Log = append(room.Log, createLog(fmt.Sprintf("房主将角色组调整为：%s。", nextConfig.Name)))
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -398,7 +394,7 @@ func (m *Manager) UpdateUndercoverConfig(roomID string, actorID string, presetID
 	room.Undercover.IncludeBlank = includeBlank
 	room.Undercover.Presets = undercoverPresets()
 	room.Log = append(room.Log, createLog(fmt.Sprintf("房主选择了题库：%s。", undercoverPresetName(presetID))))
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -428,7 +424,7 @@ func (m *Manager) Start(roomID string, actorID string) (PublicRoom, error) {
 	} else {
 		startUndercover(room)
 	}
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -449,11 +445,11 @@ func (m *Manager) UndercoverDescribe(roomID string, actorID string, text string)
 	room.Undercover.Described[player.ID] = true
 	recordAction(room, PublicAction{Type: "undercover_describe", ActorID: player.ID, ActorName: player.Name, Message: fmt.Sprintf("%s 完成了描述。", player.Name)})
 	advanceUndercoverSpeaker(room)
-	room.UpdatedAt = time.Now().UTC()
+	touchRuleAndSpeech(room)
 	return m.publicRoom(room, actorID), nil
 }
 
-func (m *Manager) UndercoverVote(roomID string, actorID string, targetID string) (PublicRoom, error) {
+func (m *Manager) UndercoverVote(roomID string, actorID string, targetID string, confirmed bool) (PublicRoom, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -465,10 +461,15 @@ func (m *Manager) UndercoverVote(roomID string, actorID string, targetID string)
 	if target == nil || !target.Alive || target.ID == player.ID {
 		return PublicRoom{}, errors.New("invalid_target")
 	}
-	room.Undercover.Votes[player.ID] = target.ID
-	recordAction(room, PublicAction{Type: "undercover_vote", ActorID: player.ID, ActorName: player.Name, TargetID: target.ID, Message: fmt.Sprintf("%s 已投票。", player.Name)})
-	resolveUndercoverVote(room)
-	room.UpdatedAt = time.Now().UTC()
+	previous := room.Undercover.Votes[player.ID]
+	room.Undercover.Votes[player.ID] = UndercoverVoteIntent{TargetID: target.ID, Confirmed: confirmed}
+	if confirmed {
+		recordAction(room, PublicAction{Type: "undercover_vote", ActorID: player.ID, ActorName: player.Name, TargetID: target.ID, Message: fmt.Sprintf("%s 已确认投票。", player.Name)})
+		resolveUndercoverVote(room)
+	} else if previous.TargetID != target.ID || previous.Confirmed {
+		recordAction(room, PublicAction{Type: "undercover_vote_select", ActorID: player.ID, ActorName: player.Name, TargetID: target.ID, Message: fmt.Sprintf("%s 选择了投票目标。", player.Name)})
+	}
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -499,7 +500,7 @@ func (m *Manager) NightAction(roomID string, actorID string, actionID string) (P
 	}
 	recordAction(room, PublicAction{Type: "night_action", ActorID: player.ID, ActorName: player.Name, TargetID: targetID, Message: fmt.Sprintf("%s 完成了夜晚行动。", player.Name)})
 	m.advanceWerewolfNight(room)
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -522,7 +523,7 @@ func (m *Manager) HunterShot(roomID string, actorID string, targetID string) (Pu
 	if err := resolveHunterShot(room, targetID); err != nil {
 		return PublicRoom{}, err
 	}
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -544,7 +545,7 @@ func (m *Manager) AdvanceDay(roomID string, actorID string) (PublicRoom, error) 
 	room.Werewolf.Votes = map[string]WerewolfVoteIntent{}
 	room.Log = append(room.Log, createLog("白天讨论结束，开始放逐投票。"))
 	recordAction(room, PublicAction{Type: "vote_started", Message: "开始放逐投票。"})
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -571,7 +572,7 @@ func (m *Manager) WerewolfVote(roomID string, actorID string, targetID string, c
 	} else if previous.TargetID != target.ID || previous.Confirmed {
 		recordAction(room, PublicAction{Type: "vote_select", ActorID: player.ID, ActorName: player.Name, TargetID: target.ID, Message: fmt.Sprintf("%s 选择了投票目标。", player.Name)})
 	}
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -604,7 +605,7 @@ func (m *Manager) ProposeTeam(roomID string, actorID string, team []string) (Pub
 	room.Phase = PhaseAvalonVote
 	room.Log = append(room.Log, createLog(fmt.Sprintf("%s 提名了任务队伍。", player.Name)))
 	recordAction(room, PublicAction{Type: "team_proposed", ActorID: player.ID, ActorName: player.Name, Message: "任务队伍已提名。"})
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -619,7 +620,7 @@ func (m *Manager) TeamVote(roomID string, actorID string, approve bool) (PublicR
 	room.Avalon.TeamVotes[player.ID] = approve
 	recordAction(room, PublicAction{Type: "team_vote", ActorID: player.ID, ActorName: player.Name, Message: fmt.Sprintf("%s 已投票。", player.Name)})
 	m.resolveAvalonTeamVote(room)
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -644,7 +645,7 @@ func (m *Manager) QuestCard(roomID string, actorID string, card string) (PublicR
 	room.Avalon.QuestCards[player.ID] = card
 	recordAction(room, PublicAction{Type: "quest_card", ActorID: player.ID, ActorName: player.Name, Message: fmt.Sprintf("%s 已提交任务牌。", player.Name)})
 	m.resolveAvalonQuest(room)
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
 
@@ -668,99 +669,8 @@ func (m *Manager) Assassinate(roomID string, actorID string, targetID string) (P
 	} else {
 		finish(room, AlignmentGood, fmt.Sprintf("%s 没有找到梅林，正义阵营获胜。", player.Name))
 	}
-	room.UpdatedAt = time.Now().UTC()
+	touchRule(room)
 	return m.publicRoom(room, actorID), nil
-}
-
-func (m *Manager) RunNextAI(roomID string) (PublicRoom, bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	room, err := m.room(roomID)
-	if err != nil {
-		return PublicRoom{}, false, err
-	}
-	if room.Phase == PhaseLobby || room.Phase == PhaseFinished {
-		return m.publicRoom(room, ""), false, nil
-	}
-
-	acted := false
-	for _, player := range room.Players {
-		if !player.IsAI || !player.Alive {
-			continue
-		}
-		if m.runAIAction(room, player) {
-			acted = true
-			break
-		}
-	}
-	if acted {
-		room.UpdatedAt = time.Now().UTC()
-		return m.publicRoom(room, ""), room.Phase != PhaseFinished, nil
-	}
-	return m.publicRoom(room, ""), false, nil
-}
-
-func hasPendingAIRequiredAction(room *Room) bool {
-	switch room.Phase {
-	case PhaseWerewolfNight:
-		for _, player := range room.Players {
-			if player.IsAI && player.Alive && canActAtNight(player) {
-				if _, ok := room.Werewolf.NightActions[player.ID]; !ok {
-					return true
-				}
-			}
-		}
-	case PhaseWerewolfVote:
-		for _, player := range room.Players {
-			if player.IsAI && player.Alive && !room.Werewolf.RevealedIdiots[player.ID] {
-				if vote, ok := room.Werewolf.Votes[player.ID]; !ok || !vote.Confirmed {
-					return true
-				}
-			}
-		}
-	case PhaseWerewolfHunter:
-		player := findPlayerByID(room, room.Werewolf.HunterPendingID)
-		return player != nil && player.IsAI && player.Alive
-	case PhaseAvalonTeam:
-		player := findPlayerByID(room, room.Avalon.LeaderID)
-		return player != nil && player.IsAI && player.Alive && len(room.Avalon.Team) == 0
-	case PhaseAvalonVote:
-		for _, player := range room.Players {
-			if player.IsAI && player.Alive {
-				if _, ok := room.Avalon.TeamVotes[player.ID]; !ok {
-					return true
-				}
-			}
-		}
-	case PhaseAvalonQuest:
-		for _, playerID := range room.Avalon.Team {
-			player := findPlayerByID(room, playerID)
-			if player != nil && player.IsAI && player.Alive {
-				if _, ok := room.Avalon.QuestCards[player.ID]; !ok {
-					return true
-				}
-			}
-		}
-	case PhaseAssassination:
-		for _, player := range room.Players {
-			if player.IsAI && player.Alive && player.Role == RoleAssassin {
-				return true
-			}
-		}
-	case PhaseUndercoverDescribe:
-		player := findPlayerByID(room, room.Undercover.CurrentSpeakerID)
-		return player != nil && player.IsAI && player.Alive && !room.Undercover.Described[player.ID]
-	case PhaseUndercoverVote:
-		for _, player := range room.Players {
-			if player.IsAI && player.Alive {
-				if _, ok := room.Undercover.Votes[player.ID]; !ok {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 func (m *Manager) Public(roomID string, viewerID string) (PublicRoom, error) {
@@ -864,7 +774,7 @@ func resetRoom(room *Room) {
 	room.RecentActions = nil
 	room.Werewolf = WerewolfState{RoleConfig: roleConfig, RolePresets: werewolfRolePresets(len(room.Players)), NightActions: map[string]string{}, SeerChecks: map[string]Alignment{}, Votes: map[string]WerewolfVoteIntent{}, RevealedIdiots: map[string]bool{}, Day: 1}
 	room.Avalon = AvalonState{TeamVotes: map[string]bool{}, QuestCards: map[string]string{}, Round: 1}
-	room.Undercover = UndercoverState{PresetID: undercoverConfig.PresetID, IncludeBlank: undercoverConfig.IncludeBlank, Presets: undercoverPresets(), Described: map[string]bool{}, Votes: map[string]string{}, Round: 1}
+	room.Undercover = UndercoverState{PresetID: undercoverConfig.PresetID, IncludeBlank: undercoverConfig.IncludeBlank, Presets: undercoverPresets(), Described: map[string]bool{}, Votes: map[string]UndercoverVoteIntent{}, Round: 1}
 	for index, player := range room.Players {
 		player.Seat = index
 		player.Alive = true
@@ -913,126 +823,11 @@ func startAvalon(room *Room) {
 	recordAction(room, PublicAction{Type: "start", Message: "阿瓦隆开始，进入组队阶段。"})
 }
 
-func startUndercover(room *Room) {
-	pair := chooseUndercoverPair(room.Undercover.PresetID)
-	players := shuffledPlayers(room.Players)
-	undercoverCount := undercoverCountForPlayers(len(players))
-	blankCount := 0
-	if room.Undercover.IncludeBlank && len(players) >= 6 {
-		blankCount = 1
-	}
-	for index, player := range players {
-		switch {
-		case index < undercoverCount:
-			player.Role = RoleUndercover
-			player.Alignment = AlignmentEvil
-		case index < undercoverCount+blankCount:
-			player.Role = RoleBlank
-			player.Alignment = AlignmentNeutral
-		default:
-			player.Role = RoleCivilian
-			player.Alignment = AlignmentGood
-		}
-	}
-	room.Phase = PhaseUndercoverDescribe
-	room.Undercover.Round = 1
-	room.Undercover.WordPair = pair
-	room.Undercover.Presets = nil
-	room.Undercover.Described = map[string]bool{}
-	room.Undercover.Votes = map[string]string{}
-	room.Undercover.CurrentSpeakerID = firstLivingPlayerID(room)
-	room.Undercover.LastEliminatedID = ""
-	room.Log = append(room.Log, createLog(fmt.Sprintf("谁是卧底开始，题库：%s。请依次描述自己的词。", undercoverPresetName(room.Undercover.PresetID))))
-	recordAction(room, PublicAction{Type: "start", Message: "谁是卧底开始，进入描述阶段。"})
-}
-
 func werewolfAlignment(role Role) Alignment {
 	if role == RoleWerewolf {
 		return AlignmentEvil
 	}
 	return AlignmentGood
-}
-
-func advanceUndercoverSpeaker(room *Room) {
-	next := nextUndescribedLivingPlayer(room)
-	if next != nil {
-		room.Undercover.CurrentSpeakerID = next.ID
-		return
-	}
-	room.Phase = PhaseUndercoverVote
-	room.Undercover.CurrentSpeakerID = ""
-	room.Undercover.Votes = map[string]string{}
-	room.Log = append(room.Log, createLog("本轮描述结束，开始投票。"))
-	recordAction(room, PublicAction{Type: "undercover_vote_started", Message: "开始投票。"})
-}
-
-func resolveUndercoverVote(room *Room) {
-	if len(room.Undercover.Votes) < livingCount(room) {
-		return
-	}
-	targetID, tied := mostVotedUndercoverTarget(room.Undercover.Votes)
-	if tied || targetID == "" {
-		room.Log = append(room.Log, createLog("本轮投票平票，无人出局。"))
-		recordAction(room, PublicAction{Type: "undercover_vote_tied", Message: "投票平票，无人出局。"})
-		startNextUndercoverRound(room)
-		return
-	}
-	target := findPlayerByID(room, targetID)
-	if target != nil {
-		target.Alive = false
-		room.Undercover.LastEliminatedID = target.ID
-		message := fmt.Sprintf("%s 被投票出局。", target.Name)
-		room.Log = append(room.Log, createLog(message))
-		recordAction(room, PublicAction{Type: "undercover_eliminate", TargetID: target.ID, Message: message})
-	}
-	if checkUndercoverWin(room) {
-		return
-	}
-	startNextUndercoverRound(room)
-}
-
-func startNextUndercoverRound(room *Room) {
-	room.Undercover.Round++
-	room.Undercover.Described = map[string]bool{}
-	room.Undercover.Votes = map[string]string{}
-	room.Undercover.CurrentSpeakerID = firstLivingPlayerID(room)
-	room.Phase = PhaseUndercoverDescribe
-	room.Log = append(room.Log, createLog(fmt.Sprintf("第 %d 轮描述开始。", room.Undercover.Round)))
-	recordAction(room, PublicAction{Type: "undercover_round_started", Message: "下一轮描述开始。"})
-}
-
-func checkUndercoverWin(room *Room) bool {
-	civilians := 0
-	undercover := 0
-	blank := 0
-	living := 0
-	for _, player := range room.Players {
-		if !player.Alive {
-			continue
-		}
-		living++
-		switch player.Role {
-		case RoleUndercover:
-			undercover++
-		case RoleBlank:
-			blank++
-		default:
-			civilians++
-		}
-	}
-	if undercover == 0 && blank == 0 {
-		finish(room, AlignmentGood, "所有卧底阵营出局，平民获胜。")
-		return true
-	}
-	if blank > 0 && undercover == 0 && living <= 2 {
-		finish(room, AlignmentNeutral, "白板留到最后，白板获胜。")
-		return true
-	}
-	if undercover+blank >= civilians || living <= 3 {
-		finish(room, AlignmentEvil, "卧底阵营隐藏到最后，卧底获胜。")
-		return true
-	}
-	return false
 }
 
 func applyDefaultWerewolfConfig(room *Room) {
@@ -1491,6 +1286,16 @@ func confirmedWerewolfVotes(room *Room) map[string]string {
 	return votes
 }
 
+func confirmedUndercoverVotes(room *Room) map[string]string {
+	votes := map[string]string{}
+	for actorID, vote := range room.Undercover.Votes {
+		if vote.Confirmed && vote.TargetID != "" {
+			votes[actorID] = vote.TargetID
+		}
+	}
+	return votes
+}
+
 func startNextWerewolfNight(room *Room) {
 	room.Werewolf.Day++
 	room.Werewolf.Votes = map[string]WerewolfVoteIntent{}
@@ -1721,16 +1526,16 @@ func (m *Manager) runAIAction(room *Room, player *Player) bool {
 		advanceUndercoverSpeaker(room)
 		return true
 	case PhaseUndercoverVote:
-		if _, ok := room.Undercover.Votes[player.ID]; ok {
+		if vote, ok := room.Undercover.Votes[player.ID]; ok && vote.Confirmed {
 			return false
 		}
 		target := m.chooseUndercoverVote(room, player)
 		if target == nil {
 			return false
 		}
-		room.Undercover.Votes[player.ID] = target.ID
+		room.Undercover.Votes[player.ID] = UndercoverVoteIntent{TargetID: target.ID, Confirmed: true}
 		recordSpeech(room, player, "我先票这个位置。")
-		recordAction(room, PublicAction{Type: "undercover_vote", ActorID: player.ID, ActorName: player.Name, TargetID: target.ID, Message: fmt.Sprintf("%s 已投票。", player.Name)})
+		recordAction(room, PublicAction{Type: "undercover_vote", ActorID: player.ID, ActorName: player.Name, TargetID: target.ID, Message: fmt.Sprintf("%s 已确认投票。", player.Name)})
 		resolveUndercoverVote(room)
 		return true
 	default:
@@ -1978,164 +1783,27 @@ func (m *Manager) chooseHunterShot(room *Room, actor *Player) (*Player, string, 
 	return nil, "", false
 }
 
-func werewolfActionsForLLM(room *Room, actions []aiplayer.LegalAction) ([]aiplayer.LegalAction, map[string]string) {
-	llmActions := make([]aiplayer.LegalAction, 0, len(actions))
-	actionMap := map[string]string{}
-	for _, action := range actions {
-		llmAction := action
-		for _, prefix := range []string{"target:", "vote:", "shoot:"} {
-			target := playerFromAction(room, action.ID, prefix)
-			if target == nil {
-				continue
-			}
-			targetRef := aiPlayerRef(room, target)
-			llmAction.ID = prefix + targetRef
-			llmAction.Label = strings.Replace(action.Label, target.Name, fmt.Sprintf("座位 %d", aiPlayerNumber(room, target)), 1)
-			llmAction.Description = fmt.Sprintf("座位 %d 的存活玩家", aiPlayerNumber(room, target))
-			break
-		}
-		llmActions = append(llmActions, llmAction)
-		actionMap[llmAction.ID] = action.ID
-	}
-	return llmActions, actionMap
-}
+type socialDecisionScope string
 
-func aiPlayerNumber(room *Room, target *Player) int {
-	for index, player := range room.Players {
-		if player.ID == target.ID {
-			return index + 1
-		}
-	}
-	return target.Seat + 1
-}
-
-func aiPlayerRef(room *Room, target *Player) string {
-	return fmt.Sprintf("seat_%d", aiPlayerNumber(room, target))
-}
-
-func aliasWerewolfVoteIntents(room *Room, votes map[string]WerewolfVoteIntent) map[string]map[string]any {
-	aliased := map[string]map[string]any{}
-	for voterID, vote := range votes {
-		voter := findPlayerByID(room, voterID)
-		if voter == nil {
-			continue
-		}
-		entry := map[string]any{"confirmed": vote.Confirmed}
-		if target := findPlayerByID(room, vote.TargetID); target != nil {
-			entry["targetId"] = aiPlayerRef(room, target)
-		}
-		aliased[aiPlayerRef(room, voter)] = entry
-	}
-	return aliased
-}
-
-func aliasAlignmentMap(room *Room, values map[string]Alignment) map[string]Alignment {
-	aliased := map[string]Alignment{}
-	for playerID, alignment := range values {
-		if player := findPlayerByID(room, playerID); player != nil {
-			aliased[aiPlayerRef(room, player)] = alignment
-		}
-	}
-	return aliased
-}
-
-func aliasBoolMap(room *Room, values map[string]bool) map[string]bool {
-	aliased := map[string]bool{}
-	for playerID, value := range values {
-		if player := findPlayerByID(room, playerID); player != nil {
-			aliased[aiPlayerRef(room, player)] = value
-		}
-	}
-	return aliased
-}
-
-func aliasOptionalPlayerID(room *Room, playerID string) string {
-	if playerID == "" {
-		return ""
-	}
-	if player := findPlayerByID(room, playerID); player != nil {
-		return aiPlayerRef(room, player)
-	}
-	return ""
-}
-
-func aliasPlayerNotes(room *Room, notes map[string]string) map[string]string {
-	if len(notes) == 0 {
-		return nil
-	}
-	aliased := map[string]string{}
-	for playerID, note := range notes {
-		if player := findPlayerByID(room, playerID); player != nil {
-			aliased[aiPlayerRef(room, player)] = note
-		}
-	}
-	return aliased
-}
-
-func playerFromAIRef(room *Room, ref string) *Player {
-	ref = strings.TrimSpace(ref)
-	seat, ok := strings.CutPrefix(ref, "seat_")
-	if !ok {
-		return nil
-	}
-	number, err := strconv.Atoi(seat)
-	if err != nil || number < 1 {
-		return nil
-	}
-	for _, player := range room.Players {
-		if aiPlayerNumber(room, player) == number {
-			return player
-		}
-	}
-	return nil
-}
-
-func aiSpeechForWerewolf(room *Room) []map[string]any {
-	speeches := make([]map[string]any, 0, len(room.Speeches))
-	for _, speech := range room.Speeches {
-		playerRef := speech.PlayerID
-		if player := findPlayerByID(room, speech.PlayerID); player != nil {
-			playerRef = aiPlayerRef(room, player)
-		}
-		speeches = append(speeches, map[string]any{
-			"id":         speech.ID,
-			"playerId":   playerRef,
-			"playerName": speech.PlayerName,
-			"text":       speech.Text,
-			"spokenAt":   speech.SpokenAt,
-		})
-	}
-	return speeches
-}
-
-func (m *Manager) canUseLLM(player *Player) bool {
-	return player.AI != nil && player.AI.Level == string(aiplayer.LevelLLM) && m.aiProvider != nil && m.aiProvider.Enabled()
-}
-
-type socialAISession struct {
-	Game        GameKind
-	RoomID      string
-	PlayerID    string
-	PrivateRole Role
-	PrivateWord string
-	Memory      []string
-}
-
-func (m *Manager) ensureAISession(room *Room, player *Player) *socialAISession {
-	key := socialAISessionKey(room.ID, player.ID)
-	session := m.aiSessions[key]
-	if session == nil {
-		session = &socialAISession{Game: room.Game, RoomID: room.ID, PlayerID: player.ID}
-		m.aiSessions[key] = session
-	}
-	session.PrivateRole = player.Role
-	session.PrivateWord = undercoverWordForPlayer(room, player)
-	return session
-}
+const (
+	socialDecisionScopeRule   socialDecisionScope = "rule"
+	socialDecisionScopeSpeech socialDecisionScope = "speech"
+)
 
 func (m *Manager) socialDecision(room *Room, player *Player, state map[string]any, actions []aiplayer.LegalAction) (aiplayer.Decision, error) {
+	return m.socialDecisionScoped(room, player, state, actions, socialDecisionScopeRule)
+}
+
+func (m *Manager) socialSpeechDecision(room *Room, player *Player, state map[string]any, actions []aiplayer.LegalAction) (aiplayer.Decision, error) {
+	return m.socialDecisionScoped(room, player, state, actions, socialDecisionScopeSpeech)
+}
+
+func (m *Manager) socialDecisionScoped(room *Room, player *Player, state map[string]any, actions []aiplayer.LegalAction, scope socialDecisionScope) (aiplayer.Decision, error) {
 	if !m.canUseLLM(player) {
 		return aiplayer.Decision{}, errors.New("llm_not_configured")
+	}
+	if m.aiController == nil || !m.aiController.Enabled() {
+		return aiplayer.Decision{}, aiagent.ErrLLMNotConfigured
 	}
 	session := m.ensureAISession(room, player)
 	state["aiSession"] = map[string]any{
@@ -2143,86 +1811,112 @@ func (m *Manager) socialDecision(room *Room, player *Player, state map[string]an
 		"memory":    append([]string{}, session.Memory...),
 	}
 	state["privateNotes"] = aliasPlayerNotes(room, room.PlayerNotes[player.ID])
-	input := aiplayer.DecisionInput{
-		Game:        string(room.Game),
-		Level:       aiplayer.LevelLLM,
-		SessionID:   sessionID(room, player),
-		PlayerName:  player.Name,
-		Personality: player.AI.Personality,
-		SpeechStyle: player.AI.SpeechStyle,
-		State:       state,
-		Actions:     actions,
-	}
-	provider := m.aiProvider
 	phase := room.Phase
-	updatedAt := room.UpdatedAt
+	ruleUpdatedAt := decisionRuleUpdatedAt(room)
+	speechUpdatedAt := decisionSpeechUpdatedAt(room)
 	playerID := player.ID
 	playerName := player.Name
-
-	// This method is called with m.mu held. Release it while waiting on the LLM
-	// so a slow model cannot block unrelated room actions and broadcasts.
-	m.mu.Unlock()
+	eventType := gameactor.AgentRequiredAction
+	if scope == socialDecisionScopeSpeech {
+		eventType = gameactor.AgentOptionalSpeech
+	}
 	startedAt := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), socialDecisionTimeout)
-	decision, err := provider.Decide(ctx, input)
-	cancel()
-	m.mu.Lock()
+	personality := ""
+	speechStyle := ""
+	if player.AI != nil {
+		personality = player.AI.Personality
+		speechStyle = player.AI.SpeechStyle
+	}
+	decision, err := m.aiController.Decide(aiagent.DecisionRequest{
+		RoomID:        room.ID,
+		PlayerID:      player.ID,
+		RequestPrefix: "social",
+		SessionID:     sessionID(room, player),
+		Phase:         string(room.Phase),
+		Type:          eventType,
+		Profile: aiagent.Profile{
+			Name:        player.Name,
+			Personality: personality,
+			SpeechStyle: speechStyle,
+		},
+		State:   state,
+		Actions: actions,
+		Unlock:  m.mu.Unlock,
+		Lock:    m.mu.Lock,
+		Stale: func(decision aiplayer.Decision) error {
+			currentPlayer := findPlayerByID(room, playerID)
+			currentRuleUpdatedAt := decisionRuleUpdatedAt(room)
+			currentSpeechUpdatedAt := decisionSpeechUpdatedAt(room)
+			staleByRule := !currentRuleUpdatedAt.Equal(ruleUpdatedAt)
+			staleBySpeech := scope == socialDecisionScopeSpeech && !currentSpeechUpdatedAt.Equal(speechUpdatedAt)
+			if currentPlayer != nil && currentPlayer.Alive && currentPlayer.IsAI && room.Phase == phase && !staleByRule && !staleBySpeech {
+				return nil
+			}
+			expectedUpdatedAt := ruleUpdatedAt
+			currentUpdatedAt := currentRuleUpdatedAt
+			if !staleByRule && staleBySpeech {
+				expectedUpdatedAt = speechUpdatedAt
+				currentUpdatedAt = currentSpeechUpdatedAt
+			}
+			staleErr := staleAIDecisionError{
+				RoomID:            room.ID,
+				PlayerID:          playerID,
+				PlayerName:        playerName,
+				ExpectedPhase:     phase,
+				CurrentPhase:      room.Phase,
+				ExpectedUpdatedAt: expectedUpdatedAt,
+				CurrentUpdatedAt:  currentUpdatedAt,
+				PlayerFound:       currentPlayer != nil,
+				ActionID:          decision.ActionID,
+				Reason:            staleReason(room, currentPlayer, phase, ruleUpdatedAt, speechUpdatedAt, scope),
+			}
+			if currentPlayer != nil {
+				staleErr.PlayerAlive = currentPlayer.Alive
+				staleErr.PlayerIsAI = currentPlayer.IsAI
+			}
+			lastSpeechID := ""
+			lastSpeechPlayer := ""
+			if len(room.Speeches) > 0 {
+				lastSpeech := room.Speeches[len(room.Speeches)-1]
+				lastSpeechID = lastSpeech.ID
+				lastSpeechPlayer = lastSpeech.PlayerName
+			}
+			slog.Warn("social llm decision became stale",
+				"room", room.ID,
+				"game", room.Game,
+				"player", playerID,
+				"playerName", playerName,
+				"reason", staleErr.Reason,
+				"expectedPhase", phase,
+				"currentPhase", room.Phase,
+				"scope", scope,
+				"expectedRuleUpdatedAt", ruleUpdatedAt,
+				"currentRuleUpdatedAt", currentRuleUpdatedAt,
+				"expectedSpeechUpdatedAt", speechUpdatedAt,
+				"currentSpeechUpdatedAt", currentSpeechUpdatedAt,
+				"playerFound", staleErr.PlayerFound,
+				"playerAlive", staleErr.PlayerAlive,
+				"playerIsAI", staleErr.PlayerIsAI,
+				"actionID", decision.ActionID,
+				"reasonLength", len(decision.Reason),
+				"speechLength", len(decision.Speech),
+				"lastSpeechID", lastSpeechID,
+				"lastSpeechPlayer", lastSpeechPlayer,
+				"duration", time.Since(startedAt),
+			)
+			return staleErr
+		},
+	})
 	if err != nil {
 		return decision, err
 	}
 	currentPlayer := findPlayerByID(room, playerID)
-	if currentPlayer == nil || !currentPlayer.Alive || !currentPlayer.IsAI || room.Phase != phase || !room.UpdatedAt.Equal(updatedAt) {
-		staleErr := staleAIDecisionError{
-			RoomID:            room.ID,
-			PlayerID:          playerID,
-			PlayerName:        playerName,
-			ExpectedPhase:     phase,
-			CurrentPhase:      room.Phase,
-			ExpectedUpdatedAt: updatedAt,
-			CurrentUpdatedAt:  room.UpdatedAt,
-			PlayerFound:       currentPlayer != nil,
-			ActionID:          decision.ActionID,
-			Reason:            staleReason(room, currentPlayer, phase, updatedAt),
-		}
-		if currentPlayer != nil {
-			staleErr.PlayerAlive = currentPlayer.Alive
-			staleErr.PlayerIsAI = currentPlayer.IsAI
-		}
-		lastSpeechID := ""
-		lastSpeechPlayer := ""
-		if len(room.Speeches) > 0 {
-			lastSpeech := room.Speeches[len(room.Speeches)-1]
-			lastSpeechID = lastSpeech.ID
-			lastSpeechPlayer = lastSpeech.PlayerName
-		}
-		slog.Warn("social llm decision became stale",
-			"room", room.ID,
-			"game", room.Game,
-			"player", playerID,
-			"playerName", playerName,
-			"reason", staleErr.Reason,
-			"expectedPhase", phase,
-			"currentPhase", room.Phase,
-			"expectedUpdatedAt", updatedAt,
-			"currentUpdatedAt", room.UpdatedAt,
-			"playerFound", staleErr.PlayerFound,
-			"playerAlive", staleErr.PlayerAlive,
-			"playerIsAI", staleErr.PlayerIsAI,
-			"actionID", decision.ActionID,
-			"reasonLength", len(decision.Reason),
-			"speechLength", len(decision.Speech),
-			"lastSpeechID", lastSpeechID,
-			"lastSpeechPlayer", lastSpeechPlayer,
-			"duration", time.Since(startedAt),
-		)
-		return decision, staleErr
-	}
 	m.applyAINotes(room, currentPlayer, decision.Notes)
 	m.rememberAI(room, currentPlayer, fmt.Sprintf("phase=%s action=%s reason=%s speech=%s", room.Phase, decision.ActionID, strings.TrimSpace(decision.Reason), strings.TrimSpace(decision.Speech)))
 	return decision, nil
 }
 
-func staleReason(room *Room, player *Player, expectedPhase Phase, expectedUpdatedAt time.Time) string {
+func staleReason(room *Room, player *Player, expectedPhase Phase, expectedRuleUpdatedAt time.Time, expectedSpeechUpdatedAt time.Time, scope socialDecisionScope) string {
 	reasons := []string{}
 	if player == nil {
 		reasons = append(reasons, "player_missing")
@@ -2237,8 +1931,11 @@ func staleReason(room *Room, player *Player, expectedPhase Phase, expectedUpdate
 	if room.Phase != expectedPhase {
 		reasons = append(reasons, "phase_changed")
 	}
-	if !room.UpdatedAt.Equal(expectedUpdatedAt) {
-		reasons = append(reasons, "room_updated")
+	if !decisionRuleUpdatedAt(room).Equal(expectedRuleUpdatedAt) {
+		reasons = append(reasons, "rule_updated")
+	}
+	if scope == socialDecisionScopeSpeech && !decisionSpeechUpdatedAt(room).Equal(expectedSpeechUpdatedAt) {
+		reasons = append(reasons, "speech_updated")
 	}
 	if len(reasons) == 0 {
 		return "unknown"
@@ -2259,12 +1956,30 @@ func (m *Manager) applyAINotes(room *Room, player *Player, notes map[string]stri
 	}
 }
 
+func (m *Manager) removeSocialAgent(roomID string, playerID string) {
+	if m.aiController != nil {
+		m.aiController.Remove(roomID, playerID)
+	}
+	delete(m.aiSessions, socialAISessionKey(roomID, playerID))
+}
+
+func (m *Manager) removeRoomAgents(roomID string) {
+	if m.aiController != nil {
+		m.aiController.RemoveRoom(roomID)
+	}
+	for key, session := range m.aiSessions {
+		if session.RoomID == roomID {
+			delete(m.aiSessions, key)
+		}
+	}
+}
+
 func (m *Manager) aiSpeechState(room *Room, player *Player) map[string]any {
 	return map[string]any{
 		"phase":        room.Phase,
 		"role":         player.Role,
 		"alignment":    player.Alignment,
-		"recentSpeech": room.Speeches,
+		"recentSpeech": aiSpeeches(room),
 		"speechGuide":  "像真实玩家一样自然短句回应，可以观察、质疑、接话；没有必要说话就跳过。不要泄露隐藏身份或秘密词。",
 	}
 }
@@ -2436,9 +2151,9 @@ func avalonAIState(room *Room, actor *Player, phase string) map[string]any {
 	players := make([]map[string]any, 0, len(room.Players))
 	for _, player := range room.Players {
 		entry := map[string]any{
-			"id":    player.ID,
+			"id":    aiPlayerRef(room, player),
 			"name":  player.Name,
-			"seat":  player.Seat,
+			"seat":  aiPlayerNumber(room, player),
 			"alive": player.Alive,
 		}
 		if roleVisible(room, actor, player) {
@@ -2457,14 +2172,14 @@ func avalonAIState(room *Room, actor *Player, phase string) map[string]any {
 		"yourRole":      actor.Role,
 		"yourAlignment": actor.Alignment,
 		"players":       players,
-		"leaderId":      room.Avalon.LeaderID,
-		"team":          append([]string{}, room.Avalon.Team...),
-		"teamVotes":     teamVotes,
+		"leaderId":      aliasOptionalPlayerID(room, room.Avalon.LeaderID),
+		"team":          aliasStringSlice(room, room.Avalon.Team),
+		"teamVotes":     aliasBoolMap(room, teamVotes),
 		"teamVoteCount": len(room.Avalon.TeamVotes),
 		"questResults":  append([]AvalonQuestResult{}, room.Avalon.QuestResults...),
 		"successes":     room.Avalon.Successes,
 		"fails":         room.Avalon.Fails,
-		"recentSpeech":  room.Speeches,
+		"recentSpeech":  aiSpeeches(room),
 	}
 }
 
@@ -2479,9 +2194,9 @@ func undercoverAIState(room *Room, player *Player, phase string) map[string]any 
 		"badSpeechExamples":     []string{"它在生活里挺常见", "它一般会出现在具体场景里", "它的特点不能说得太细", "我先说个比较宽的范围", "我会先看大家怎么描述"},
 		"forbiddenPublicSpeech": forbiddenPublicSpeech(word),
 		"players":               publicPlayersForAI(room, player),
-		"described":             cloneBoolMap(room.Undercover.Described),
-		"votes":                 cloneStringMap(room.Undercover.Votes),
-		"recentSpeech":          room.Speeches,
+		"described":             aliasBoolMap(room, room.Undercover.Described),
+		"votes":                 aliasUndercoverVoteIntents(room, room.Undercover.Votes),
+		"recentSpeech":          aiSpeeches(room),
 	}
 }
 
@@ -2489,12 +2204,12 @@ func publicPlayersForAI(room *Room, actor *Player) []map[string]any {
 	players := make([]map[string]any, 0, len(room.Players))
 	for _, player := range room.Players {
 		entry := map[string]any{
-			"id":    player.ID,
+			"id":    aiPlayerRef(room, player),
 			"name":  player.Name,
-			"seat":  player.Seat,
+			"seat":  aiPlayerNumber(room, player),
 			"alive": player.Alive,
 		}
-		if player.ID == actor.ID {
+		if roleVisible(room, actor, player) {
 			entry["role"] = player.Role
 			entry["alignment"] = player.Alignment
 		}
@@ -2513,9 +2228,14 @@ func playerFromAction(room *Room, actionID string, prefix string) *Player {
 func (m *Manager) chooseAvalonTeam(room *Room, leader *Player) ([]string, string) {
 	actions := avalonTeamActions(room, leader)
 	if m.canUseLLM(leader) && len(actions) > 0 {
-		decision, err := m.socialDecision(room, leader, avalonAIState(room, leader, "team"), actions)
-		if err == nil && strings.HasPrefix(decision.ActionID, "team:") {
-			team := strings.Split(strings.TrimPrefix(decision.ActionID, "team:"), ",")
+		llmActions, actionMap := avalonTeamActionsForLLM(room, actions)
+		decision, err := m.socialDecision(room, leader, avalonAIState(room, leader, "team"), llmActions)
+		if err == nil {
+			actionID := actionMap[decision.ActionID]
+			if actionID == "" {
+				actionID = decision.ActionID
+			}
+			team := strings.Split(strings.TrimPrefix(actionID, "team:"), ",")
 			if len(team) == room.Avalon.RequiredTeam {
 				return team, strings.TrimSpace(decision.Speech)
 			}
@@ -2566,9 +2286,14 @@ func (m *Manager) chooseAvalonAssassination(room *Room, player *Player) (*Player
 		actions = append(actions, aiplayer.LegalAction{ID: "assassinate:" + target.ID, Label: fmt.Sprintf("刺杀 %s", target.Name)})
 	}
 	if m.canUseLLM(player) && len(actions) > 0 {
-		decision, err := m.socialDecision(room, player, avalonAIState(room, player, "assassination"), actions)
+		llmActions, actionMap := playerTargetActionsForLLM(room, actions, []string{"assassinate:"})
+		decision, err := m.socialDecision(room, player, avalonAIState(room, player, "assassination"), llmActions)
 		if err == nil {
-			if target := playerFromAction(room, decision.ActionID, "assassinate:"); target != nil {
+			actionID := actionMap[decision.ActionID]
+			if actionID == "" {
+				actionID = decision.ActionID
+			}
+			if target := playerFromAction(room, actionID, "assassinate:"); target != nil {
 				return target, strings.TrimSpace(decision.Speech)
 			}
 		}
@@ -2663,9 +2388,14 @@ func (m *Manager) chooseUndercoverVote(room *Room, player *Player) *Player {
 		return nil
 	}
 	if player.AI != nil && player.AI.Level == string(aiplayer.LevelLLM) && m.aiProvider != nil && m.aiProvider.Enabled() {
-		decision, err := m.socialDecision(room, player, undercoverAIState(room, player, "vote"), actions)
+		llmActions, actionMap := playerTargetActionsForLLM(room, actions, []string{"vote:"})
+		decision, err := m.socialDecision(room, player, undercoverAIState(room, player, "vote"), llmActions)
 		if err == nil && strings.HasPrefix(decision.ActionID, "vote:") {
-			return findPlayerByID(room, strings.TrimPrefix(decision.ActionID, "vote:"))
+			actionID := actionMap[decision.ActionID]
+			if actionID == "" {
+				actionID = decision.ActionID
+			}
+			return findPlayerByID(room, strings.TrimPrefix(actionID, "vote:"))
 		}
 		if err != nil {
 			slog.Warn("undercover llm vote failed", "room", room.ID, "player", player.ID, "playerName", player.Name, "error", err)
@@ -2841,242 +2571,6 @@ func reconcileLobbyConfig(room *Room) {
 	}
 }
 
-func applyDefaultUndercoverConfig(room *Room) {
-	if room.Undercover.PresetID == "" {
-		room.Undercover.PresetID = defaultUndercoverPresetID()
-	}
-	room.Undercover.Presets = undercoverPresets()
-	room.Undercover.Described = map[string]bool{}
-	room.Undercover.Votes = map[string]string{}
-}
-
-func defaultUndercoverPresetID() string {
-	return "daily"
-}
-
-func undercoverPresets() []UndercoverPreset {
-	return []UndercoverPreset{
-		{ID: "daily", Name: "日常生活", Description: "生活里常见但容易混淆的词。", Pairs: []UndercoverWordPair{
-			{ID: "daily-1", CivilianWord: "咖啡", UndercoverWord: "奶茶", Category: "饮品"},
-			{ID: "daily-2", CivilianWord: "公交车", UndercoverWord: "地铁", Category: "交通"},
-			{ID: "daily-3", CivilianWord: "雨伞", UndercoverWord: "遮阳伞", Category: "物品"},
-			{ID: "daily-4", CivilianWord: "键盘", UndercoverWord: "钢琴", Category: "物品"},
-			{ID: "daily-5", CivilianWord: "火锅", UndercoverWord: "麻辣烫", Category: "食物"},
-			{ID: "daily-6", CivilianWord: "电影院", UndercoverWord: "剧院", Category: "地点"},
-		}},
-		{ID: "internet", Name: "网络热词", Description: "更适合熟人局的互联网语境题库。", Pairs: []UndercoverWordPair{
-			{ID: "internet-1", CivilianWord: "弹幕", UndercoverWord: "评论区", Category: "网络"},
-			{ID: "internet-2", CivilianWord: "直播", UndercoverWord: "短视频", Category: "网络"},
-			{ID: "internet-3", CivilianWord: "表情包", UndercoverWord: "贴纸", Category: "网络"},
-			{ID: "internet-4", CivilianWord: "摸鱼", UndercoverWord: "摆烂", Category: "网络"},
-			{ID: "internet-5", CivilianWord: "热搜", UndercoverWord: "推荐页", Category: "网络"},
-		}},
-		{ID: "anime", Name: "轻二次元", Description: "偏 ACG 的非 IP 词库，不依赖具体版权角色。", Pairs: []UndercoverWordPair{
-			{ID: "anime-1", CivilianWord: "魔法少女", UndercoverWord: "变身英雄", Category: "幻想"},
-			{ID: "anime-2", CivilianWord: "社团活动", UndercoverWord: "校园祭", Category: "校园"},
-			{ID: "anime-3", CivilianWord: "机甲", UndercoverWord: "机器人", Category: "科幻"},
-			{ID: "anime-4", CivilianWord: "异世界", UndercoverWord: "平行宇宙", Category: "幻想"},
-			{ID: "anime-5", CivilianWord: "必杀技", UndercoverWord: "连招", Category: "战斗"},
-		}},
-		{ID: "ai-curated", Name: "AI 推荐", Description: "按 AI 参与感设计的更抽象题库。", Pairs: []UndercoverWordPair{
-			{ID: "ai-1", CivilianWord: "灵感", UndercoverWord: "直觉", Category: "抽象"},
-			{ID: "ai-2", CivilianWord: "记忆", UndercoverWord: "回忆", Category: "抽象"},
-			{ID: "ai-3", CivilianWord: "计划", UndercoverWord: "策略", Category: "抽象"},
-			{ID: "ai-4", CivilianWord: "规则", UndercoverWord: "约定", Category: "抽象"},
-			{ID: "ai-5", CivilianWord: "推理", UndercoverWord: "猜测", Category: "抽象"},
-		}},
-	}
-}
-
-func undercoverPresetExists(id string) bool {
-	for _, preset := range undercoverPresets() {
-		if preset.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
-func undercoverPresetName(id string) string {
-	for _, preset := range undercoverPresets() {
-		if preset.ID == id {
-			return preset.Name
-		}
-	}
-	return undercoverPresets()[0].Name
-}
-
-func chooseUndercoverPair(presetID string) UndercoverWordPair {
-	for _, preset := range undercoverPresets() {
-		if preset.ID == presetID && len(preset.Pairs) > 0 {
-			return preset.Pairs[rand.IntN(len(preset.Pairs))]
-		}
-	}
-	preset := undercoverPresets()[0]
-	return preset.Pairs[rand.IntN(len(preset.Pairs))]
-}
-
-func undercoverCountForPlayers(count int) int {
-	if count >= 7 {
-		return 2
-	}
-	return 1
-}
-
-func firstLivingPlayerID(room *Room) string {
-	for _, player := range room.Players {
-		if player.Alive {
-			return player.ID
-		}
-	}
-	return ""
-}
-
-func nextUndescribedLivingPlayer(room *Room) *Player {
-	for _, player := range room.Players {
-		if player.Alive && !room.Undercover.Described[player.ID] {
-			return player
-		}
-	}
-	return nil
-}
-
-func mostVotedUndercoverTarget(votes map[string]string) (string, bool) {
-	counts := map[string]int{}
-	bestID := ""
-	bestCount := 0
-	tied := false
-	for _, targetID := range votes {
-		counts[targetID]++
-		switch {
-		case counts[targetID] > bestCount:
-			bestID = targetID
-			bestCount = counts[targetID]
-			tied = false
-		case counts[targetID] == bestCount:
-			tied = true
-		}
-	}
-	return bestID, tied
-}
-
-func undercoverWordForPlayer(room *Room, player *Player) string {
-	switch player.Role {
-	case RoleUndercover:
-		return room.Undercover.WordPair.UndercoverWord
-	case RoleBlank:
-		return ""
-	default:
-		return room.Undercover.WordPair.CivilianWord
-	}
-}
-
-func undercoverViewForViewer(room *Room, viewer *Player) UndercoverView {
-	view := UndercoverView{
-		Round:            room.Undercover.Round,
-		PresetID:         room.Undercover.PresetID,
-		IncludeBlank:     room.Undercover.IncludeBlank,
-		CurrentSpeakerID: room.Undercover.CurrentSpeakerID,
-		Described:        cloneBoolMap(room.Undercover.Described),
-		Votes:            cloneStringMap(room.Undercover.Votes),
-		LastEliminatedID: room.Undercover.LastEliminatedID,
-	}
-	if room.Phase == PhaseLobby {
-		view.Presets = undercoverPresets()
-		return view
-	}
-	if room.Phase == PhaseFinished {
-		view.WordPair = room.Undercover.WordPair
-		return view
-	}
-	if viewer != nil {
-		view.WordPair = UndercoverWordPair{ID: room.Undercover.WordPair.ID, Category: room.Undercover.WordPair.Category}
-		if viewer.Role == RoleUndercover {
-			view.WordPair.UndercoverWord = room.Undercover.WordPair.UndercoverWord
-		} else if viewer.Role == RoleCivilian {
-			view.WordPair.CivilianWord = room.Undercover.WordPair.CivilianWord
-		}
-	}
-	return view
-}
-
-func undercoverDescriptionActions(room *Room, player *Player) []aiplayer.LegalAction {
-	word := undercoverWordForPlayer(room, player)
-	if word == "" {
-		return []aiplayer.LegalAction{
-			{ID: "say:blank-follow", Label: "空白牌：跟随已有线索", Description: "根据最近发言接一个不露怯的侧面说法。speech 必须是最终发言，不能泛泛说常见、场景或特点。"},
-			{ID: "say:blank-tone", Label: "空白牌：用语气试探", Description: "用谨慎语气给模糊但像真人的线索，不声称知道具体词。speech 必须自然短句。"},
-			{ID: "say:blank-soft", Label: "空白牌：保守绕开核心", Description: "绕开核心名词，说一个安全的边缘联想。speech 不能说“我先看大家怎么描述”。"},
-		}
-	}
-	return []aiplayer.LegalAction{
-		{ID: "say:use", Label: "从用途或接触方式给线索", Description: "给一个关于使用方式、接触方式或参与动作的侧面线索。speech 必须是最终发言，不得说出底词，不得使用空话。"},
-		{ID: "say:association", Label: "从相邻事物给线索", Description: "说它旁边常伴随的类别、动作或氛围，但不能点名底词。speech 必须像真人发言。"},
-		{ID: "say:feeling", Label: "从感觉或语境给线索", Description: "给一个带个人感受的侧面线索，不能只说常见、场景、特点。speech 必须短而具体。"},
-	}
-}
-
-func validUndercoverDescription(text string, word string) (string, bool) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "", false
-	}
-	runes := []rune(text)
-	if len(runes) > 48 {
-		text = string(runes[:48])
-	}
-	lowerText := strings.ToLower(text)
-	for _, phrase := range []string{"生活里挺常见", "生活里很常见", "具体场景", "特点不能说得太细", "比较宽的范围", "看大家怎么描述", "常见但不好说"} {
-		if strings.Contains(lowerText, strings.ToLower(phrase)) {
-			return "", false
-		}
-	}
-	word = strings.TrimSpace(word)
-	if word != "" && strings.Contains(text, word) {
-		return "", false
-	}
-	return text, true
-}
-
-func fallbackUndercoverDescription(actionID string) string {
-	switch actionID {
-	case "say:use":
-		return "我想到的是它被用起来的样子。"
-	case "say:association":
-		return "我会先从它旁边的东西联想。"
-	case "say:feeling":
-		return "我对它的第一感觉比较明确。"
-	case "say:blank-follow":
-		return "我先顺着前面的方向说。"
-	case "say:blank-tone":
-		return "这个我不敢说太满。"
-	default:
-		return "我先给个边缘一点的线索。"
-	}
-}
-
-func forbiddenPublicSpeech(word string) []string {
-	word = strings.TrimSpace(word)
-	if word == "" {
-		return []string{}
-	}
-	return []string{word}
-}
-
-func undercoverVoteActions(room *Room, player *Player) []aiplayer.LegalAction {
-	actions := []aiplayer.LegalAction{}
-	for _, target := range room.Players {
-		if target.Alive && target.ID != player.ID {
-			actions = append(actions, aiplayer.LegalAction{
-				ID:          "vote:" + target.ID,
-				Label:       target.Name,
-				Description: fmt.Sprintf("投票给 %s", target.Name),
-			})
-		}
-	}
-	return actions
-}
-
 func createLog(text string) LogEntry {
 	return LogEntry{ID: "log_" + randomToken(8), Text: text}
 }
@@ -3122,6 +2616,14 @@ func cloneStringMap(source map[string]string) map[string]string {
 
 func cloneWerewolfVotes(source map[string]WerewolfVoteIntent) map[string]WerewolfVoteIntent {
 	next := map[string]WerewolfVoteIntent{}
+	for key, value := range source {
+		next[key] = value
+	}
+	return next
+}
+
+func cloneUndercoverVotes(source map[string]UndercoverVoteIntent) map[string]UndercoverVoteIntent {
+	next := map[string]UndercoverVoteIntent{}
 	for key, value := range source {
 		next[key] = value
 	}

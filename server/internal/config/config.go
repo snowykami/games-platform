@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -16,7 +17,8 @@ type Config struct {
 }
 
 type HTTPConfig struct {
-	Port string
+	Port                string
+	SecureSessionCookie bool
 }
 
 type DatabaseConfig struct {
@@ -52,7 +54,10 @@ func Load() Config {
 	}
 
 	return Config{
-		HTTP:     HTTPConfig{Port: port},
+		HTTP: HTTPConfig{
+			Port:                port,
+			SecureSessionCookie: secureSessionCookie(),
+		},
 		Database: DatabaseConfig{URL: os.Getenv("DB_URL")},
 		Redis:    RedisConfig{URL: os.Getenv("REDIS_URL")},
 		AI: AIConfig{
@@ -62,6 +67,18 @@ func Load() Config {
 		},
 		OIDC: loadOIDCProviders(),
 	}
+}
+
+func secureSessionCookie() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("SESSION_COOKIE_SECURE")))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	}
+	env := strings.ToLower(strings.TrimSpace(os.Getenv("APP_ENV")))
+	return env == "production" || env == "prod"
 }
 
 func (c AIConfig) Enabled() bool {

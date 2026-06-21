@@ -116,7 +116,7 @@ export function useSocialRoom(game: SocialGameSlug, roomId: string | undefined) 
     teamVote: (approve: boolean) => roomId ? run(() => voteAvalonTeam(roomId, approve)) : Promise.resolve(),
     undercoverConfig: (presetId: string, includeBlank: boolean) => roomId ? run(() => updateUndercoverConfig(roomId, presetId, includeBlank)) : Promise.resolve(),
     undercoverDescribe: (text: string) => roomId ? run(() => describeUndercover(roomId, text)) : Promise.resolve(),
-    undercoverVote: (targetId: string) => roomId ? run(() => voteUndercover(roomId, targetId)) : Promise.resolve(),
+    undercoverVote: (targetId: string, confirmed: boolean) => roomId ? run(() => voteUndercover(roomId, targetId, confirmed)) : Promise.resolve(),
     updateAI: (playerId: string, level: string) => roomId ? run(() => updateSocialAI(game, roomId, playerId, level)) : Promise.resolve(),
     updatePlayerNote: (playerId: string, note: string) => roomId ? run(() => updateSocialPlayerNote(game, roomId, playerId, note)) : Promise.resolve(),
     updateWerewolfRoles: (config: WerewolfRoleConfig) => roomId ? run(() => updateWerewolfRoles(roomId, config)) : Promise.resolve(),

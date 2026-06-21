@@ -204,22 +204,32 @@ func UserFromContext(ctx context.Context) (*User, bool) {
 }
 
 func SetSessionCookie(w http.ResponseWriter, session Session) {
+	setSessionCookie(w, session, false)
+}
+
+func setSessionCookie(w http.ResponseWriter, session Session, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookieName,
 		Value:    session.Token,
 		Path:     "/",
 		Expires:  session.ExpiresAt,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 		HttpOnly: true,
 	})
 }
 
 func ClearSessionCookie(w http.ResponseWriter) {
+	clearSessionCookie(w, false)
+}
+
+func clearSessionCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 		HttpOnly: true,
 	})
