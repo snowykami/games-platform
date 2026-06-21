@@ -12,6 +12,7 @@ import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { useCurrentRoom } from '@/games/useCurrentRoom'
+import { usePendingAction } from '@/games/usePendingAction'
 import { cn } from '@/shared/lib/utils'
 import { createMahjongRoom, getCurrentMahjongRoom } from './online'
 import { useMahjongRoom } from './useMahjongRoom'
@@ -28,6 +29,7 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
   const [pendingAI, setPendingAI] = useState(false)
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
+  const pending = usePendingAction()
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
   const loadCurrentRoom = useCallback(() => getCurrentMahjongRoom(), [])
   const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
@@ -41,6 +43,10 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
     })
   }, [aiLevel])
 
+  useEffect(() => {
+    pending.clearAll()
+  }, [pending, pending.clearAll, room?.actionSeq, room?.phase, room?.players.length])
+
   if (roomId && room && room.phase !== 'lobby') {
     return <MahjongOnlineTable error={error} room={room} roomId={roomId} />
   }
@@ -48,7 +54,10 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
   async function createRoom() {
     setMessage('正在创建房间...')
     try {
-      const nextRoom = await createMahjongRoom()
+      const nextRoom = await pending.run('create', () => createMahjongRoom())
+      if (!nextRoom) {
+        return
+      }
 
       navigate(`/games/mahjong?room=${nextRoom.id}`)
       setJoinCode(nextRoom.id)
@@ -85,14 +94,14 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
   }
 
   async function addAIPlayer() {
-    if (pendingAI || !room) {
+    if (pendingAI || pending.isPending('add-ai') || !room) {
       return
     }
 
     setPendingAI(true)
     setMessage('正在添加 AI...')
     try {
-      await actions.addAI(aiLevel)
+      await pending.run('add-ai', () => actions.addAI(aiLevel), { releaseOnSettle: false })
       setMessage('AI 已加入。')
     }
     finally {
@@ -102,7 +111,7 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
 
   async function startGame() {
     setMessage('正在开始牌局...')
-    await actions.start()
+    await pending.run('start', () => actions.start(), { releaseOnSettle: false })
     setMessage('牌局开始。')
   }
 
@@ -121,9 +130,9 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
 
           <form className="rounded-lg border border-[#d8b66a]/35 bg-[#081914]/82 p-5 shadow-[0_24px_70px_rgba(0,0,0,0.22)]" onSubmit={joinRoom}>
             <h2 className="text-2xl font-black tracking-normal">进入房间</h2>
-            <button className="mahjong-action mahjong-action-primary mt-4 w-full" type="button" onClick={createRoom}>
+            <button className="mahjong-action mahjong-action-primary mt-4 w-full" disabled={pending.isPending('create')} type="button" onClick={createRoom}>
               <Plus className="size-4" />
-              创建并进入
+              {pending.isPending('create') ? '同步中...' : '创建并进入'}
             </button>
             {currentRoom && (
               <ContinueRoomEntry
@@ -175,15 +184,15 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
               <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} palette="dark" onChange={setAILevel} />
               <button
                 className={cn('mahjong-action', pendingAI && 'loading')}
-                disabled={pendingAI || !isHost || !room || room.players.length >= 4}
+                disabled={pendingAI || pending.isPending('add-ai') || !isHost || !room || room.players.length >= 4}
                 type="button"
                 onClick={addAIPlayer}
               >
                 <Bot className="size-4" />
-                {pendingAI ? '添加中' : `添加 AI (${getAILevelLabel(aiLevel, 'zh')})`}
+                {pendingAI || pending.isPending('add-ai') ? '添加中' : `添加 AI (${getAILevelLabel(aiLevel, 'zh')})`}
               </button>
-              <button className="mahjong-action mahjong-action-primary" disabled={!isHost || !room || room.players.length < 4} type="button" onClick={startGame}>
-                开始游戏
+              <button className="mahjong-action mahjong-action-primary" disabled={pending.isPending('start') || !isHost || !room || room.players.length < 4} type="button" onClick={startGame}>
+                {pending.isPending('start') ? '同步中...' : '开始游戏'}
               </button>
             </div>
           </div>
@@ -252,9 +261,14 @@ export function MahjongRoomGate({ roomId }: MahjongRoomGateProps) {
 
 function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: MahjongOnlineRoom, roomId: string }) {
   const { actions } = useMahjongRoom(roomId)
+  const pending = usePendingAction()
   const human = room.players.find(player => player.id === room.youPlayerId)
   const currentPlayer = room.players.find(player => player.id === room.currentPlayerId)
   const winner = room.players.find(player => player.id === room.winnerId)
+
+  useEffect(() => {
+    pending.clearAll()
+  }, [pending, pending.clearAll, room.actionSeq, room.currentPlayerId, room.hasDrawn, room.log.length, room.phase])
 
   if (!human || !currentPlayer) {
     return (
@@ -268,6 +282,13 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
   const canHumanDraw = isHumanTurn && !room.hasDrawn
   const canHumanDiscard = isHumanTurn && room.hasDrawn
   const lastLog = room.log.at(-1)?.text
+  const isRestartPending = pending.isPending('restart')
+  const isDrawPending = pending.isPending('draw')
+  const isSelfDrawPending = pending.isPending('self-draw')
+  const isSkipClaimsPending = pending.isPending('skip-claims')
+  const hasPendingClaim = room.claimOptions.some(option => pending.isPending(`claim:${option.id}`))
+  const hasPendingDiscard = human.hand.some(tile => pending.isPending(`discard:${tile.id}`))
+  const hasPendingTableAction = isDrawPending || isSelfDrawPending || isSkipClaimsPending || hasPendingClaim || hasPendingDiscard
 
   return (
     <main className="min-h-svh bg-[#1b342b] text-[#fff8e8]">
@@ -282,9 +303,14 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
               <ArrowLeft className="size-4" />
               游戏大厅
             </Link>
-            <button className="mahjong-action mahjong-action-primary" disabled={room.hostPlayerId !== room.youPlayerId} type="button" onClick={() => actions.start()}>
+            <button
+              className="mahjong-action mahjong-action-primary"
+              disabled={room.hostPlayerId !== room.youPlayerId || isRestartPending}
+              type="button"
+              onClick={() => void pending.run('restart', () => actions.start(), { releaseOnSettle: false })}
+            >
               <RefreshCw className="size-4" />
-              重开
+              {isRestartPending ? '同步中...' : '重开'}
             </button>
           </div>
         </header>
@@ -347,13 +373,23 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
               </div>
               <div className="flex flex-wrap gap-2">
                 <SpeechButton palette="mahjong" onSend={actions.say} />
-                <button className="mahjong-action" disabled={!canHumanDraw} type="button" onClick={actions.draw}>
+                <button
+                  className="mahjong-action"
+                  disabled={!canHumanDraw || isDrawPending || hasPendingTableAction}
+                  type="button"
+                  onClick={() => void pending.run('draw', actions.draw, { releaseOnSettle: false })}
+                >
                   <Hand className="size-4" />
-                  摸牌
+                  {isDrawPending ? '同步中...' : '摸牌'}
                 </button>
-                <button className="mahjong-action mahjong-action-primary" disabled={!canHumanDiscard} type="button" onClick={actions.selfDraw}>
+                <button
+                  className="mahjong-action mahjong-action-primary"
+                  disabled={!canHumanDiscard || isSelfDrawPending || hasPendingTableAction}
+                  type="button"
+                  onClick={() => void pending.run('self-draw', actions.selfDraw, { releaseOnSettle: false })}
+                >
                   <Sparkles className="size-4" />
-                  自摸
+                  {isSelfDrawPending ? '同步中...' : '自摸'}
                 </button>
               </div>
             </div>
@@ -361,11 +397,24 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
             {room.claimOptions.length > 0 && (
               <div className="flex flex-wrap items-center gap-2 rounded-lg bg-[#fff8e8]/10 p-2">
                 {room.claimOptions.map(option => (
-                  <button key={option.id} className="mahjong-action mahjong-action-primary" type="button" onClick={() => actions.claim(option.id)}>
-                    {claimLabel(option)}
+                  <button
+                    key={option.id}
+                    className="mahjong-action mahjong-action-primary"
+                    disabled={hasPendingTableAction}
+                    type="button"
+                    onClick={() => void pending.run(`claim:${option.id}`, () => actions.claim(option.id), { releaseOnSettle: false })}
+                  >
+                    {pending.isPending(`claim:${option.id}`) ? '同步中...' : claimLabel(option)}
                   </button>
                 ))}
-                <button className="mahjong-action" type="button" onClick={actions.skipClaims}>跳过</button>
+                <button
+                  className="mahjong-action"
+                  disabled={hasPendingTableAction}
+                  type="button"
+                  onClick={() => void pending.run('skip-claims', actions.skipClaims, { releaseOnSettle: false })}
+                >
+                  {isSkipClaimsPending ? '同步中...' : '跳过'}
+                </button>
               </div>
             )}
 
@@ -374,10 +423,10 @@ function MahjongOnlineTable({ error, room, roomId }: { error?: string, room: Mah
                 <button
                   key={tile.id}
                   className="p-0 transition hover:-translate-y-1 disabled:cursor-not-allowed disabled:opacity-55"
-                  disabled={!canHumanDiscard}
+                  disabled={!canHumanDiscard || hasPendingTableAction}
                   title={canHumanDiscard ? `打出 ${formatTile(tile)}` : formatTile(tile)}
                   type="button"
-                  onClick={() => actions.discard(tile.id)}
+                  onClick={() => void pending.run(`discard:${tile.id}`, () => actions.discard(tile.id), { releaseOnSettle: false })}
                 >
                   <TileView tile={tile} />
                 </button>

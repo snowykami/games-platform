@@ -1,5 +1,6 @@
 import { Check } from 'lucide-react'
 import { useState } from 'react'
+import { usePendingAction } from '@/games/usePendingAction'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 
@@ -12,22 +13,19 @@ interface PlayerNoteEditorProps {
 export function PlayerNoteEditor({ className, note = '', onSave }: PlayerNoteEditorProps) {
   const { t } = useI18n()
   const [draft, setDraft] = useState(note)
-  const [pending, setPending] = useState(false)
+  const pending = usePendingAction()
+  const isSaving = pending.isPending('save')
 
   async function saveNote() {
-    if (pending || draft === note) {
+    if (isSaving || draft === note) {
       return
     }
 
     const nextNote = normalizeNoteDraft(draft)
-    setPending(true)
-    try {
+    await pending.run('save', async () => {
       await onSave(nextNote)
       setDraft(nextNote)
-    }
-    finally {
-      setPending(false)
-    }
+    })
   }
 
   return (
@@ -49,11 +47,11 @@ export function PlayerNoteEditor({ className, note = '', onSave }: PlayerNoteEdi
       <button
         aria-label={t('social.saveNote')}
         className="inline-grid size-8 place-items-center rounded-lg border border-white/16 bg-white/10 transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-        disabled={pending || draft === note}
-        title={t('social.saveNote')}
+        disabled={isSaving || draft === note}
+        title={isSaving ? t('common.syncing') : t('social.saveNote')}
         type="submit"
       >
-        <Check className="size-4" />
+        {isSaving ? <span className="text-xs font-black">...</span> : <Check className="size-4" />}
       </button>
     </form>
   )

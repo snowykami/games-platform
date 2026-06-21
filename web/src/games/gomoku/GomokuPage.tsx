@@ -2,13 +2,14 @@ import type { ReactNode } from 'react'
 import type { GomokuMove, GomokuPlayer, GomokuStone } from './online'
 import type { GameSpeechEntry } from '@/games/speech'
 import { ArrowLeft, Copy, RotateCcw } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useAutoFollowScroll } from '@/games/useAutoFollowScroll'
+import { usePendingAction } from '@/games/usePendingAction'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { useGomokuRoom } from './useGomokuRoom'
@@ -17,6 +18,7 @@ export function GomokuPage({ roomId }: { roomId: string }) {
   const { t } = useI18n()
   const { actions, error, isLoading, room } = useGomokuRoom(roomId)
   const [message, setMessage] = useState(() => t('gomoku.ready'))
+  const pending = usePendingAction()
   const historyScroll = useAutoFollowScroll<HTMLDivElement>()
 
   const human = useMemo(() => room?.players.find(player => player.id === room.youPlayerId), [room?.players, room?.youPlayerId])
@@ -32,6 +34,10 @@ export function GomokuPage({ roomId }: { roomId: string }) {
   const isHumanTurn = Boolean(room && human && room.phase === 'playing' && room.currentPlayerId === human.id)
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
 
+  useEffect(() => {
+    pending.clearAll()
+  }, [pending, pending.clearAll, room?.actionSeq, room?.phase, room?.moves.length])
+
   async function handleCopyRoom() {
     await navigator.clipboard?.writeText(window.location.href)
     setMessage(t('room.copied'))
@@ -42,12 +48,12 @@ export function GomokuPage({ roomId }: { roomId: string }) {
       return
     }
 
-    await actions.place(x, y)
+    await pending.run(`place:${x}:${y}`, () => actions.place(x, y), { releaseOnSettle: false })
     setMessage(t('gomoku.placedAt', { point: formatPoint(x, y) }))
   }
 
   async function handleRestart() {
-    await actions.start()
+    await pending.run('restart', () => actions.start(), { releaseOnSettle: false })
     setMessage(t('gomoku.restarted'))
   }
 
@@ -96,9 +102,9 @@ export function GomokuPage({ roomId }: { roomId: string }) {
             {t('common.room')}
             {room.id}
           </StatusPill>
-          <button className="gomoku-button ml-auto" disabled={!isHost} type="button" onClick={handleRestart}>
+          <button className="gomoku-button ml-auto" disabled={!isHost || pending.isPending('restart')} type="button" onClick={handleRestart}>
             <RotateCcw className="size-4" />
-            {t('gomoku.restart')}
+            {pending.isPending('restart') ? t('common.syncing') : t('gomoku.restart')}
           </button>
         </div>
 
@@ -122,7 +128,7 @@ export function GomokuPage({ roomId }: { roomId: string }) {
                         isHumanTurn && !move && 'cursor-pointer',
                         !isHumanTurn && 'cursor-default',
                       )}
-                      disabled={!isHumanTurn || Boolean(move)}
+                      disabled={!isHumanTurn || Boolean(move) || pending.isPending(`place:${x}:${y}`)}
                       type="button"
                       onClick={() => handlePlace(x, y)}
                     >

@@ -12,6 +12,7 @@ import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useCurrentRoom } from '@/games/useCurrentRoom'
+import { usePendingAction } from '@/games/usePendingAction'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { createXiangqiRoom, getCurrentXiangqiRoom } from './online'
@@ -31,6 +32,7 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
   const [pendingAI, setPendingAI] = useState(false)
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
+  const pending = usePendingAction()
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
   const loadCurrentRoom = useCallback(() => getCurrentXiangqiRoom(), [])
   const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
@@ -49,6 +51,10 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
     }
   }, [])
 
+  useEffect(() => {
+    pending.clearAll()
+  }, [pending, pending.clearAll, room?.actionSeq, room?.phase, room?.players.length])
+
   if (roomId && room && room.phase !== 'lobby') {
     return <XiangqiPage roomId={roomId} />
   }
@@ -56,7 +62,10 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
   async function createRoom() {
     setMessage(t('room.defaultMessage'))
     try {
-      const nextRoom = await createXiangqiRoom()
+      const nextRoom = await pending.run('create', () => createXiangqiRoom())
+      if (!nextRoom) {
+        return
+      }
 
       navigate(`/games/xiangqi?room=${nextRoom.id}`)
       setJoinCode(nextRoom.id)
@@ -93,14 +102,14 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
   }
 
   async function addAIPlayer() {
-    if (pendingAI || !room) {
+    if (pendingAI || pending.isPending('add-ai') || !room) {
       return
     }
 
     setPendingAI(true)
     setMessage(t('room.addingAI'))
     try {
-      await actions.addAI(aiLevel)
+      await pending.run('add-ai', () => actions.addAI(aiLevel), { releaseOnSettle: false })
       setMessage(t('room.aiJoined'))
     }
     finally {
@@ -110,7 +119,7 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
 
   async function startGame() {
     setMessage(t('room.starting'))
-    await actions.start()
+    await pending.run('start', () => actions.start(), { releaseOnSettle: false })
     setMessage(t('room.gameStarted'))
   }
 
@@ -130,9 +139,9 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
 
           <form className="xiangqi-panel grid content-start gap-4 p-5 sm:p-6" onSubmit={joinRoom}>
             <h2 className="text-2xl font-black tracking-normal">{t('xiangqi.enterTitle')}</h2>
-            <button className="xiangqi-button xiangqi-button-primary w-full" type="button" onClick={createRoom}>
+            <button className="xiangqi-button xiangqi-button-primary w-full" disabled={pending.isPending('create')} type="button" onClick={createRoom}>
               <Plus className="size-4" />
-              {t('common.createAndEnter')}
+              {pending.isPending('create') ? t('common.syncing') : t('common.createAndEnter')}
             </button>
             {currentRoom && (
               <ContinueRoomEntry
@@ -185,15 +194,15 @@ export function XiangqiRoomGate({ roomId }: XiangqiRoomGateProps) {
                 <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} palette="xiangqi" onChange={setAILevel} />
                 <button
                   className={cn('xiangqi-button', pendingAI && 'loading')}
-                  disabled={pendingAI || !isHost || !room || room.players.length >= 2}
+                  disabled={pendingAI || pending.isPending('add-ai') || !isHost || !room || room.players.length >= 2}
                   type="button"
                   onClick={addAIPlayer}
                 >
                   <Bot className="size-4" />
-                  {pendingAI ? t('room.addingAI') : `${t('room.addAI')} (${getAILevelLabel(aiLevel, locale)})`}
+                  {pendingAI || pending.isPending('add-ai') ? t('room.addingAI') : `${t('room.addAI')} (${getAILevelLabel(aiLevel, locale)})`}
                 </button>
-                <button className="xiangqi-button xiangqi-button-primary" disabled={!isHost || !room || room.players.length < 2} type="button" onClick={startGame}>
-                  {t('common.startGame')}
+                <button className="xiangqi-button xiangqi-button-primary" disabled={pending.isPending('start') || !isHost || !room || room.players.length < 2} type="button" onClick={startGame}>
+                  {pending.isPending('start') ? t('common.syncing') : t('common.startGame')}
                 </button>
               </div>
             </div>

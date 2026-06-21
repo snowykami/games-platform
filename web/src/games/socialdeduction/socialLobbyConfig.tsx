@@ -4,6 +4,7 @@ import type { useSocialRoom } from './useSocialRoom'
 import { useState } from 'react'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
+import { usePendingAction } from '../usePendingAction'
 import { roleLabel, roleTotal, socialButton } from './socialStyle'
 import { RoleBadge, SocialBadge } from './socialUi'
 
@@ -21,6 +22,7 @@ export function WerewolfRoleSetup({
   const { t } = useI18n()
   const [draft, setDraft] = useState<WerewolfRoleCounts>(room.werewolf.roleConfig.counts)
   const [message, setMessage] = useState('')
+  const pending = usePendingAction()
   const rolePresets = room.werewolf.rolePresets ?? []
   const total = roleTotal(draft)
   const canSave = isHost
@@ -39,14 +41,13 @@ export function WerewolfRoleSetup({
       return
     }
     setMessage(t('werewolf.updatingRoles'))
-    await actions.updateWerewolfRoles({
+    await pending.run(`preset:${preset.id}`, () => actions.updateWerewolfRoles({
       counts: preset.counts,
       description: preset.description,
       mode: 'preset',
       name: preset.name,
       presetId: preset.id,
-    })
-    setMessage(t('werewolf.rolesUpdated'))
+    }).then(() => setMessage(t('werewolf.rolesUpdated'))), { releaseOnSettle: false })
   }
 
   async function saveCustom() {
@@ -55,13 +56,12 @@ export function WerewolfRoleSetup({
       return
     }
     setMessage(t('werewolf.updatingRoles'))
-    await actions.updateWerewolfRoles({
+    await pending.run('custom', () => actions.updateWerewolfRoles({
       counts: draft,
       description: t('werewolf.customRolesDescription'),
       mode: 'custom',
       name: t('werewolf.customRoles'),
-    })
-    setMessage(t('werewolf.rolesUpdated'))
+    }).then(() => setMessage(t('werewolf.rolesUpdated'))), { releaseOnSettle: false })
   }
 
   return (
@@ -77,7 +77,7 @@ export function WerewolfRoleSetup({
         {t('werewolf.rolePreset')}
         <select
           className="min-h-10 rounded-lg border border-white/20 bg-black/30 px-3 text-sm font-black text-[#fff8e8] outline-none"
-          disabled={!isHost || rolePresets.length === 0}
+          disabled={!isHost || rolePresets.length === 0 || pending.isPending(`preset:${room.werewolf.roleConfig.presetId ?? ''}`)}
           value={room.werewolf.roleConfig.mode === 'preset' ? room.werewolf.roleConfig.presetId ?? '' : 'custom'}
           onChange={event => event.target.value === 'custom' ? undefined : void selectPreset(event.target.value)}
         >
@@ -98,8 +98,8 @@ export function WerewolfRoleSetup({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <button className={socialButton(config, true)} disabled={!canSave} type="button" onClick={() => void saveCustom()}>
-          {t('werewolf.applyCustomRoles')}
+        <button className={socialButton(config, true)} disabled={!canSave || pending.isPending('custom')} type="button" onClick={() => void saveCustom()}>
+          {pending.isPending('custom') ? t('common.syncing') : t('werewolf.applyCustomRoles')}
         </button>
         <SocialBadge className={total === room.players.length ? 'bg-emerald-200 text-emerald-950 ring-1 ring-emerald-300/45' : 'bg-[#4a1424] text-[#ffd6df] ring-1 ring-[#ff7a9a]/35'}>
           {total}
@@ -124,6 +124,7 @@ export function UndercoverLobbyConfig({
   room: SocialRoom
 }) {
   const { t } = useI18n()
+  const pending = usePendingAction()
   const presets = room.undercover.presets ?? []
   const selectedPreset = presets.find(preset => preset.id === room.undercover.presetId)
 
@@ -138,9 +139,9 @@ export function UndercoverLobbyConfig({
           <input
             checked={room.undercover.includeBlank}
             className="size-4 accent-[#f4c7ff]"
-            disabled={!isHost}
+            disabled={!isHost || pending.isPending('blank')}
             type="checkbox"
-            onChange={event => void actions.undercoverConfig(room.undercover.presetId, event.target.checked)}
+            onChange={event => void pending.run('blank', () => actions.undercoverConfig(room.undercover.presetId, event.target.checked), { releaseOnSettle: false })}
           />
           {t('undercover.includeBlank')}
         </label>
@@ -150,11 +151,11 @@ export function UndercoverLobbyConfig({
           <button
             key={preset.id}
             className={cn(socialButton(config), preset.id === room.undercover.presetId && 'ring-2 ring-[#f4c7ff]')}
-            disabled={!isHost}
+            disabled={!isHost || pending.isPending(`preset:${preset.id}`)}
             type="button"
-            onClick={() => void actions.undercoverConfig(preset.id, room.undercover.includeBlank)}
+            onClick={() => void pending.run(`preset:${preset.id}`, () => actions.undercoverConfig(preset.id, room.undercover.includeBlank), { releaseOnSettle: false })}
           >
-            {preset.name}
+            {pending.isPending(`preset:${preset.id}`) ? t('common.syncing') : preset.name}
           </button>
         ))}
       </div>

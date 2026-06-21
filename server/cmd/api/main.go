@@ -63,6 +63,11 @@ func routes(cfg config.Config) http.Handler {
 		slog.Error("auth store initialization failed", "error", err)
 		os.Exit(1)
 	}
+	gameUsageStore, err := games.NewUsageStore(context.Background(), cfg.Database.URL)
+	if err != nil {
+		slog.Error("game usage store initialization failed", "error", err)
+		os.Exit(1)
+	}
 	authHandler := auth.NewHandler(authStore, cfg.OIDC, cfg.HTTP.SecureSessionCookie)
 	aiProvider := aiplayer.NewOpenAIProvider(cfg.AI)
 	aiHandler := aiplayer.NewHandler(aiProvider)
@@ -89,10 +94,33 @@ func routes(cfg config.Config) http.Handler {
 	router.Route("/api", func(api chi.Router) {
 		api.Mount("/auth", authHandler.Routes())
 		api.Get("/games", func(w http.ResponseWriter, r *http.Request) {
-			httpx.WriteJSON(w, http.StatusOK, gamesResponse{Games: games.ListForLocale(i18n.FromRequest(r))})
+			gameList := games.ListForLocale(i18n.FromRequest(r))
+			if user, ok := auth.UserFromContext(r.Context()); ok {
+				stats, err := gameUsageStore.StatsForUser(r.Context(), user.ID)
+				if err != nil {
+					slog.Warn("game usage lookup failed", "user", user.ID, "error", err)
+				} else {
+					gameList = games.SortByUsage(gameList, stats)
+				}
+			}
+			httpx.WriteJSON(w, http.StatusOK, gamesResponse{Games: gameList})
 		})
 		api.Group(func(protected chi.Router) {
 			protected.Use(auth.RequireUser)
+			protected.Post("/games/{gameSlug}/usage", func(w http.ResponseWriter, r *http.Request) {
+				gameSlug := chi.URLParam(r, "gameSlug")
+				if !games.Exists(gameSlug) {
+					httpx.WriteErrorKey(w, r, http.StatusNotFound, "game_not_found")
+					return
+				}
+				user, _ := auth.UserFromContext(r.Context())
+				if err := gameUsageStore.RecordUse(r.Context(), user.ID, gameSlug); err != nil {
+					slog.Warn("game usage record failed", "user", user.ID, "game", gameSlug, "error", err)
+					httpx.WriteErrorKey(w, r, http.StatusInternalServerError, "game_usage_record_failed")
+					return
+				}
+				httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+			})
 			protected.Mount("/ai", aiHandler.Routes())
 			protected.Mount("/gomoku", gomokuHandler.Routes())
 			protected.Mount("/avalon", avalonHandler.Routes())

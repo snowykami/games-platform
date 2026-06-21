@@ -9,6 +9,7 @@ import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
+import { usePendingAction } from '@/games/usePendingAction'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { UnoVariantInfoButton } from './UnoVariantInfo'
@@ -39,6 +40,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
   const [singleClickPlay, setSingleClickPlay] = useState(() => window.localStorage.getItem('uno-single-click-play') === 'true')
   const [pendingCardId, setPendingCardId] = useState<string>()
   const [wildPicker, setWildPicker] = useState<{ card: UnoCard, color: UnoColor }>()
+  const pending = usePendingAction()
   const lastActionSeqRef = useRef(0)
 
   const human = useMemo(() => room?.players.find(player => player.id === room.youPlayerId), [room?.players, room?.youPlayerId])
@@ -90,6 +92,10 @@ export function UnoPage({ roomId }: { roomId: string }) {
     }
   }, [room])
 
+  useEffect(() => {
+    pending.clearAll()
+  }, [pending, pending.clearAll, room?.actionSeq, room?.currentPlayerId, room?.phase])
+
   async function handleCopyRoom() {
     await navigator.clipboard?.writeText(window.location.href)
     setMessage(t('room.copied'))
@@ -115,7 +121,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
   }
 
   async function playConfirmedCard(card: UnoCard, color: UnoColor) {
-    await actions.play(card.id, color)
+    await pending.run(`play:${card.id}`, () => actions.play(card.id, color), { releaseOnSettle: false })
     setPendingCardId(undefined)
     setWildPicker(undefined)
     setMessage(t('uno.playedCard', { card: formatCard(card) }))
@@ -126,22 +132,22 @@ export function UnoPage({ roomId }: { roomId: string }) {
       return
     }
 
-    await actions.draw()
+    await pending.run('draw', () => actions.draw(), { releaseOnSettle: false })
     setMessage(t('uno.drewCard'))
   }
 
   async function handleRestart() {
-    await actions.start()
+    await pending.run('restart', () => actions.start(), { releaseOnSettle: false })
     setMessage(t('uno.restarted'))
   }
 
   async function handleCallUno() {
-    await actions.callUno()
+    await pending.run('call-uno', () => actions.callUno(), { releaseOnSettle: false })
     setMessage('UNO!')
   }
 
   async function handleCatchUno(targetId: string) {
-    await actions.catchUno(targetId)
+    await pending.run(`catch:${targetId}`, () => actions.catchUno(targetId), { releaseOnSettle: false })
     setMessage(t('uno.caughtUno'))
   }
 
@@ -212,9 +218,9 @@ export function UnoPage({ roomId }: { roomId: string }) {
               </StatusPill>
             )}
             {(room.rules.flip || room.flipSide) && <StatusPill>{room.flipSide ? t('uno.darkSide') : t('uno.lightSide')}</StatusPill>}
-            <button className="uno-button ml-auto" disabled={room.hostPlayerId !== room.youPlayerId} type="button" onClick={handleRestart}>
+            <button className="uno-button ml-auto" disabled={pending.isPending('restart') || room.hostPlayerId !== room.youPlayerId} type="button" onClick={handleRestart}>
               <RotateCcw className="size-4" />
-              {t('uno.restart')}
+              {pending.isPending('restart') ? t('common.syncing') : t('uno.restart')}
             </button>
           </div>
 
@@ -228,7 +234,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
                   <button
                     aria-label={t('uno.drawPile')}
                     className="uno-card-back aspect-[2/3] w-16 rounded-xl p-0 transition hover:-translate-y-1 disabled:cursor-not-allowed disabled:opacity-45 sm:w-[82px]"
-                    disabled={!isHumanTurn}
+                    disabled={!isHumanTurn || pending.isPending('draw')}
                     type="button"
                     onClick={handleDraw}
                   />
@@ -282,13 +288,13 @@ export function UnoPage({ roomId }: { roomId: string }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <SpeechButton onSend={actions.say} />
                   {human.needsUno && (
-                    <button className="uno-button uno-button-primary" type="button" onClick={handleCallUno}>
-                      UNO
+                    <button className="uno-button uno-button-primary" disabled={pending.isPending('call-uno')} type="button" onClick={handleCallUno}>
+                      {pending.isPending('call-uno') ? t('common.syncing') : 'UNO'}
                     </button>
                   )}
                   {catchableUnoPlayers.map(player => (
-                    <button key={player.id} className="uno-button" type="button" onClick={() => handleCatchUno(player.id)}>
-                      {t('uno.catchUno')}
+                    <button key={player.id} className="uno-button" disabled={pending.isPending(`catch:${player.id}`)} type="button" onClick={() => handleCatchUno(player.id)}>
+                      {pending.isPending(`catch:${player.id}`) ? t('common.syncing') : t('uno.catchUno')}
                       {' '}
                       {player.name}
                     </button>
@@ -310,7 +316,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
                   <button
                     key={card.id}
                     className="p-0 transition disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={!isHumanTurn || !playableCardIds.has(card.id)}
+                    disabled={!isHumanTurn || !playableCardIds.has(card.id) || pending.isPending(`play:${card.id}`)}
                     type="button"
                     onClick={() => handlePlay(card)}
                   >
@@ -356,6 +362,7 @@ export function UnoPage({ roomId }: { roomId: string }) {
                     activeWildPicker.color === color && 'outline outline-4 outline-[#33f3ff]',
                   )}
                   type="button"
+                  disabled={pending.isPending(`play:${activeWildPicker.card.id}`)}
                   onClick={() => playConfirmedCard(activeWildPicker.card, color)}
                 >
                   <span className="sr-only">{formatColor(color, t)}</span>

@@ -7,6 +7,7 @@ import { getAICapabilities } from '@/games/ai'
 import { ContinueRoomEntry } from '@/games/ContinueRoomEntry'
 import { useAutoFollowScroll } from '@/games/useAutoFollowScroll'
 import { useCurrentRoom } from '@/games/useCurrentRoom'
+import { usePendingAction } from '@/games/usePendingAction'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { createSocialRoom, getCurrentSocialRoom } from './online'
@@ -34,6 +35,7 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
   const [message, setMessage] = useState(() => t('room.defaultMessage'))
   const [pendingAI, setPendingAI] = useState(false)
   const [llmEnabled, setLLMEnabled] = useState(false)
+  const pending = usePendingAction()
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
   const loadCurrentRoom = useCallback(() => getCurrentSocialRoom(game), [game])
   const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
@@ -44,10 +46,17 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
     })
   }, [])
 
+  useEffect(() => {
+    pending.clearAll()
+  }, [pending, pending.clearAll, room?.actionSeq, room?.phase, room?.players.length])
+
   async function createRoom() {
     setMessage(t('room.defaultMessage'))
     try {
-      const nextRoom = await createSocialRoom(game)
+      const nextRoom = await pending.run('create', () => createSocialRoom(game))
+      if (!nextRoom) {
+        return
+      }
       navigate(`/games/${game}?room=${nextRoom.id}`)
       setJoinCode(nextRoom.id)
       setMessage(t('room.created'))
@@ -81,13 +90,13 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
   }
 
   async function addAIPlayer() {
-    if (pendingAI || !room) {
+    if (pendingAI || pending.isPending('add-ai') || !room) {
       return
     }
     setPendingAI(true)
     setMessage(t('room.addingAI'))
     try {
-      await actions.addAI('ai')
+      await pending.run('add-ai', () => actions.addAI('ai'), { releaseOnSettle: false })
       setMessage(t('room.aiJoined'))
     }
     finally {
@@ -97,7 +106,7 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
 
   async function startGame() {
     setMessage(t('room.starting'))
-    await actions.start()
+    await pending.run('start', () => actions.start(), { releaseOnSettle: false })
     setMessage(t('room.gameStarted'))
   }
 
@@ -116,9 +125,9 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
 
           <form className={cn('grid content-start gap-4 rounded-lg border p-5 shadow-[0_22px_64px_rgba(0,0,0,0.28)] sm:p-6', config.panel)} onSubmit={joinRoom}>
             <h2 className="text-2xl font-black tracking-normal">{t(config.enterTitleKey)}</h2>
-            <button className={socialButton(config, true)} type="button" onClick={createRoom}>
+            <button className={socialButton(config, true)} disabled={pending.isPending('create')} type="button" onClick={createRoom}>
               <Plus className="size-4" />
-              {t('common.createAndEnter')}
+              {pending.isPending('create') ? t('common.syncing') : t('common.createAndEnter')}
             </button>
             {currentRoom && (
               <ContinueRoomEntry
@@ -187,15 +196,15 @@ export function SocialDeductionRoomGate({ game, roomId }: SocialDeductionRoomGat
                 </span>
                 <button
                   className={cn(socialButton(config), pendingAI && 'opacity-70')}
-                  disabled={pendingAI || !isHost || !llmEnabled || room.players.length >= room.maxPlayers}
+                  disabled={pendingAI || pending.isPending('add-ai') || !isHost || !llmEnabled || room.players.length >= room.maxPlayers}
                   type="button"
                   onClick={addAIPlayer}
                 >
                   <Bot className="size-4" />
-                  {pendingAI ? t('room.addingAI') : t('room.addAI')}
+                  {pendingAI || pending.isPending('add-ai') ? t('room.addingAI') : t('room.addAI')}
                 </button>
-                <button className={socialButton(config, true)} disabled={!isHost || room.players.length < room.minPlayers} type="button" onClick={startGame}>
-                  {t('common.startGame')}
+                <button className={socialButton(config, true)} disabled={pending.isPending('start') || !isHost || room.players.length < room.minPlayers} type="button" onClick={startGame}>
+                  {pending.isPending('start') ? t('common.syncing') : t('common.startGame')}
                 </button>
               </div>
             </div>
@@ -282,7 +291,7 @@ function SocialGamePage({
 }) {
   const { t } = useI18n()
   const [message, setMessage] = useState(() => t('social.connected'))
-  const [mobilePanel, setMobilePanel] = useState<SocialMobilePanel>(null)
+  const [mobilePanel, setMobilePanel] = useState<SocialMobilePanel>('intel')
   const tableLogScroll = useAutoFollowScroll<HTMLDivElement>()
   const you = room.players.find(player => player.id === room.youPlayerId)
   const leader = room.players.find(player => player.id === room.avalon.leaderId)

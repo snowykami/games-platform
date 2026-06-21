@@ -1,5 +1,6 @@
 import { Check, Pencil } from 'lucide-react'
 import { useState } from 'react'
+import { usePendingAction } from '@/games/usePendingAction'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 
@@ -14,7 +15,8 @@ export function PlayerNameEditor({ buttonClassName, className, name, onSave }: P
   const { t } = useI18n()
   const [draft, setDraft] = useState(name)
   const [editing, setEditing] = useState(false)
-  const [pending, setPending] = useState(false)
+  const pending = usePendingAction()
+  const isSaving = pending.isPending('save')
 
   if (!editing) {
     return (
@@ -35,18 +37,14 @@ export function PlayerNameEditor({ buttonClassName, className, name, onSave }: P
 
   async function saveName() {
     const nextName = draft.trim()
-    if (!nextName || pending) {
+    if (!nextName || isSaving) {
       return
     }
 
-    setPending(true)
-    try {
+    await pending.run('save', async () => {
       await onSave(nextName)
       setEditing(false)
-    }
-    finally {
-      setPending(false)
-    }
+    })
   }
 
   return (
@@ -67,11 +65,11 @@ export function PlayerNameEditor({ buttonClassName, className, name, onSave }: P
       <button
         aria-label={t('common.saveName')}
         className={cn('inline-grid size-8 place-items-center rounded-lg border border-white/20 bg-white/14 transition hover:bg-white/24 disabled:cursor-not-allowed disabled:opacity-50', buttonClassName)}
-        disabled={pending || !draft.trim()}
-        title={t('common.saveName')}
+        disabled={isSaving || !draft.trim()}
+        title={isSaving ? t('common.syncing') : t('common.saveName')}
         type="submit"
       >
-        <Check className="size-4" />
+        {isSaving ? <span className="text-xs font-black">...</span> : <Check className="size-4" />}
       </button>
     </form>
   )

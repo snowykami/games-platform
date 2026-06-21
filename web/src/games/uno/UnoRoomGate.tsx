@@ -12,6 +12,7 @@ import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useCurrentRoom } from '@/games/useCurrentRoom'
+import { usePendingAction } from '@/games/usePendingAction'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { createUnoRoom, getCurrentUnoRoom } from './online'
@@ -51,6 +52,7 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   const [llmEnabled, setLLMEnabled] = useState(false)
   const [variantKey, setVariantKey] = useState('classic')
   const [themeKey, setThemeKey] = useState('classic')
+  const pending = usePendingAction()
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
   const loadCurrentRoom = useCallback(() => getCurrentUnoRoom(), [])
   const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
@@ -64,6 +66,10 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
     })
   }, [aiLevel])
 
+  useEffect(() => {
+    pending.clearAll()
+  }, [pending, pending.clearAll, room?.actionSeq, room?.phase, room?.players.length])
+
   if (roomId && room && room.phase !== 'lobby') {
     return <UnoPage roomId={roomId} />
   }
@@ -71,7 +77,10 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   async function createRoom() {
     setMessage(t('room.defaultMessage'))
     try {
-      const nextRoom = await createUnoRoom({ themeKey, variantKey })
+      const nextRoom = await pending.run('create', () => createUnoRoom({ themeKey, variantKey }))
+      if (!nextRoom) {
+        return
+      }
 
       navigate(`/games/uno?room=${nextRoom.id}`)
       setJoinCode(nextRoom.id)
@@ -109,14 +118,14 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
   }
 
   async function addAIPlayer() {
-    if (pendingAI || !room) {
+    if (pendingAI || pending.isPending('add-ai') || !room) {
       return
     }
 
     setPendingAI(true)
     setMessage(t('room.addingAI'))
     try {
-      await actions.addAI(aiLevel)
+      await pending.run('add-ai', () => actions.addAI(aiLevel), { releaseOnSettle: false })
       setMessage(t('room.aiJoined'))
     }
     finally {
@@ -126,7 +135,7 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
 
   async function startGame() {
     setMessage(t('room.starting'))
-    await actions.start()
+    await pending.run('start', () => actions.start(), { releaseOnSettle: false })
     setMessage(t('room.gameStarted'))
   }
 
@@ -147,9 +156,9 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
           <form className="uno-panel grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-4 p-5 sm:p-6" onSubmit={joinRoom}>
             <div className="grid gap-4">
               <h2 className="text-2xl font-black tracking-normal">{t('uno.enterTitle')}</h2>
-              <button className="uno-button uno-button-primary w-full" type="button" onClick={createRoom}>
+              <button className="uno-button uno-button-primary w-full" disabled={pending.isPending('create')} type="button" onClick={createRoom}>
                 <Plus className="size-4" />
-                {t('common.createAndEnter')}
+                {pending.isPending('create') ? t('common.syncing') : t('common.createAndEnter')}
               </button>
               {currentRoom && (
                 <ContinueRoomEntry
@@ -216,15 +225,15 @@ export function UnoRoomGate({ roomId }: UnoRoomGateProps) {
                 <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} onChange={setAILevel} />
                 <button
                   className={cn('uno-button', pendingAI && 'loading')}
-                  disabled={pendingAI || !isHost || !room || room.players.length >= 10}
+                  disabled={pendingAI || pending.isPending('add-ai') || !isHost || !room || room.players.length >= 10}
                   type="button"
                   onClick={addAIPlayer}
                 >
                   <Bot className="size-4" />
-                  {pendingAI ? t('room.addingAI') : `${t('room.addAI')} (${getAILevelLabel(aiLevel, locale)})`}
+                  {pendingAI || pending.isPending('add-ai') ? t('room.addingAI') : `${t('room.addAI')} (${getAILevelLabel(aiLevel, locale)})`}
                 </button>
-                <button className="uno-button uno-button-primary" disabled={!isHost || !room || room.players.length < 2} type="button" onClick={startGame}>
-                  {t('common.startGame')}
+                <button className="uno-button uno-button-primary" disabled={pending.isPending('start') || !isHost || !room || room.players.length < 2} type="button" onClick={startGame}>
+                  {pending.isPending('start') ? t('common.syncing') : t('common.startGame')}
                 </button>
               </div>
             </div>

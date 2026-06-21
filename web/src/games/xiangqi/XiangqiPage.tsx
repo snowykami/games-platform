@@ -3,13 +3,14 @@ import type { XiangqiOnlineMove, XiangqiOnlinePiece, XiangqiOnlinePlayer } from 
 import type { XiangqiMove, XiangqiPiece, XiangqiPosition, XiangqiSide } from './types'
 import type { GameSpeechEntry } from '@/games/speech'
 import { ArrowLeft, Copy, Flag, RefreshCw, RotateCw } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useAutoFollowScroll } from '@/games/useAutoFollowScroll'
+import { usePendingAction } from '@/games/usePendingAction'
 import { useI18n } from '@/i18n/context'
 import { Button } from '@/shared/components/ui/button'
 import { cn } from '@/shared/lib/utils'
@@ -25,6 +26,7 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
   const [selectedId, setSelectedId] = useState<string>()
   const [perspective, setPerspective] = useState<XiangqiSide>('red')
   const [message, setMessage] = useState(() => t('xiangqi.tableReady'))
+  const pending = usePendingAction()
   const recordScroll = useAutoFollowScroll<HTMLOListElement>()
 
   const human = useMemo(() => room?.players.find(player => player.id === room.youPlayerId), [room?.players, room?.youPlayerId])
@@ -36,6 +38,8 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
   const isHumanTurn = Boolean(room && human && room.phase === 'playing' && room.currentPlayerId === human.id)
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
   const isAIThinking = Boolean(room && currentPlayer?.isAI && room.phase === 'playing')
+  const isMovePending = pending.isPending('move')
+  const isRestartPending = pending.isPending('restart')
   const engineState = useMemo(() => ({
     checkSide: room?.checkSide,
     message: '',
@@ -57,6 +61,10 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
       }
     : undefined
 
+  useEffect(() => {
+    pending.clearAll()
+  }, [pending, pending.clearAll, room?.actionSeq, room?.currentPlayerId, room?.moves.length, room?.phase])
+
   async function handleCopyRoom() {
     await navigator.clipboard?.writeText(window.location.href)
     setMessage(t('room.copied'))
@@ -65,12 +73,12 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
   function handlePointClick(position: XiangqiPosition) {
     const target = getPieceAt(pieces, position)
 
-    if (!room || room.phase === 'finished' || !isHumanTurn || isAIThinking) {
+    if (!room || room.phase === 'finished' || !isHumanTurn || isAIThinking || isMovePending) {
       return
     }
 
     if (selectedPiece && legalMoveKeys.has(positionKey(position))) {
-      void actions.move(selectedPiece.id, position.x, position.y)
+      void pending.run('move', () => actions.move(selectedPiece.id, position.x, position.y), { releaseOnSettle: false })
       setMessage(t('xiangqi.movedTo', { position: t('xiangqi.position', { file: position.x + 1, rank: position.y + 1 }) }))
       setSelectedId(undefined)
       return
@@ -82,13 +90,13 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
     }
 
     if (selectedPiece) {
-      void actions.move(selectedPiece.id, position.x, position.y)
+      void pending.run('move', () => actions.move(selectedPiece.id, position.x, position.y), { releaseOnSettle: false })
       setSelectedId(undefined)
     }
   }
 
   async function handleRestart() {
-    await actions.start()
+    await pending.run('restart', () => actions.start(), { releaseOnSettle: false })
     setMessage(t('xiangqi.restarted'))
     setSelectedId(undefined)
     setPerspective('red')
@@ -128,9 +136,9 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
               <Copy className="size-4" />
               {t('common.copyLink')}
             </Button>
-            <Button className="bg-[#fff8e8] text-[#202018] hover:bg-[#f3deb3]" disabled={!isHost} type="button" onClick={handleRestart}>
+            <Button className="bg-[#fff8e8] text-[#202018] hover:bg-[#f3deb3]" disabled={!isHost || isRestartPending} type="button" onClick={handleRestart}>
               <RefreshCw className="size-4" />
-              {t('xiangqi.restart')}
+              {isRestartPending ? t('common.syncing') : t('xiangqi.restart')}
             </Button>
           </div>
         </header>
@@ -144,6 +152,7 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
               lastMove={lastMove}
               legalMoveKeys={legalMoveKeys}
               pieces={pieces}
+              pending={isMovePending}
               selectableSide={isHumanTurn ? human.side : undefined}
               selectedId={selectedId}
               onPointClick={handlePointClick}
@@ -253,6 +262,7 @@ function XiangqiBoard({
   lastMove,
   legalMoveKeys,
   pieces,
+  pending,
   selectableSide,
   selectedId,
   onPointClick,
@@ -267,6 +277,7 @@ function XiangqiBoard({
   lastMove?: XiangqiMove
   legalMoveKeys: Set<string>
   pieces: XiangqiPiece[]
+  pending?: boolean
   selectableSide?: XiangqiSide
   selectedId?: string
   onPointClick: (position: XiangqiPosition) => void
@@ -310,6 +321,7 @@ function XiangqiBoard({
               isLegal && !piece && 'bg-[#1f806d]/34 ring-2 ring-[#1f806d]/70',
               !piece && !isLegal && 'hover:bg-[#5c321f]/14',
             )}
+            disabled={pending}
             style={pointStyle(columnIndex, rowIndex)}
             type="button"
             onClick={() => onPointClick(position)}
@@ -336,7 +348,7 @@ function XiangqiBoard({
               isSelected && 'z-20 ring-4 ring-[#1f806d] ring-offset-2 ring-offset-[#d8a85e]',
               isCaptureTarget && 'ring-4 ring-[#cf3027] ring-offset-2 ring-offset-[#d8a85e]',
             )}
-            disabled={!canInteract}
+            disabled={pending || !canInteract}
             style={point}
             type="button"
             onClick={() => onPointClick(piece.position)}

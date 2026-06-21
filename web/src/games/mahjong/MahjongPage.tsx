@@ -9,6 +9,7 @@ import { decideWithAI, getAICapabilities } from '@/games/ai'
 import { AILevelBadgeSelect } from '@/games/AILevelBadgeSelect'
 import { SpeechBubble, SpeechButton } from '@/games/GameSpeech'
 import { latestSpeechForPlayer } from '@/games/speech'
+import { usePendingAction } from '@/games/usePendingAction'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import {
@@ -33,6 +34,7 @@ export function MahjongPage() {
   const [speeches, setSpeeches] = useState<GameSpeechEntry[]>([])
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
+  const pending = usePendingAction()
   const human = getHumanPlayer(state)
   const currentPlayer = getCurrentPlayer(state)
   const winner = state.players.find(player => player.id === state.winnerId)
@@ -42,6 +44,10 @@ export function MahjongPage() {
   const isHumanTurn = state.phase === 'playing' && currentPlayer.id === human.id
   const canHumanDraw = isHumanTurn && !state.hasDrawn
   const canHumanDiscard = isHumanTurn && state.hasDrawn
+
+  useEffect(() => {
+    pending.clearAll()
+  }, [pending, pending.clearAll, state.currentPlayerIndex, state.hasDrawn, state.log.length, state.phase])
 
   useEffect(() => {
     void getAICapabilities().then((capabilities) => {
@@ -105,27 +111,27 @@ export function MahjongPage() {
   }, [runBotTurn, state])
 
   function handleRestart() {
-    setState(createMahjongGame())
+    void pending.run('restart', () => setState(createMahjongGame()), { releaseOnSettle: false })
   }
 
   function handleDraw() {
-    setState(current => drawTile(current, human.id))
+    void pending.run('draw', () => setState(current => drawTile(current, human.id)), { releaseOnSettle: false })
   }
 
   function handleDiscard(tile: MahjongTile) {
-    setState(current => discardTile(current, human.id, tile.id))
+    void pending.run(`discard:${tile.id}`, () => setState(current => discardTile(current, human.id, tile.id)), { releaseOnSettle: false })
   }
 
   function handleSelfDraw() {
-    setState(current => declareSelfDraw(current, human.id))
+    void pending.run('self-draw', () => setState(current => declareSelfDraw(current, human.id)), { releaseOnSettle: false })
   }
 
   function handleClaim(option: ClaimOption) {
-    setState(current => claimOption(current, option.id))
+    void pending.run(`claim:${option.id}`, () => setState(current => claimOption(current, option.id)), { releaseOnSettle: false })
   }
 
   function handleSkipClaims() {
-    setState(current => skipClaims(current, human.id))
+    void pending.run('skip-claims', () => setState(current => skipClaims(current, human.id)), { releaseOnSettle: false })
   }
 
   function recordSpeech(player: MahjongPlayer, text: string | undefined) {
@@ -160,9 +166,9 @@ export function MahjongPage() {
               <ArrowLeft className="size-4" />
               {t('mahjong.back')}
             </Link>
-            <button className="mahjong-action mahjong-action-primary" type="button" onClick={handleRestart}>
+            <button className="mahjong-action mahjong-action-primary" disabled={pending.isPending('restart')} type="button" onClick={handleRestart}>
               <RefreshCw className="size-4" />
-              {t('mahjong.restart')}
+              {pending.isPending('restart') ? t('common.syncing') : t('mahjong.restart')}
             </button>
           </div>
         </header>
@@ -224,13 +230,13 @@ export function MahjongPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <SpeechButton palette="mahjong" onSend={text => recordSpeech(human, text)} />
-                <button className="mahjong-action" disabled={!canHumanDraw} type="button" onClick={handleDraw}>
+                <button className="mahjong-action" disabled={!canHumanDraw || pending.isPending('draw')} type="button" onClick={handleDraw}>
                   <Hand className="size-4" />
-                  {t('mahjong.drawTile')}
+                  {pending.isPending('draw') ? t('common.syncing') : t('mahjong.drawTile')}
                 </button>
-                <button className="mahjong-action mahjong-action-primary" disabled={!selfDrawResult.canWin} type="button" onClick={handleSelfDraw}>
+                <button className="mahjong-action mahjong-action-primary" disabled={!selfDrawResult.canWin || pending.isPending('self-draw')} type="button" onClick={handleSelfDraw}>
                   <Sparkles className="size-4" />
-                  {t('mahjong.selfDraw')}
+                  {pending.isPending('self-draw') ? t('common.syncing') : t('mahjong.selfDraw')}
                 </button>
               </div>
             </div>
@@ -238,11 +244,11 @@ export function MahjongPage() {
             {humanClaims.length > 0 && (
               <div className="flex flex-wrap items-center gap-2 rounded-lg bg-[#fff8e8]/10 p-2">
                 {humanClaims.map(option => (
-                  <button key={option.id} className="mahjong-action mahjong-action-primary" type="button" onClick={() => handleClaim(option)}>
-                    {claimLabel(option, t)}
+                  <button key={option.id} className="mahjong-action mahjong-action-primary" disabled={pending.isPending(`claim:${option.id}`)} type="button" onClick={() => handleClaim(option)}>
+                    {pending.isPending(`claim:${option.id}`) ? t('common.syncing') : claimLabel(option, t)}
                   </button>
                 ))}
-                <button className="mahjong-action" type="button" onClick={handleSkipClaims}>{t('mahjong.skip')}</button>
+                <button className="mahjong-action" disabled={pending.isPending('skip-claims')} type="button" onClick={handleSkipClaims}>{pending.isPending('skip-claims') ? t('common.syncing') : t('mahjong.skip')}</button>
               </div>
             )}
 
@@ -251,7 +257,7 @@ export function MahjongPage() {
                 <button
                   key={tile.id}
                   className="p-0 transition hover:-translate-y-1 disabled:cursor-not-allowed disabled:opacity-55"
-                  disabled={!canHumanDiscard}
+                  disabled={!canHumanDiscard || pending.isPending(`discard:${tile.id}`)}
                   title={canHumanDiscard ? t('mahjong.discardAction', { tile: formatTile(tile) }) : formatTile(tile)}
                   type="button"
                   onClick={() => handleDiscard(tile)}

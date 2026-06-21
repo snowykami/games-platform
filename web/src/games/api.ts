@@ -1,5 +1,6 @@
 import type { GameDefinition } from '@/games/registry'
 import { z } from 'zod'
+import { fetchWithAuthRedirect } from '@/auth/fetch'
 import { localGames } from '@/games/registry'
 import { localizeGames } from '@/i18n/gameText'
 import { getCurrentLocale } from '@/i18n/locale'
@@ -33,5 +34,12 @@ export async function getGames(): Promise<GameDefinition[]> {
   }
   catch {
     return localizeGames(localGames, getCurrentLocale())
+  }
+}
+
+export async function recordGameUsage(slug: string) {
+  const response = await fetchWithAuthRedirect(`/api/games/${encodeURIComponent(slug)}/usage`, { method: 'POST' })
+  if (!response.ok) {
+    throw new Error(`Failed to record game usage: ${response.status}`)
   }
 }

@@ -4,6 +4,7 @@ import type { GAME_COPY } from './socialTheme'
 import { Skull, Vote } from 'lucide-react'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
+import { usePendingAction } from '../usePendingAction'
 import { socialButton } from './socialStyle'
 import { Panel } from './socialUi'
 
@@ -45,10 +46,12 @@ export function ConfirmChoiceButton({
   config: typeof GAME_COPY[SocialGameSlug]
   disabled: boolean
   label: string
-  onConfirm: () => void
+  onConfirm: () => void | Promise<void>
   selectedLabel?: ReactNode
 }) {
   const { t } = useI18n()
+  const pending = usePendingAction()
+  const isSubmitting = pending.isPending('confirm')
 
   return (
     <div className="mt-1 grid gap-2 rounded-lg border border-white/12 bg-black/18 p-2">
@@ -62,9 +65,9 @@ export function ConfirmChoiceButton({
             )
           : t('social.selectBeforeConfirm')}
       </p>
-      <button className={socialButton(config, true)} disabled={disabled} type="button" onClick={onConfirm}>
+      <button className={socialButton(config, true)} disabled={disabled || isSubmitting} type="button" onClick={() => void pending.run('confirm', onConfirm, { releaseOnSettle: false })}>
         <Vote className="size-4" />
-        {label}
+        {isSubmitting ? t('common.syncing') : label}
       </button>
     </div>
   )

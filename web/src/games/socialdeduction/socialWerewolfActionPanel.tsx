@@ -5,6 +5,7 @@ import { Send, Shield, Skull, Vote } from 'lucide-react'
 import { useState } from 'react'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
+import { usePendingAction } from '../usePendingAction'
 import { ChoiceButton, ConfirmChoiceButton, SubmittedNotice } from './socialActionControls'
 import { PlayerRefLabel } from './socialPlayers'
 import { socialButton } from './socialStyle'
@@ -28,6 +29,7 @@ export function WerewolfActionPanel({
   const [wolfMessage, setWolfMessage] = useState('')
   const [selectedWerewolfVote, setSelectedWerewolfVote] = useState('')
   const [selectedHunterTarget, setSelectedHunterTarget] = useState('')
+  const pending = usePendingAction()
   const livingTargets = room.players.filter(player => player.alive && player.id !== you.id)
   const yourWerewolfVote = room.werewolf.votes[you.id]
   const hunterPending = room.players.find(player => player.id === room.werewolf.hunterPendingId)
@@ -64,10 +66,10 @@ export function WerewolfActionPanel({
       if (!text) {
         return
       }
-      void actions.wolfSpeech(text).then(() => {
+      void pending.run('wolf-speech', () => actions.wolfSpeech(text).then(() => {
         setWolfMessage('')
         setMessage(t('werewolf.wolfMessageSent'))
-      })
+      }), { releaseOnSettle: false })
     }
 
     return (
@@ -115,8 +117,9 @@ export function WerewolfActionPanel({
                   }
                 }}
               />
-              <button className={socialButton(config, true)} disabled={!wolfMessage.trim()} type="button" onClick={submitWolfMessage}>
+              <button className={socialButton(config, true)} disabled={!wolfMessage.trim() || pending.isPending('wolf-speech')} type="button" onClick={submitWolfMessage}>
                 <Send className="size-4" />
+                <span className="sr-only">{pending.isPending('wolf-speech') ? t('common.syncing') : t('common.send')}</span>
               </button>
             </div>
           </div>

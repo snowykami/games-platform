@@ -1,5 +1,9 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
+import { useAuth } from '@/auth/AuthContext'
+import { recordGameUsage } from '@/games/api'
 import { GomokuRoomGate } from '@/games/gomoku/GomokuRoomGate'
 import { MahjongRoomGate } from '@/games/mahjong/MahjongRoomGate'
 import { findGame } from '@/games/registry'
@@ -16,10 +20,25 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/shared/component
 export function GamePage() {
   const { slug } = useParams<{ slug: string }>()
   const [searchParams] = useSearchParams()
+  const { user } = useAuth()
+  const queryClient = useQueryClient()
+  const recordedSlugRef = useRef<string | undefined>(undefined)
   const { t } = useI18n()
   const roomId = searchParams.get('room')?.trim() || undefined
   const game = slug ? findGame(slug) : undefined
   useDocumentMeta(game?.title ?? t('catalog.notFoundTitle'), gameIconHref(game?.slug))
+
+  useEffect(() => {
+    if (!game || game.status !== 'available' || recordedSlugRef.current === game.slug) {
+      return
+    }
+    recordedSlugRef.current = game.slug
+    void recordGameUsage(game.slug)
+      .then(() => queryClient.invalidateQueries({ queryKey: ['games', user?.id ?? 'anonymous'] }))
+      .catch(() => {
+        recordedSlugRef.current = undefined
+      })
+  }, [game, queryClient, user?.id])
 
   if (!game) {
     return (

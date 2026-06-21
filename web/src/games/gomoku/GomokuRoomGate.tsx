@@ -12,6 +12,7 @@ import { PlayerNameEditor } from '@/games/PlayerNameEditor'
 import { PlayerStatusDot } from '@/games/PlayerStatusDot'
 import { latestSpeechForPlayer } from '@/games/speech'
 import { useCurrentRoom } from '@/games/useCurrentRoom'
+import { usePendingAction } from '@/games/usePendingAction'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
 import { GomokuPage } from './GomokuPage'
@@ -31,6 +32,7 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
   const [pendingAI, setPendingAI] = useState(false)
   const [aiLevel, setAILevel] = useState<AILevel>('normal')
   const [llmEnabled, setLLMEnabled] = useState(false)
+  const pending = usePendingAction()
   const isHost = Boolean(room?.hostPlayerId && room.hostPlayerId === room.youPlayerId)
   const loadCurrentRoom = useCallback(() => getCurrentGomokuRoom(), [])
   const { currentRoom } = useCurrentRoom(!roomId, loadCurrentRoom)
@@ -44,6 +46,10 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
     })
   }, [aiLevel])
 
+  useEffect(() => {
+    pending.clearAll()
+  }, [pending, pending.clearAll, room?.actionSeq, room?.phase, room?.players.length])
+
   if (roomId && room && room.phase !== 'lobby') {
     return <GomokuPage roomId={roomId} />
   }
@@ -51,7 +57,10 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
   async function createRoom() {
     setMessage(t('room.defaultMessage'))
     try {
-      const nextRoom = await createGomokuRoom()
+      const nextRoom = await pending.run('create', () => createGomokuRoom())
+      if (!nextRoom) {
+        return
+      }
 
       navigate(`/games/gomoku?room=${nextRoom.id}`)
       setJoinCode(nextRoom.id)
@@ -88,14 +97,14 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
   }
 
   async function addAIPlayer() {
-    if (pendingAI || !room) {
+    if (pendingAI || pending.isPending('add-ai') || !room) {
       return
     }
 
     setPendingAI(true)
     setMessage(t('room.addingAI'))
     try {
-      await actions.addAI(aiLevel)
+      await pending.run('add-ai', () => actions.addAI(aiLevel), { releaseOnSettle: false })
       setMessage(t('room.aiJoined'))
     }
     finally {
@@ -105,7 +114,7 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
 
   async function startGame() {
     setMessage(t('room.starting'))
-    await actions.start()
+    await pending.run('start', () => actions.start(), { releaseOnSettle: false })
     setMessage(t('room.gameStarted'))
   }
 
@@ -127,9 +136,9 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
 
           <form className="gomoku-panel grid content-start gap-4 p-5 sm:p-6" onSubmit={joinRoom}>
             <h2 className="text-2xl font-black tracking-normal">{t('gomoku.enterTitle')}</h2>
-            <button className="gomoku-button gomoku-button-primary w-full" type="button" onClick={createRoom}>
+            <button className="gomoku-button gomoku-button-primary w-full" disabled={pending.isPending('create')} type="button" onClick={createRoom}>
               <Plus className="size-4" />
-              {t('common.createAndEnter')}
+              {pending.isPending('create') ? t('common.syncing') : t('common.createAndEnter')}
             </button>
             {currentRoom && (
               <ContinueRoomEntry
@@ -182,15 +191,15 @@ export function GomokuRoomGate({ roomId }: GomokuRoomGateProps) {
                 <AILevelPicker level={aiLevel} llmEnabled={llmEnabled} palette="gomoku" onChange={setAILevel} />
                 <button
                   className={cn('gomoku-button', pendingAI && 'loading')}
-                  disabled={pendingAI || !isHost || !room || room.players.length >= 2}
+                  disabled={pendingAI || pending.isPending('add-ai') || !isHost || !room || room.players.length >= 2}
                   type="button"
                   onClick={addAIPlayer}
                 >
                   <Bot className="size-4" />
-                  {pendingAI ? t('room.addingAI') : `${t('room.addAI')} (${getAILevelLabel(aiLevel, locale)})`}
+                  {pendingAI || pending.isPending('add-ai') ? t('room.addingAI') : `${t('room.addAI')} (${getAILevelLabel(aiLevel, locale)})`}
                 </button>
-                <button className="gomoku-button gomoku-button-primary" disabled={!isHost || !room || room.players.length < 2} type="button" onClick={startGame}>
-                  {t('common.startGame')}
+                <button className="gomoku-button gomoku-button-primary" disabled={pending.isPending('start') || !isHost || !room || room.players.length < 2} type="button" onClick={startGame}>
+                  {pending.isPending('start') ? t('common.syncing') : t('common.startGame')}
                 </button>
               </div>
             </div>

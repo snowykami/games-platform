@@ -6,6 +6,7 @@ import { Check, Skull, X } from 'lucide-react'
 import { useState } from 'react'
 import { useI18n } from '@/i18n/context'
 import { cn } from '@/shared/lib/utils'
+import { usePendingAction } from '../usePendingAction'
 import { ChoiceButton, ConfirmChoiceButton, SubmittedNotice } from './socialActionControls'
 import { PlayerRefLabel } from './socialPlayers'
 import { socialButton } from './socialStyle'
@@ -31,6 +32,7 @@ export function AvalonActionPanel({
   const [selectedQuestCard, setSelectedQuestCard] = useState<'success' | 'fail'>()
   const [questSubmitted, setQuestSubmitted] = useState(false)
   const [selectedAssassinationTarget, setSelectedAssassinationTarget] = useState('')
+  const pending = usePendingAction()
   const alivePlayers = room.players.filter(player => player.alive)
   const onQuest = room.avalon.team.includes(you.id)
   const isLeader = room.avalon.leaderId === you.id
@@ -65,11 +67,11 @@ export function AvalonActionPanel({
         </div>
         <button
           className={socialButton(config, true)}
-          disabled={!isLeader || selectedTeam.length !== room.avalon.requiredTeam}
+          disabled={!isLeader || selectedTeam.length !== room.avalon.requiredTeam || pending.isPending('team')}
           type="button"
-          onClick={() => void actions.proposeTeam(selectedTeam).then(() => setMessage(t('avalon.teamProposed')))}
+          onClick={() => void pending.run('team', () => actions.proposeTeam(selectedTeam).then(() => setMessage(t('avalon.teamProposed'))), { releaseOnSettle: false })}
         >
-          {t('avalon.submitTeam')}
+          {pending.isPending('team') ? t('common.syncing') : t('avalon.submitTeam')}
         </button>
       </Panel>
     )

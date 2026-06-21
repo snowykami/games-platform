@@ -5,6 +5,7 @@ import type { useSocialRoom } from './useSocialRoom'
 import { Vote } from 'lucide-react'
 import { useState } from 'react'
 import { useI18n } from '@/i18n/context'
+import { usePendingAction } from '../usePendingAction'
 import { ChoiceButton, ConfirmChoiceButton, SubmittedNotice } from './socialActionControls'
 import { socialButton } from './socialStyle'
 import { Panel } from './socialUi'
@@ -25,8 +26,10 @@ export function UndercoverActionPanel({
   const { t } = useI18n()
   const [selectedUndercoverVote, setSelectedUndercoverVote] = useState('')
   const [description, setDescription] = useState('')
+  const pending = usePendingAction()
   const livingTargets = room.players.filter(player => player.alive && player.id !== you.id)
   const isCurrentSpeaker = room.undercover.currentSpeakerId === you.id
+  const isSubmittingDescription = pending.isPending('describe')
 
   async function submitDescription() {
     const nextDescription = description.trim()
@@ -34,9 +37,10 @@ export function UndercoverActionPanel({
       return
     }
 
-    await actions.undercoverDescribe(nextDescription)
-    setDescription('')
-    setMessage(t('undercover.described'))
+    await pending.run('describe', () => actions.undercoverDescribe(nextDescription).then(() => {
+      setDescription('')
+      setMessage(t('undercover.described'))
+    }), { releaseOnSettle: false })
   }
 
   function handleDescriptionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -59,7 +63,7 @@ export function UndercoverActionPanel({
         </p>
         <textarea
           className="min-h-24 resize-none rounded-lg border border-white/18 bg-black/28 p-3 text-sm font-bold text-[#fff8e8] outline-none focus:ring-2 focus:ring-[#f4c7ff]"
-          disabled={!isCurrentSpeaker}
+          disabled={!isCurrentSpeaker || isSubmittingDescription}
           maxLength={80}
           placeholder={t('undercover.describePlaceholder')}
           value={description}
@@ -68,11 +72,11 @@ export function UndercoverActionPanel({
         />
         <button
           className={socialButton(config, true)}
-          disabled={!isCurrentSpeaker || !description.trim()}
+          disabled={!isCurrentSpeaker || !description.trim() || isSubmittingDescription}
           type="button"
           onClick={() => void submitDescription()}
         >
-          {t('undercover.submitDescription')}
+          {isSubmittingDescription ? t('common.syncing') : t('undercover.submitDescription')}
         </button>
       </Panel>
     )
