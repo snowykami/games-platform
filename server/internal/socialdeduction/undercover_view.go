@@ -406,8 +406,8 @@ func undercoverVoteActions(room *Room, player *Player) []aiplayer.LegalAction {
 		if target.Alive && target.ID != player.ID {
 			actions = append(actions, aiplayer.LegalAction{
 				ID:          "vote:" + target.ID,
-				Label:       target.Name,
-				Description: fmt.Sprintf("投票给 %s", target.Name),
+				Label:       fmt.Sprintf("投票给 %d号 %s", target.Seat+1, target.Name),
+				Description: fmt.Sprintf("座位 %d 的存活玩家，AI action id 会映射为 seat_%d。", target.Seat+1, target.Seat+1),
 			})
 		}
 	}

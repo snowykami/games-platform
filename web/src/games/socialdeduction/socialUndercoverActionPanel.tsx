@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { useI18n } from '@/i18n/context'
 import { usePendingAction } from '../usePendingAction'
 import { ChoiceButton, ConfirmChoiceButton, SubmittedNotice } from './socialActionControls'
+import { PlayerRefLabel } from './socialPlayers'
 import { socialButton } from './socialStyle'
 import { Panel } from './socialUi'
 
@@ -108,14 +109,14 @@ export function UndercoverActionPanel({
               void actions.undercoverVote(player.id, false)
             }}
           >
-            {player.name}
+            <PlayerRefLabel player={player} room={room} />
           </ChoiceButton>
         ))}
         <ConfirmChoiceButton
           config={config}
           disabled={!activeUndercoverVoteTarget || hasVoted}
           label={hasVoted ? t('undercover.voted') : t('social.confirmVote')}
-          selectedLabel={selectedPlayer?.name}
+          selectedLabel={selectedPlayer ? <PlayerRefLabel player={selectedPlayer} room={room} /> : undefined}
           onConfirm={() => void actions.undercoverVote(activeUndercoverVoteTarget, true).then(() => setMessage(t('undercover.voted')))}
         />
       </Panel>
