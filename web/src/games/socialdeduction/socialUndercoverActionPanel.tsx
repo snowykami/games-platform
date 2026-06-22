@@ -5,6 +5,7 @@ import type { useSocialRoom } from './useSocialRoom'
 import { Vote } from 'lucide-react'
 import { useState } from 'react'
 import { useI18n } from '@/i18n/context'
+import { cn } from '@/shared/lib/utils'
 import { usePendingAction } from '../usePendingAction'
 import { ChoiceButton, ConfirmChoiceButton, SubmittedNotice } from './socialActionControls'
 import { PlayerRefLabel } from './socialPlayers'
@@ -57,14 +58,14 @@ export function UndercoverActionPanel({
     const currentSpeaker = room.players.find(player => player.id === room.undercover.currentSpeakerId)
 
     return (
-      <Panel config={config}>
+      <Panel active={isCurrentSpeaker} config={config}>
         <h2 className="text-xl font-black">{t('undercover.describeTitle')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">
           {isCurrentSpeaker ? t('undercover.yourTurnDescribe') : t('undercover.waitDescribe', { name: currentSpeaker?.name ?? '-' })}
         </p>
         <textarea
-          className="min-h-24 resize-none rounded-lg border border-white/18 bg-black/28 p-3 text-sm font-bold text-[#fff8e8] outline-none focus:ring-2 focus:ring-[#f4c7ff]"
-          disabled={!isCurrentSpeaker || isSubmittingDescription}
+          className={cn('min-h-24 resize-none rounded-lg border border-white/18 bg-black/28 p-3 text-sm font-bold text-[#fff8e8] outline-none focus:ring-2 focus:ring-[#f4c7ff]', isCurrentSpeaker && 'border-[#f4c7ff]/80 shadow-[0_0_24px_rgba(244,199,255,0.18)]')}
+          disabled={isSubmittingDescription}
           maxLength={80}
           placeholder={t('undercover.describePlaceholder')}
           value={description}
@@ -90,7 +91,7 @@ export function UndercoverActionPanel({
     const selectedPlayer = room.players.find(player => player.id === activeUndercoverVoteTarget)
 
     return (
-      <Panel config={config}>
+      <Panel active={!hasVoted} config={config}>
         <h2 className="text-xl font-black">{t('undercover.voteTitle')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">{t('undercover.voteHint')}</p>
         {hasVoted && <SubmittedNotice config={config} label={t('undercover.voted')} />}

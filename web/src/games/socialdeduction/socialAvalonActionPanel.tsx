@@ -49,7 +49,7 @@ export function AvalonActionPanel({
 
   if (room.phase === 'team') {
     return (
-      <Panel config={config}>
+      <Panel active={isLeader} config={config}>
         <h2 className="text-xl font-black">{t('avalon.proposeTeam')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">{t('avalon.teamSize', { count: room.avalon.requiredTeam })}</p>
         <div className="grid gap-2">
@@ -81,7 +81,7 @@ export function AvalonActionPanel({
     const selectedVoteLabel = selectedTeamVote === undefined ? undefined : selectedTeamVote ? t('avalon.approve') : t('avalon.reject')
 
     return (
-      <Panel config={config}>
+      <Panel active={!teamVoteSubmitted} config={config}>
         <h2 className="text-xl font-black">{t('avalon.teamVote')}</h2>
         <div className="flex flex-wrap gap-2 text-sm leading-6 text-[#fff8e8]/76">
           {teamPlayers.map(player => <PlayerRefLabel key={player.id} player={player} room={room} />)}
@@ -115,7 +115,7 @@ export function AvalonActionPanel({
 
   if (room.phase === 'quest') {
     return (
-      <Panel config={config}>
+      <Panel active={onQuest && !questSubmitted} config={config}>
         <h2 className="text-xl font-black">{t('avalon.quest')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">{onQuest ? t('avalon.playQuestCard') : t('avalon.waitQuest')}</p>
         {onQuest && (
@@ -158,7 +158,7 @@ export function AvalonActionPanel({
     const selectedPlayer = room.players.find(player => player.id === selectedAssassinationTarget)
 
     return (
-      <Panel config={config}>
+      <Panel active={isAssassin} config={config}>
         <h2 className="text-xl font-black">{t('avalon.assassination')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">{isAssassin ? t('avalon.chooseMerlin') : t('avalon.waitAssassin')}</p>
         {isAssassin && room.players.filter(player => player.alignment === 'good' || !player.visibleToYou).map(player => (

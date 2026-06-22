@@ -129,8 +129,8 @@ function socialShellTheme(config: typeof GAME_COPY[SocialGameSlug], game: Social
   }
 }
 
-export function Panel({ children, config }: { children: ReactNode, config: typeof GAME_COPY[SocialGameSlug] }) {
-  return <aside className={cn('grid min-w-0 content-start gap-3 overflow-hidden rounded-lg border p-4', config.panel)}>{children}</aside>
+export function Panel({ active = false, children, config }: { active?: boolean, children: ReactNode, config: typeof GAME_COPY[SocialGameSlug] }) {
+  return <aside className={cn('grid min-w-0 content-start gap-3 overflow-hidden rounded-lg border p-4', config.panel, active && 'social-action-panel-active')}>{children}</aside>
 }
 
 export function StatusPill({ children, className }: { children: ReactNode, className?: string }) {

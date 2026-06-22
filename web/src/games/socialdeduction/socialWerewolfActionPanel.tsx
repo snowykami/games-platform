@@ -73,7 +73,7 @@ export function WerewolfActionPanel({
     }
 
     return (
-      <Panel config={config}>
+      <Panel active={canSubmitNightAction} config={config}>
         <h2 className="text-xl font-black">{t('werewolf.nightAction')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">{nightSubmitted ? t('werewolf.actionSubmitted') : canAct ? t('werewolf.chooseNightTarget') : t('werewolf.noNightAction')}</p>
         {nightSubmitted && <SubmittedNotice config={config} label={t('werewolf.actionSubmitted')} />}
@@ -191,7 +191,7 @@ export function WerewolfActionPanel({
     const selectedHunterPlayer = room.players.find(player => player.id === selectedHunterTarget)
 
     return (
-      <Panel config={config}>
+      <Panel active={canShoot} config={config}>
         <h2 className="text-xl font-black">{t('werewolf.hunterShot')}</h2>
         <p className="text-sm leading-6 text-[#fff8e8]/76">
           {canShoot
@@ -250,7 +250,7 @@ export function WerewolfActionPanel({
     const voteEntries = sortedBySeat(room, room.players.filter(player => player.alive && !room.werewolf.revealedIdiots?.[player.id]))
 
     return (
-      <Panel config={config}>
+      <Panel active={!hasVoted} config={config}>
         <h2 className="text-xl font-black">{t('werewolf.exileVote')}</h2>
         {hasVoted && <SubmittedNotice config={config} label={t('werewolf.votedCanChange')} />}
         <div className="grid min-w-0 gap-2 rounded-lg border border-white/12 bg-black/18 p-2.5">

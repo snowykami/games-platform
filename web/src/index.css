@@ -78,6 +78,28 @@ body {
   }
 }
 
+@keyframes social-action-panel-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgb(255 248 232 / 18%),
+      0 18px 46px rgb(0 0 0 / 24%),
+      0 0 0 rgb(244 199 255 / 0%);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 2px rgb(244 199 255 / 86%),
+      0 22px 58px rgb(0 0 0 / 34%),
+      0 0 34px rgb(244 199 255 / 32%);
+  }
+}
+
+.social-action-panel-active {
+  border-color: rgb(244 199 255 / 78%);
+  animation: social-action-panel-pulse 1.45s ease-in-out infinite;
+}
+
 button,
 input,
 select,
