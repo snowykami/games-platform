@@ -836,30 +836,57 @@ func TestUndercoverDomainsGenerateLargeWordBank(t *testing.T) {
 	if len(presets) < 6 {
 		t.Fatalf("expected multiple undercover domains, got %d", len(presets))
 	}
-	if total := undercoverTotalPairCount(); total < 4000 {
-		t.Fatalf("expected at least 4000 undercover pairs, got %d", total)
+	if total := undercoverTotalGroupCount(); total < len(presets)*minUndercoverGroupsPerDomain {
+		t.Fatalf("expected at least %d undercover word groups, got %d", len(presets)*minUndercoverGroupsPerDomain, total)
 	}
-	computingPairs := undercoverPairsForDomain("computing")
-	if len(computingPairs) < undercoverPairsPerDomain {
-		t.Fatalf("expected computing domain to have %d pairs, got %d", undercoverPairsPerDomain, len(computingPairs))
+	computingGroups := undercoverGroupsForDomain("computing")
+	if len(computingGroups) < minUndercoverGroupsPerDomain {
+		t.Fatalf("expected computing domain to have %d groups, got %d", minUndercoverGroupsPerDomain, len(computingGroups))
 	}
 	foundTCPUDP := false
-	for _, pair := range computingPairs {
-		if pair.CivilianWord == "TCP" && pair.UndercoverWord == "UDP" {
+	for _, group := range computingGroups {
+		if len(group.Words) >= 2 && group.Words[0] == "TCP" && group.Words[1] == "UDP" {
 			foundTCPUDP = true
 			break
 		}
 	}
 	if !foundTCPUDP {
-		t.Fatalf("expected computing domain to include TCP/UDP pair")
+		t.Fatalf("expected computing domain to include TCP/UDP group")
 	}
 	for _, preset := range presets {
 		if len(preset.Pairs) > 0 {
 			t.Fatalf("lobby domain metadata should not expose full word bank, got %d pairs for %s", len(preset.Pairs), preset.ID)
 		}
 		if preset.PairCount == 0 {
-			t.Fatalf("expected pair count for domain %s", preset.ID)
+			t.Fatalf("expected group count for domain %s", preset.ID)
 		}
+		if preset.PairCount < minUndercoverGroupsPerDomain {
+			t.Fatalf("expected at least %d groups for domain %s, got %d", minUndercoverGroupsPerDomain, preset.ID, preset.PairCount)
+		}
+	}
+}
+
+func TestChooseUndercoverPairDrawsTwoWordsFromMultiWordGroup(t *testing.T) {
+	pairSeen := map[string]bool{}
+	group := undercoverWordGroup{
+		DomainID:   "computing",
+		Category:   "计算机、网络和 AI 等",
+		GroupIndex: 155,
+		Words:      []string{"大语言模型", "多模态模型", "视觉语言模型", "语音模型"},
+	}
+	for range 80 {
+		pair := chooseUndercoverPairFromGroup(group)
+		if pair.CivilianWord == pair.UndercoverWord {
+			t.Fatalf("expected different words, got %+v", pair)
+		}
+		if !strings.HasPrefix(pair.ID, "computing-155-") {
+			t.Fatalf("expected stable group id prefix, got %q", pair.ID)
+		}
+		pairSeen[pair.CivilianWord] = true
+		pairSeen[pair.UndercoverWord] = true
+	}
+	if len(pairSeen) < 3 {
+		t.Fatalf("expected multi-word group to draw different words over repeated picks, got %v", pairSeen)
 	}
 }
 
