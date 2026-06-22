@@ -67,3 +67,22 @@ func TestManagerRunsAI(t *testing.T) {
 		t.Fatalf("moves = %d, want 2", len(next.Moves))
 	}
 }
+
+func TestAIChoosesImmediateGeneralCapture(t *testing.T) {
+	room := &Room{
+		Phase: PhasePlaying,
+		Pieces: []Piece{
+			{ID: "red-general", Side: SideRed, Type: PieceGeneral, X: 4, Y: 9},
+			{ID: "red-rook", Side: SideRed, Type: PieceRook, X: 4, Y: 5},
+			{ID: "black-general", Side: SideBlack, Type: PieceGeneral, X: 4, Y: 0},
+		},
+	}
+
+	piece, to, ok := chooseAIMove(room, SideRed, "master")
+	if !ok {
+		t.Fatal("expected AI move")
+	}
+	if piece.ID != "red-rook" || to.X != 4 || to.Y != 0 {
+		t.Fatalf("expected rook to capture general, got %s to %+v", piece.ID, to)
+	}
+}

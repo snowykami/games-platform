@@ -64,3 +64,31 @@ func TestRejectsOccupiedPoint(t *testing.T) {
 		t.Fatal("expected occupied point error")
 	}
 }
+
+func TestAIChoosesImmediateWinningMove(t *testing.T) {
+	room := &Room{}
+	for x := 3; x <= 6; x++ {
+		room.Board[7][x] = StoneBlack
+		room.Moves = append(room.Moves, Move{X: x, Y: 7, Stone: StoneBlack})
+	}
+
+	x, y := chooseAIMove(room, StoneBlack, "master")
+	if y != 7 || (x != 2 && x != 7) {
+		t.Fatalf("expected AI to finish open four, got %s", formatPoint(x, y))
+	}
+}
+
+func TestAIBlocksImmediateOpponentWin(t *testing.T) {
+	room := &Room{}
+	for x := 3; x <= 6; x++ {
+		room.Board[7][x] = StoneWhite
+		room.Moves = append(room.Moves, Move{X: x, Y: 7, Stone: StoneWhite})
+	}
+	room.Board[8][8] = StoneBlack
+	room.Moves = append(room.Moves, Move{X: 8, Y: 8, Stone: StoneBlack})
+
+	x, y := chooseAIMove(room, StoneBlack, "master")
+	if y != 7 || (x != 2 && x != 7) {
+		t.Fatalf("expected AI to block opponent open four, got %s", formatPoint(x, y))
+	}
+}

@@ -15,23 +15,19 @@ func legalMoves(pieces []Piece, piece Piece) []Position {
 	return legal
 }
 
-func allLegalMoves(pieces []Piece, side Side) []struct {
+type legalMove struct {
 	piece Piece
 	to    Position
-} {
-	moves := []struct {
-		piece Piece
-		to    Position
-	}{}
+}
+
+func allLegalMoves(pieces []Piece, side Side) []legalMove {
+	moves := []legalMove{}
 	for _, piece := range pieces {
 		if piece.Side != side {
 			continue
 		}
 		for _, to := range legalMoves(pieces, piece) {
-			moves = append(moves, struct {
-				piece Piece
-				to    Position
-			}{piece: piece, to: to})
+			moves = append(moves, legalMove{piece: piece, to: to})
 		}
 	}
 	return moves
