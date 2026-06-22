@@ -1631,7 +1631,8 @@ func TestUndercoverAIContextUsesSeatAliasesAndMapsVoteBack(t *testing.T) {
 		},
 		Undercover: UndercoverState{
 			Round:     1,
-			WordPair:  UndercoverWordPair{CivilianWord: "苹果", UndercoverWord: "梨"},
+			DomainIDs: []string{"computing", "academic"},
+			WordPair:  UndercoverWordPair{CivilianWord: "TCP", UndercoverWord: "UDP", Category: "计算机与网络"},
 			Described: map[string]bool{"raw_civilian_id": true, "raw_undercover_id": true},
 			Votes:     map[string]UndercoverVoteIntent{"raw_undercover_id": {TargetID: "raw_civilian_id", Confirmed: true}},
 		},
@@ -1658,6 +1659,12 @@ func TestUndercoverAIContextUsesSeatAliasesAndMapsVoteBack(t *testing.T) {
 	})
 	if strings.Contains(string(payload), `"role":"undercover"`) || strings.Contains(string(payload), `"role":"blank"`) {
 		t.Fatalf("undercover context leaked other hidden roles: %s", string(payload))
+	}
+	if !strings.Contains(string(payload), "计算机与网络") || !strings.Contains(string(payload), "学术与校园") {
+		t.Fatalf("expected undercover AI context to include selected domain names, got %s", string(payload))
+	}
+	if !strings.Contains(string(payload), `"wordCategory":"计算机与网络"`) {
+		t.Fatalf("expected undercover AI context to include current word category, got %s", string(payload))
 	}
 
 	manager.mu.Lock()

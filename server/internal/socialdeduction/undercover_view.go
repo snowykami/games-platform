@@ -198,11 +198,15 @@ func undercoverPresetName(id string) string {
 }
 
 func undercoverDomainNames(ids []string) string {
+	return strings.Join(undercoverDomainNameList(ids), "、")
+}
+
+func undercoverDomainNameList(ids []string) []string {
 	names := []string{}
 	for _, id := range normalizeUndercoverDomainIDs(ids) {
 		names = append(names, undercoverPresetName(id))
 	}
-	return strings.Join(names, "、")
+	return names
 }
 
 func normalizeUndercoverDomainIDs(ids []string) []string {
