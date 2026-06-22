@@ -190,6 +190,10 @@ BASE_URL=http://127.0.0.1:8901 pnpm --dir web verify:ui
 - [AI Function Calling 规范](docs/ai-function-calling.md)
 - [资产与 UI 指引](docs/assets-and-ui.md)
 
+## 许可
+
+本项目采用 [MIT License](LICENSE)。
+
 ## 当前限制
 
 - PG 和 Redis 尚未接入真实读写，当前状态保存在进程内存中。
