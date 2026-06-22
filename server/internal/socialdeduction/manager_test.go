@@ -767,7 +767,7 @@ func TestUndercoverDescriptionActionsDoNotRevealSecretWord(t *testing.T) {
 			testAIPlayer("p1", "Clue Bot", RoleCivilian, AlignmentGood),
 		},
 		Undercover: UndercoverState{
-			WordPair: UndercoverWordPair{CivilianWord: "苹果", UndercoverWord: "梨"},
+			WordPair: UndercoverWordPair{CivilianWord: "苹果", CivilianHint: "常见水果，常被切块或榨汁。", UndercoverWord: "梨", UndercoverHint: "水分较多的水果。"},
 		},
 	}
 
@@ -784,6 +784,9 @@ func TestUndercoverDescriptionActionsDoNotRevealSecretWord(t *testing.T) {
 	forbidden, ok := state["forbiddenPublicSpeech"].([]string)
 	if !ok || len(forbidden) != 1 || forbidden[0] != "苹果" {
 		t.Fatalf("expected forbidden public speech to include secret word, got %#v", state["forbiddenPublicSpeech"])
+	}
+	if state["yourWordHint"] != "常见水果，常被切块或榨汁。" {
+		t.Fatalf("expected own word hint in private AI context, got %#v", state["yourWordHint"])
 	}
 }
 
@@ -831,6 +834,43 @@ func TestUndercoverPublicRoomHidesRolesUntilFinished(t *testing.T) {
 	}
 }
 
+func TestUndercoverWordHintsStayPrivateInPublicView(t *testing.T) {
+	manager := NewManager(GameUndercover, nil)
+	room := &Room{
+		ID:         "UNDHINTS",
+		Game:       GameUndercover,
+		HostUserID: "u1",
+		Phase:      PhaseFinished,
+		Players: []*Player{
+			testPlayer("p1", "u1", "Host", RoleCivilian, AlignmentGood),
+			testPlayer("p2", "u2", "Guest", RoleUndercover, AlignmentEvil),
+		},
+		Undercover: UndercoverState{
+			WordPair: UndercoverWordPair{
+				ID:             "pair-1",
+				CivilianWord:   "TCP",
+				CivilianHint:   "面向连接、强调可靠传输和顺序到达的传输层协议。",
+				UndercoverWord: "UDP",
+				UndercoverHint: "无连接、开销较低、常用于低延迟传输的传输层协议。",
+				Category:       "计算机、网络和 AI 等",
+			},
+			Described: map[string]bool{},
+			Votes:     map[string]UndercoverVoteIntent{},
+		},
+	}
+
+	payload, err := json.Marshal(manager.publicRoom(room, "u1"))
+	if err != nil {
+		t.Fatalf("marshal public room: %v", err)
+	}
+	serialized := string(payload)
+	for _, leaked := range []string{"CivilianHint", "UndercoverHint", "可靠传输", "低延迟传输"} {
+		if strings.Contains(serialized, leaked) {
+			t.Fatalf("expected hint to stay private, leaked %q in %s", leaked, serialized)
+		}
+	}
+}
+
 func TestUndercoverDomainsGenerateLargeWordBank(t *testing.T) {
 	presets := undercoverPresets()
 	if len(presets) < 6 {
@@ -845,7 +885,7 @@ func TestUndercoverDomainsGenerateLargeWordBank(t *testing.T) {
 	}
 	foundTCPUDP := false
 	for _, group := range computingGroups {
-		if len(group.Words) >= 2 && group.Words[0] == "TCP" && group.Words[1] == "UDP" {
+		if len(group.Words) >= 2 && group.Words[0].Text == "TCP" && group.Words[1].Text == "UDP" {
 			foundTCPUDP = true
 			break
 		}
@@ -866,13 +906,52 @@ func TestUndercoverDomainsGenerateLargeWordBank(t *testing.T) {
 	}
 }
 
+func TestUndercoverWordBankAcceptsStringAndHintObjects(t *testing.T) {
+	var source undercoverDomainSource
+	payload := []byte(`{
+		"id": "mixed",
+		"name": "混合格式",
+		"description": "测试字符串词和带解释词。",
+		"groups": [
+			[
+				"TCP",
+				{"text": "UDP", "hint": "无连接、开销较低的传输层协议。"}
+			]
+		]
+	}`)
+	if err := json.Unmarshal(payload, &source); err != nil {
+		t.Fatalf("decode mixed word bank: %v", err)
+	}
+	if err := normalizeUndercoverDomainSource(&source); err == nil {
+		t.Fatalf("expected too few groups to fail validation")
+	}
+	source.Groups = make([][]undercoverWordEntry, minUndercoverGroupsPerDomain)
+	for index := range source.Groups {
+		source.Groups[index] = []undercoverWordEntry{
+			{Text: fmt.Sprintf("平民词%d", index), Hint: "平民解释"},
+			{Text: fmt.Sprintf("卧底词%d", index), Hint: "卧底解释"},
+		}
+	}
+	if err := normalizeUndercoverDomainSource(&source); err != nil {
+		t.Fatalf("normalize mixed word bank: %v", err)
+	}
+	if source.Groups[0][1].Hint != "卧底解释" {
+		t.Fatalf("expected hint to survive normalization, got %+v", source.Groups[0][1])
+	}
+}
+
 func TestChooseUndercoverPairDrawsTwoWordsFromMultiWordGroup(t *testing.T) {
 	pairSeen := map[string]bool{}
 	group := undercoverWordGroup{
 		DomainID:   "computing",
 		Category:   "计算机、网络和 AI 等",
 		GroupIndex: 155,
-		Words:      []string{"大语言模型", "多模态模型", "视觉语言模型", "语音模型"},
+		Words: []undercoverWordEntry{
+			{Text: "大语言模型", Hint: "能理解和生成自然语言的大规模神经网络模型。"},
+			{Text: "多模态模型", Hint: "能同时处理文本、图像、音频等多种输入形式的模型。"},
+			{Text: "视觉语言模型", Hint: "结合图像理解和语言生成能力的多模态模型。"},
+			{Text: "语音模型", Hint: "处理语音识别、合成或理解任务的 AI 模型。"},
+		},
 	}
 	for range 80 {
 		pair := chooseUndercoverPairFromGroup(group)

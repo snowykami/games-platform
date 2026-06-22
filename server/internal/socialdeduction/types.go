@@ -244,6 +244,8 @@ type UndercoverWordPair struct {
 	CivilianWord   string `json:"civilianWord,omitempty"`
 	UndercoverWord string `json:"undercoverWord,omitempty"`
 	Category       string `json:"category,omitempty"`
+	CivilianHint   string `json:"-"`
+	UndercoverHint string `json:"-"`
 }
 
 type AvalonQuestResult struct {

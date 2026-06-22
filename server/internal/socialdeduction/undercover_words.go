@@ -16,17 +16,39 @@ const minUndercoverGroupsPerDomain = 100
 var undercoverWordBankFS embed.FS
 
 type undercoverDomainSource struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	Groups      [][]string `json:"groups"`
+	ID          string                  `json:"id"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
+	Groups      [][]undercoverWordEntry `json:"groups"`
+}
+
+type undercoverWordEntry struct {
+	Text string `json:"text"`
+	Hint string `json:"hint,omitempty"`
 }
 
 type undercoverWordGroup struct {
 	DomainID   string
 	Category   string
 	GroupIndex int
-	Words      []string
+	Words      []undercoverWordEntry
+}
+
+func (entry *undercoverWordEntry) UnmarshalJSON(data []byte) error {
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		entry.Text = text
+		entry.Hint = ""
+		return nil
+	}
+	type wordObject undercoverWordEntry
+	var object wordObject
+	if err := json.Unmarshal(data, &object); err != nil {
+		return err
+	}
+	entry.Text = object.Text
+	entry.Hint = object.Hint
+	return nil
 }
 
 var undercoverWordBankCache = struct {
@@ -101,15 +123,15 @@ func normalizeUndercoverDomainSource(source *undercoverDomainSource) error {
 	}
 
 	seenGroups := map[string]bool{}
-	groups := make([][]string, 0, len(source.Groups))
+	groups := make([][]undercoverWordEntry, 0, len(source.Groups))
 	for index, group := range source.Groups {
 		if len(group) < 2 {
 			return fmt.Errorf("domain %q group %d must contain at least two words", source.ID, index+1)
 		}
 		wordSeen := map[string]bool{}
-		words := make([]string, 0, len(group))
-		for wordIndex, rawWord := range group {
-			word := strings.TrimSpace(rawWord)
+		words := make([]undercoverWordEntry, 0, len(group))
+		for wordIndex, rawEntry := range group {
+			word := strings.TrimSpace(rawEntry.Text)
 			if word == "" {
 				return fmt.Errorf("domain %q group %d word %d is empty", source.ID, index+1, wordIndex+1)
 			}
@@ -118,9 +140,12 @@ func normalizeUndercoverDomainSource(source *undercoverDomainSource) error {
 				return fmt.Errorf("domain %q group %d repeats word %q", source.ID, index+1, word)
 			}
 			wordSeen[key] = true
-			words = append(words, word)
+			words = append(words, undercoverWordEntry{
+				Text: word,
+				Hint: strings.TrimSpace(rawEntry.Hint),
+			})
 		}
-		groupKey := strings.ToLower(strings.Join(words, "\x00"))
+		groupKey := normalizedUndercoverGroupKey(words)
 		if seenGroups[groupKey] {
 			return fmt.Errorf("domain %q group %d duplicates word group", source.ID, index+1)
 		}
@@ -129,4 +154,12 @@ func normalizeUndercoverDomainSource(source *undercoverDomainSource) error {
 	}
 	source.Groups = groups
 	return nil
+}
+
+func normalizedUndercoverGroupKey(words []undercoverWordEntry) string {
+	parts := make([]string, 0, len(words))
+	for _, word := range words {
+		parts = append(parts, strings.ToLower(word.Text))
+	}
+	return strings.Join(parts, "\x00")
 }

@@ -42,9 +42,11 @@ func allUndercoverPairsForDomain(source undercoverDomainSource) []UndercoverWord
 				}
 				pairs = append(pairs, UndercoverWordPair{
 					ID:             fmt.Sprintf("%s-%03d-%02d-%02d", source.ID, groupIndex+1, civilianIndex+1, undercoverIndex+1),
-					CivilianWord:   civilianWord,
-					UndercoverWord: undercoverWord,
+					CivilianWord:   civilianWord.Text,
+					UndercoverWord: undercoverWord.Text,
 					Category:       source.Name,
+					CivilianHint:   civilianWord.Hint,
+					UndercoverHint: undercoverWord.Hint,
 				})
 			}
 		}
@@ -158,9 +160,11 @@ func chooseUndercoverPairFromGroup(group undercoverWordGroup) UndercoverWordPair
 	}
 	return UndercoverWordPair{
 		ID:             fmt.Sprintf("%s-%03d-%02d-%02d", group.DomainID, group.GroupIndex, civilianIndex+1, undercoverIndex+1),
-		CivilianWord:   group.Words[civilianIndex],
-		UndercoverWord: group.Words[undercoverIndex],
+		CivilianWord:   group.Words[civilianIndex].Text,
+		UndercoverWord: group.Words[undercoverIndex].Text,
 		Category:       group.Category,
+		CivilianHint:   group.Words[civilianIndex].Hint,
+		UndercoverHint: group.Words[undercoverIndex].Hint,
 	}
 }
 
@@ -232,6 +236,17 @@ func undercoverWordForPlayer(room *Room, player *Player) string {
 		return ""
 	default:
 		return room.Undercover.WordPair.CivilianWord
+	}
+}
+
+func undercoverWordHintForPlayer(room *Room, player *Player) string {
+	switch player.Role {
+	case RoleUndercover:
+		return room.Undercover.WordPair.UndercoverHint
+	case RoleBlank:
+		return ""
+	default:
+		return room.Undercover.WordPair.CivilianHint
 	}
 }
 

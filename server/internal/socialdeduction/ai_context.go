@@ -100,13 +100,15 @@ func avalonAIState(room *Room, actor *Player, phase string) map[string]any {
 
 func undercoverAIState(room *Room, player *Player, phase string) map[string]any {
 	word := undercoverWordForPlayer(room, player)
+	wordHint := undercoverWordHintForPlayer(room, player)
 	return map[string]any{
 		"phase":                 phase,
 		"round":                 room.Undercover.Round,
 		"yourWord":              word,
+		"yourWordHint":          wordHint,
 		"selectedDomains":       undercoverDomainNameList(room.Undercover.DomainIDs),
 		"wordCategory":          room.Undercover.WordPair.Category,
-		"speechPolicy":          "描述阶段必须把 speech 写成最终要说出口的话，不能照抄 action label。只能给间接线索，绝不能直接说出、拼写、引用或复述 yourWord；空白牌也不能声称自己知道具体词。禁止空话套话，例如“生活里常见”“具体场景”“特点不能说太细”“先看大家怎么描述”。像真人一样给一个具体但不泄词的侧面线索。",
+		"speechPolicy":          "描述阶段必须把 speech 写成最终要说出口的话，不能照抄 action label。只能给间接线索，绝不能直接说出、拼写、引用或复述 yourWord；yourWordHint 是私有理解材料，只能帮助你构思侧面描述，不能直接复述定义、关键词或术语堆砌；空白牌也不能声称自己知道具体词。禁止空话套话，例如“生活里常见”“具体场景”“特点不能说太细”“先看大家怎么描述”。像真人一样给一个具体但不泄词的侧面线索。",
 		"badSpeechExamples":     []string{"它在生活里挺常见", "它一般会出现在具体场景里", "它的特点不能说得太细", "我先说个比较宽的范围", "我会先看大家怎么描述"},
 		"forbiddenPublicSpeech": forbiddenPublicSpeech(word),
 		"players":               publicPlayersForAI(room, player),
