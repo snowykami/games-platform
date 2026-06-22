@@ -100,10 +100,12 @@ export interface SocialRoom {
   undercover: {
     round: number
     presetId: string
+    domainIds?: string[]
     presets?: Array<{
       id: string
       name: string
       description: string
+      pairCount?: number
       pairs?: Array<{
         id: string
         civilianWord?: string
@@ -117,6 +119,7 @@ export interface SocialRoom {
       undercoverWord?: string
       category?: string
     }
+    yourWord?: string
     includeBlank: boolean
     currentSpeakerId?: string
     described: Record<string, boolean>
@@ -299,13 +302,16 @@ const roomSchema: z.ZodType<SocialRoom> = z.object({
   undercover: z.object({
     round: z.number().default(0),
     presetId: z.string().default(''),
+    domainIds: z.array(z.string()).optional(),
     presets: z.array(z.object({
       id: z.string(),
       name: z.string(),
       description: z.string(),
+      pairCount: z.number().optional(),
       pairs: z.array(undercoverWordPairSchema).optional(),
     })).optional(),
     wordPair: undercoverWordPairSchema.optional(),
+    yourWord: z.string().optional(),
     includeBlank: z.boolean().default(false),
     currentSpeakerId: z.string().optional(),
     described: z.record(z.string(), z.boolean()).default({}),
@@ -399,8 +405,8 @@ export async function startSocialRoom(game: SocialGameSlug, roomId: string, opti
   return requestRoom(game, `/rooms/${encodeURIComponent(roomId)}/start`, { method: 'POST' }, options)
 }
 
-export async function updateUndercoverConfig(roomId: string, presetId: string, includeBlank: boolean, options?: SocialRequestOptions) {
-  return requestRoom('undercover', `/rooms/${encodeURIComponent(roomId)}/undercover-config`, jsonPatch({ includeBlank, presetId }), options)
+export async function updateUndercoverConfig(roomId: string, domainIds: string[], includeBlank: boolean, options?: SocialRequestOptions) {
+  return requestRoom('undercover', `/rooms/${encodeURIComponent(roomId)}/undercover-config`, jsonPatch({ domainIds, includeBlank }), options)
 }
 
 export async function describeUndercover(roomId: string, text: string, options?: SocialRequestOptions) {

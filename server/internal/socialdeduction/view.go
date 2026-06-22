@@ -14,7 +14,10 @@ func (m *Manager) publicRoomWithOptions(room *Room, viewerUserID string, options
 	godView := options.GodViewAvailable && options.GodView
 	players := make([]PublicPlayer, 0, len(room.Players))
 	for _, player := range room.Players {
-		visible := godView || roleVisible(room, viewer, player)
+		visible := roleVisible(room, viewer, player)
+		if godView && (room.Game != GameUndercover || room.Phase == PhaseFinished) {
+			visible = true
+		}
 		publicPlayer := PublicPlayer{
 			ID:             player.ID,
 			UserID:         player.UserID,
@@ -89,6 +92,9 @@ func roleVisible(room *Room, viewer *Player, target *Player) bool {
 	if viewer == nil || target.Role == "" {
 		return false
 	}
+	if room.Game == GameUndercover {
+		return false
+	}
 	if viewer.ID == target.ID {
 		return true
 	}
@@ -103,9 +109,6 @@ func roleVisible(room *Room, viewer *Player, target *Player) bool {
 			return viewer.Role != RoleOberon && target.Role != RoleOberon
 		}
 		return viewer.Role == RoleMerlin && target.Alignment == AlignmentEvil && target.Role != RoleMordred
-	}
-	if room.Game == GameUndercover {
-		return viewer.ID == target.ID
 	}
 	return false
 }

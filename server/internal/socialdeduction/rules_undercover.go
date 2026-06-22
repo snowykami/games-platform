@@ -3,7 +3,8 @@ package socialdeduction
 import "fmt"
 
 func startUndercover(room *Room) {
-	pair := chooseUndercoverPair(room.Undercover.PresetID)
+	room.Undercover.DomainIDs = normalizeUndercoverDomainIDs(room.Undercover.DomainIDs)
+	pair := chooseUndercoverPair(room.Undercover.DomainIDs)
 	players := shuffledPlayers(room.Players)
 	undercoverCount := undercoverCountForPlayers(len(players))
 	blankCount := 0
@@ -31,7 +32,7 @@ func startUndercover(room *Room) {
 	room.Undercover.Votes = map[string]UndercoverVoteIntent{}
 	room.Undercover.CurrentSpeakerID = firstLivingPlayerID(room)
 	room.Undercover.LastEliminatedID = ""
-	room.Log = append(room.Log, createLog(fmt.Sprintf("谁是卧底开始，题库：%s。请依次描述自己的词。", undercoverPresetName(room.Undercover.PresetID))))
+	room.Log = append(room.Log, createLog(fmt.Sprintf("谁是卧底开始，领域：%s。请依次描述自己的词。", undercoverDomainNames(room.Undercover.DomainIDs))))
 	recordAction(room, PublicAction{Type: "start", Message: "谁是卧底开始，进入描述阶段。"})
 }
 

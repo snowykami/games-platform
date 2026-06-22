@@ -85,7 +85,7 @@ export function UndercoverActionPanel({
   if (room.phase === 'undercover_vote') {
     const yourUndercoverVote = room.undercover.votes[you.id]
     const hasVoted = Boolean(yourUndercoverVote?.confirmed)
-    const activeUndercoverVoteTarget = selectedUndercoverVote || yourUndercoverVote?.targetId || ''
+    const activeUndercoverVoteTarget = hasVoted ? yourUndercoverVote?.targetId ?? '' : selectedUndercoverVote || yourUndercoverVote?.targetId || ''
     const selectedPlayer = room.players.find(player => player.id === activeUndercoverVoteTarget)
 
     return (
@@ -98,8 +98,12 @@ export function UndercoverActionPanel({
             key={player.id}
             config={config}
             icon={<Vote className="size-4" />}
+            disabled={hasVoted}
             selected={activeUndercoverVoteTarget === player.id}
             onClick={() => {
+              if (hasVoted) {
+                return
+              }
               setSelectedUndercoverVote(player.id)
               void actions.undercoverVote(player.id, false)
             }}

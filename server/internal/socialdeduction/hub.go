@@ -335,7 +335,7 @@ func (h *Hub) handleMessage(message wsMessage, roomID string, userID string) err
 			return errors.New("invalid_undercover_config_payload")
 		}
 		return h.runMessageCommand(roomID, gameactor.EventHumanIntentSubmitted, gameactor.LaneRule, func() error {
-			_, err := h.manager.UpdateUndercoverConfig(roomID, userID, request.PresetID, request.IncludeBlank)
+			_, err := h.manager.UpdateUndercoverConfig(roomID, userID, request.DomainIDs, request.IncludeBlank)
 			return err
 		})
 	case "room.describe":

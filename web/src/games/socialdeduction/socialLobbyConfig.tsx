@@ -126,14 +126,34 @@ export function UndercoverLobbyConfig({
   const { t } = useI18n()
   const pending = usePendingAction()
   const presets = room.undercover.presets ?? []
-  const selectedPreset = presets.find(preset => preset.id === room.undercover.presetId)
+  const selectedDomainIds = room.undercover.domainIds?.length ? room.undercover.domainIds : room.undercover.presetId ? [room.undercover.presetId] : []
+  const selectedCount = selectedDomainIds.length
+  const selectedPairCount = presets
+    .filter(preset => selectedDomainIds.includes(preset.id))
+    .reduce((total, preset) => total + (preset.pairCount ?? 0), 0)
+
+  function toggleDomain(domainId: string) {
+    if (!isHost) {
+      return
+    }
+    const nextDomainIds = selectedDomainIds.includes(domainId)
+      ? selectedDomainIds.filter(id => id !== domainId)
+      : [...selectedDomainIds, domainId]
+    if (nextDomainIds.length === 0) {
+      return
+    }
+    void pending.run(`domain:${domainId}`, () => actions.undercoverConfig(nextDomainIds, room.undercover.includeBlank), { releaseOnSettle: false })
+  }
 
   return (
-    <section className="grid gap-2 rounded-lg border border-white/14 bg-black/24 p-3">
+    <section className="grid gap-3 rounded-lg border border-white/14 bg-black/24 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <strong className={config.accent}>{t('undercover.presetTitle')}</strong>
-          <p className="text-xs font-bold text-[#fff8e8]/62">{selectedPreset?.description ?? t('undercover.presetHint')}</p>
+          <p className="text-xs font-bold leading-5 text-[#fff8e8]/62">{t('undercover.presetHint')}</p>
+          <p className="mt-1 text-xs font-black text-[#fff8e8]/78">
+            {t('undercover.selectedDomains', { count: selectedCount, total: selectedPairCount })}
+          </p>
         </div>
         <label className="flex items-center gap-2 text-xs font-black text-[#fff8e8]/78">
           <input
@@ -141,21 +161,30 @@ export function UndercoverLobbyConfig({
             className="size-4 accent-[#f4c7ff]"
             disabled={!isHost || pending.isPending('blank')}
             type="checkbox"
-            onChange={event => void pending.run('blank', () => actions.undercoverConfig(room.undercover.presetId, event.target.checked), { releaseOnSettle: false })}
+            onChange={event => void pending.run('blank', () => actions.undercoverConfig(selectedDomainIds, event.target.checked), { releaseOnSettle: false })}
           />
           {t('undercover.includeBlank')}
         </label>
       </div>
-      <div className="grid gap-2 sm:grid-cols-4">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {presets.map(preset => (
           <button
             key={preset.id}
-            className={cn(socialButton(config), preset.id === room.undercover.presetId && 'ring-2 ring-[#f4c7ff]')}
-            disabled={!isHost || pending.isPending(`preset:${preset.id}`)}
+            className={cn(
+              'grid min-h-24 content-start gap-1.5 rounded-lg border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-45',
+              selectedDomainIds.includes(preset.id)
+                ? 'border-[#f4c7ff] bg-[#f4c7ff]/18 shadow-[0_0_0_2px_rgba(244,199,255,0.24)]'
+                : 'border-white/14 bg-black/20 hover:border-white/28 hover:bg-white/8',
+            )}
+            disabled={!isHost || pending.isPending(`domain:${preset.id}`)}
             type="button"
-            onClick={() => void pending.run(`preset:${preset.id}`, () => actions.undercoverConfig(preset.id, room.undercover.includeBlank), { releaseOnSettle: false })}
+            onClick={() => toggleDomain(preset.id)}
           >
-            {pending.isPending(`preset:${preset.id}`) ? t('common.syncing') : preset.name}
+            <span className="text-sm font-black text-[#fff8e8]">{pending.isPending(`domain:${preset.id}`) ? t('common.syncing') : preset.name}</span>
+            <span className="text-xs font-bold leading-5 text-[#fff8e8]/62">{preset.description}</span>
+            <span className={cn('mt-auto w-fit rounded-full px-2 py-0.5 text-[0.68rem] font-black', selectedDomainIds.includes(preset.id) ? config.primary : 'bg-white/10 text-[#fff8e8]/70')}>
+              {preset.pairCount ?? 0}
+            </span>
           </button>
         ))}
       </div>

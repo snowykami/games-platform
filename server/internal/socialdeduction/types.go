@@ -216,6 +216,7 @@ type AvalonState struct {
 type UndercoverState struct {
 	Round            int                             `json:"round"`
 	PresetID         string                          `json:"presetId"`
+	DomainIDs        []string                        `json:"domainIds,omitempty"`
 	Presets          []UndercoverPreset              `json:"presets,omitempty"`
 	WordPair         UndercoverWordPair              `json:"wordPair,omitempty"`
 	IncludeBlank     bool                            `json:"includeBlank"`
@@ -234,6 +235,7 @@ type UndercoverPreset struct {
 	ID          string               `json:"id"`
 	Name        string               `json:"name"`
 	Description string               `json:"description"`
+	PairCount   int                  `json:"pairCount,omitempty"`
 	Pairs       []UndercoverWordPair `json:"pairs,omitempty"`
 }
 
@@ -335,8 +337,10 @@ type AvalonView struct {
 type UndercoverView struct {
 	Round            int                             `json:"round"`
 	PresetID         string                          `json:"presetId"`
+	DomainIDs        []string                        `json:"domainIds,omitempty"`
 	Presets          []UndercoverPreset              `json:"presets,omitempty"`
 	WordPair         UndercoverWordPair              `json:"wordPair,omitempty"`
+	YourWord         string                          `json:"yourWord,omitempty"`
 	IncludeBlank     bool                            `json:"includeBlank"`
 	CurrentSpeakerID string                          `json:"currentSpeakerId,omitempty"`
 	Described        map[string]bool                 `json:"described"`

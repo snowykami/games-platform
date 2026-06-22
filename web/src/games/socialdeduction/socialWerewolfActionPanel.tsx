@@ -246,12 +246,39 @@ export function WerewolfActionPanel({
     const hasVoted = Boolean(yourWerewolfVote?.confirmed)
     const activeWerewolfVoteTarget = selectedWerewolfVote || yourWerewolfVote?.targetId || ''
     const selectedPlayer = room.players.find(player => player.id === activeWerewolfVoteTarget)
+    const voteTargets = sortedBySeat(room, livingTargets)
+    const voteEntries = sortedBySeat(room, room.players.filter(player => player.alive && !room.werewolf.revealedIdiots?.[player.id]))
 
     return (
       <Panel config={config}>
         <h2 className="text-xl font-black">{t('werewolf.exileVote')}</h2>
         {hasVoted && <SubmittedNotice config={config} label={t('werewolf.votedCanChange')} />}
-        {livingTargets.map(player => (
+        <div className="grid min-w-0 gap-2 rounded-lg border border-white/12 bg-black/18 p-2.5">
+          <h3 className="text-sm font-black text-[#fff8e8]/86">投票动态</h3>
+          <div className="grid min-w-0 gap-1.5">
+            {voteEntries.map((voter) => {
+              const vote = room.werewolf.votes[voter.id]
+              const target = vote?.targetId ? room.players.find(player => player.id === vote.targetId) : undefined
+              return (
+                <div key={voter.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 rounded-md bg-black/22 px-2 py-1.5 text-xs font-black text-[#fff8e8]/72">
+                  <span className="min-w-0 overflow-hidden">
+                    <PlayerRefLabel player={voter} room={room} />
+                  </span>
+                  <span className="text-[#fff8e8]/36">-&gt;</span>
+                  <span className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 overflow-hidden text-right">
+                    {target ? <PlayerRefLabel player={target} room={room} /> : <span className="text-[#fff8e8]/42">未选择</span>}
+                    {vote?.targetId && (
+                      <span className={cn('rounded-full px-1.5 py-0.5 text-[0.62rem] leading-none', vote.confirmed ? 'bg-[#a7f3d0] text-[#06391f]' : 'bg-white/12 text-[#fff8e8]/62')}>
+                        {vote.confirmed ? '已确认' : '未确认'}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        {voteTargets.map(player => (
           <ChoiceButton
             key={player.id}
             config={config}
@@ -282,6 +309,23 @@ export function WerewolfActionPanel({
   }
 
   return <Panel config={config}>{t('social.waiting')}</Panel>
+}
+
+function sortedBySeat(room: SocialRoom, players: SocialPlayer[]) {
+  return [...players].sort((left, right) => compareBySeat(room, left, right))
+}
+
+function compareBySeat(room: SocialRoom, left: SocialPlayer, right: SocialPlayer) {
+  const leftSeat = playerSeat(left)
+  const rightSeat = playerSeat(right)
+  if (leftSeat !== rightSeat) {
+    return leftSeat - rightSeat
+  }
+  return room.players.indexOf(left) - room.players.indexOf(right)
+}
+
+function playerSeat(player: SocialPlayer) {
+  return Number.isFinite(player.seat) && player.seat >= 0 ? player.seat : Number.MAX_SAFE_INTEGER
 }
 
 function werewolfNightTargets(room: SocialRoom, you: SocialPlayer) {

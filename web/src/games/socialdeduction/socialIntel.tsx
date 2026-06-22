@@ -88,7 +88,10 @@ export function SelfIntel({
 }
 
 function undercoverWord(room: SocialRoom, you?: SocialPlayer) {
-  if (!you || !room.undercover.wordPair) {
+  if (room.undercover.yourWord !== undefined) {
+    return room.undercover.yourWord
+  }
+  if (!you || !room.undercover.wordPair || room.phase !== 'finished') {
     return ''
   }
   if (you.role === 'undercover') {
@@ -102,6 +105,9 @@ function undercoverWord(room: SocialRoom, you?: SocialPlayer) {
 
 function rolePlayHint(game: SocialGameSlug, player?: SocialPlayer) {
   if (!player?.role) {
+    if (game === 'undercover') {
+      return '你只知道自己的词。描述时不要直接说出底词，同时观察谁的描述和大家不太一样。'
+    }
     return '先观察局势，等身份揭晓后按你的阵营目标行动。'
   }
 

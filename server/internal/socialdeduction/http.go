@@ -59,8 +59,9 @@ type questRequest struct {
 }
 
 type undercoverConfigRequest struct {
-	PresetID     string `json:"presetId"`
-	IncludeBlank bool   `json:"includeBlank"`
+	PresetID     string   `json:"presetId"`
+	DomainIDs    []string `json:"domainIds,omitempty"`
+	IncludeBlank bool     `json:"includeBlank"`
 }
 
 type describeRequest struct {

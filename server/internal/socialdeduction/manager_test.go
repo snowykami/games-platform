@@ -787,6 +787,122 @@ func TestUndercoverDescriptionActionsDoNotRevealSecretWord(t *testing.T) {
 	}
 }
 
+func TestUndercoverPublicRoomHidesRolesUntilFinished(t *testing.T) {
+	manager := NewManager(GameUndercover, nil)
+	room := &Room{
+		ID:    "UNDHIDE",
+		Game:  GameUndercover,
+		Phase: PhaseUndercoverDescribe,
+		Players: []*Player{
+			testPlayer("p1", "u1", "Host", RoleUndercover, AlignmentEvil),
+			testPlayer("p2", "u2", "Guest", RoleCivilian, AlignmentGood),
+			testPlayer("p3", "u3", "Guest Two", RoleCivilian, AlignmentGood),
+			testPlayer("p4", "u4", "Guest Three", RoleCivilian, AlignmentGood),
+		},
+		Undercover: UndercoverState{
+			Round:            1,
+			WordPair:         UndercoverWordPair{ID: "pair-1", CivilianWord: "苹果", UndercoverWord: "梨", Category: "水果"},
+			CurrentSpeakerID: "p1",
+			Described:        map[string]bool{},
+			Votes:            map[string]UndercoverVoteIntent{},
+		},
+	}
+
+	view := manager.publicRoomWithOptions(room, "u1", PublicRoomOptions{GodViewAvailable: true, GodView: true})
+	for _, player := range view.Players {
+		if player.Role != "" || player.Alignment != "" || player.VisibleToYou {
+			t.Fatalf("expected undercover roles to stay hidden during game, got %+v", player)
+		}
+	}
+	if view.Undercover.YourWord != "梨" {
+		t.Fatalf("expected neutral own word only, got %q", view.Undercover.YourWord)
+	}
+	if view.Undercover.WordPair.CivilianWord != "" || view.Undercover.WordPair.UndercoverWord != "" {
+		t.Fatalf("expected public word pair to hide role-specific words, got %+v", view.Undercover.WordPair)
+	}
+
+	room.Phase = PhaseFinished
+	finishedView := manager.publicRoom(room, "u1")
+	if finishedView.Players[0].Role != RoleUndercover || finishedView.Players[1].Role != RoleCivilian {
+		t.Fatalf("expected roles to reveal after finish, got %+v", finishedView.Players)
+	}
+	if finishedView.Undercover.WordPair.CivilianWord != "苹果" || finishedView.Undercover.WordPair.UndercoverWord != "梨" {
+		t.Fatalf("expected final words to reveal after finish, got %+v", finishedView.Undercover.WordPair)
+	}
+}
+
+func TestUndercoverDomainsGenerateLargeWordBank(t *testing.T) {
+	presets := undercoverPresets()
+	if len(presets) < 6 {
+		t.Fatalf("expected multiple undercover domains, got %d", len(presets))
+	}
+	if total := undercoverTotalPairCount(); total < 4000 {
+		t.Fatalf("expected at least 4000 undercover pairs, got %d", total)
+	}
+	computingPairs := undercoverPairsForDomain("computing")
+	if len(computingPairs) < undercoverPairsPerDomain {
+		t.Fatalf("expected computing domain to have %d pairs, got %d", undercoverPairsPerDomain, len(computingPairs))
+	}
+	foundTCPUDP := false
+	for _, pair := range computingPairs {
+		if pair.CivilianWord == "TCP" && pair.UndercoverWord == "UDP" {
+			foundTCPUDP = true
+			break
+		}
+	}
+	if !foundTCPUDP {
+		t.Fatalf("expected computing domain to include TCP/UDP pair")
+	}
+	for _, preset := range presets {
+		if len(preset.Pairs) > 0 {
+			t.Fatalf("lobby domain metadata should not expose full word bank, got %d pairs for %s", len(preset.Pairs), preset.ID)
+		}
+		if preset.PairCount == 0 {
+			t.Fatalf("expected pair count for domain %s", preset.ID)
+		}
+	}
+}
+
+func TestUndercoverConfigSupportsMultipleDomains(t *testing.T) {
+	manager := NewManager(GameUndercover, nil)
+	room := &Room{
+		ID:         "UNDDOMAINS",
+		Game:       GameUndercover,
+		HostUserID: "u1",
+		Phase:      PhaseLobby,
+		Players: []*Player{
+			testPlayer("p1", "u1", "Host", RoleCivilian, AlignmentGood),
+			testPlayer("p2", "u2", "Guest", RoleCivilian, AlignmentGood),
+			testPlayer("p3", "u3", "Guest Two", RoleCivilian, AlignmentGood),
+			testPlayer("p4", "u4", "Guest Three", RoleCivilian, AlignmentGood),
+		},
+		Undercover: UndercoverState{DomainIDs: []string{defaultUndercoverPresetID()}, Described: map[string]bool{}, Votes: map[string]UndercoverVoteIntent{}},
+	}
+	manager.rooms[room.ID] = room
+
+	view, err := manager.UpdateUndercoverConfig(room.ID, "u1", []string{"computing", "academic"}, true)
+	if err != nil {
+		t.Fatalf("update domains: %v", err)
+	}
+	if got := strings.Join(view.Undercover.DomainIDs, ","); got != "computing,academic" {
+		t.Fatalf("expected selected domains to persist in public view, got %q", got)
+	}
+	if !view.Undercover.IncludeBlank {
+		t.Fatalf("expected include blank to persist")
+	}
+	if _, err := manager.UpdateUndercoverConfig(room.ID, "u1", []string{"unknown"}, false); err == nil || err.Error() != "invalid_undercover_domain" {
+		t.Fatalf("expected invalid domain error, got %v", err)
+	}
+
+	startUndercover(room)
+	if got := strings.Join(room.Undercover.DomainIDs, ","); got != "computing,academic" {
+		t.Fatalf("expected selected domains to survive start, got %q", got)
+	}
+	if room.Undercover.WordPair.CivilianWord == "" || room.Undercover.WordPair.UndercoverWord == "" {
+		t.Fatalf("expected selected domains to produce a word pair, got %+v", room.Undercover.WordPair)
+	}
+}
+
 func TestUndercoverLLMDescriptionRejectsUnsafeSpeech(t *testing.T) {
 	provider := &fakeDecisionProvider{
 		enabled: true,
@@ -1538,6 +1654,7 @@ func TestUndercoverAIContextUsesSeatAliasesAndMapsVoteBack(t *testing.T) {
 		"userId",
 		"connected",
 		"aiProfile",
+		"yourRole",
 	})
 	if strings.Contains(string(payload), `"role":"undercover"`) || strings.Contains(string(payload), `"role":"blank"`) {
 		t.Fatalf("undercover context leaked other hidden roles: %s", string(payload))
@@ -1732,6 +1849,19 @@ func TestUndercoverVoteRequiresConfirmationAndAllowsChanges(t *testing.T) {
 
 	if _, err := manager.UndercoverVote(room.ID, "u1", "p3", true); err != nil {
 		t.Fatalf("confirm vote: %v", err)
+	}
+	actionCountAfterConfirm := len(room.RecentActions)
+	if _, err := manager.UndercoverVote(room.ID, "u1", "p3", true); err != nil {
+		t.Fatalf("duplicate confirm should be idempotent: %v", err)
+	}
+	if len(room.RecentActions) != actionCountAfterConfirm {
+		t.Fatalf("duplicate confirm should not record another vote action")
+	}
+	if _, err := manager.UndercoverVote(room.ID, "u1", "p2", false); err == nil || err.Error() != "vote_already_confirmed" {
+		t.Fatalf("expected confirmed voter cannot change selection, got %v", err)
+	}
+	if vote := room.Undercover.Votes["p1"]; vote.TargetID != "p3" || !vote.Confirmed {
+		t.Fatalf("expected confirmed vote to stay locked, got %+v", vote)
 	}
 	if _, err := manager.UndercoverVote(room.ID, "u2", "p3", true); err != nil {
 		t.Fatalf("second vote: %v", err)

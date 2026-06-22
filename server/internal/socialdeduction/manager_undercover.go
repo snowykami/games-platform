@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-func (m *Manager) UpdateUndercoverConfig(roomID string, actorID string, presetID string, includeBlank bool) (PublicRoom, error) {
+func (m *Manager) UpdateUndercoverConfig(roomID string, actorID string, domainIDs []string, includeBlank bool) (PublicRoom, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -22,13 +22,23 @@ func (m *Manager) UpdateUndercoverConfig(roomID string, actorID string, presetID
 	if room.Phase != PhaseLobby {
 		return PublicRoom{}, errors.New("undercover_config_only_lobby")
 	}
-	if !undercoverPresetExists(presetID) {
-		return PublicRoom{}, errors.New("invalid_undercover_preset")
+	if len(domainIDs) == 0 {
+		domainIDs = []string{defaultUndercoverPresetID()}
 	}
-	room.Undercover.PresetID = presetID
+	for _, domainID := range domainIDs {
+		if !undercoverDomainExists(domainID) {
+			return PublicRoom{}, errors.New("invalid_undercover_domain")
+		}
+	}
+	normalizedDomainIDs := normalizeUndercoverDomainIDs(domainIDs)
+	if len(normalizedDomainIDs) == 0 {
+		return PublicRoom{}, errors.New("invalid_undercover_domain")
+	}
+	room.Undercover.PresetID = normalizedDomainIDs[0]
+	room.Undercover.DomainIDs = normalizedDomainIDs
 	room.Undercover.IncludeBlank = includeBlank
 	room.Undercover.Presets = undercoverPresets()
-	room.Log = append(room.Log, createLog(fmt.Sprintf("房主选择了题库：%s。", undercoverPresetName(presetID))))
+	room.Log = append(room.Log, createLog(fmt.Sprintf("房主选择了领域：%s。", undercoverDomainNames(normalizedDomainIDs))))
 	touchRule(room)
 	return m.publicRoom(room, actorID), nil
 }
@@ -67,6 +77,12 @@ func (m *Manager) UndercoverVote(roomID string, actorID string, targetID string,
 		return PublicRoom{}, errors.New("invalid_target")
 	}
 	previous := room.Undercover.Votes[player.ID]
+	if previous.Confirmed {
+		if previous.TargetID == target.ID && confirmed {
+			return m.publicRoom(room, actorID), nil
+		}
+		return PublicRoom{}, errors.New("vote_already_confirmed")
+	}
 	room.Undercover.Votes[player.ID] = UndercoverVoteIntent{TargetID: target.ID, Confirmed: confirmed}
 	if confirmed {
 		recordAction(room, PublicAction{Type: "undercover_vote", ActorID: player.ID, ActorName: player.Name, TargetID: target.ID, Message: fmt.Sprintf("%s 已确认投票。", player.Name)})

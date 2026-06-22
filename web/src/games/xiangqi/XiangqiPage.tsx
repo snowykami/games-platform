@@ -145,8 +145,8 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
           </div>
         </header>
 
-        <section className="grid min-h-0 gap-3 overflow-hidden xl:grid-cols-[minmax(0,800px)_340px]">
-          <div className="grid min-h-0 place-items-center overflow-hidden rounded-lg border border-[#fff8e8]/18 bg-[radial-gradient(circle_at_20%_12%,rgba(207,48,39,0.18),transparent_30%),linear-gradient(145deg,#31423a,#171612)] p-2 shadow-[0_26px_80px_rgba(0,0,0,0.34)] sm:p-4">
+        <section className="grid min-h-0 min-w-0 gap-3 overflow-hidden xl:grid-cols-[minmax(0,800px)_340px]">
+          <div className="grid min-h-0 min-w-0 place-items-center overflow-hidden rounded-lg border border-[#fff8e8]/18 bg-[radial-gradient(circle_at_20%_12%,rgba(207,48,39,0.18),transparent_30%),linear-gradient(145deg,#31423a,#171612)] p-3 shadow-[0_26px_80px_rgba(0,0,0,0.34)] sm:p-4">
             <XiangqiBoard
               checkBanner={checkBanner}
               displayFiles={displayFiles}
@@ -161,7 +161,7 @@ export function XiangqiPage({ roomId }: { roomId: string }) {
             />
           </div>
 
-          <aside className="grid min-h-0 gap-3 overflow-hidden xl:grid-rows-[auto_auto_minmax(0,1fr)]">
+          <aside className="grid min-h-0 min-w-0 gap-3 overflow-hidden xl:grid-rows-[auto_auto_minmax(0,1fr)]">
             <section className="min-h-0 rounded-lg border border-[#fff8e8]/18 bg-[#10100d]/70 p-3 shadow-[0_18px_46px_rgba(0,0,0,0.24)]">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -285,7 +285,7 @@ function XiangqiBoard({
   onPointClick: (position: XiangqiPosition) => void
 }) {
   return (
-    <div className="relative aspect-[9/10] h-full max-h-full w-auto max-w-full rounded-lg border-4 border-[#5c321f] bg-[#d8a85e] shadow-[inset_0_0_0_2px_rgba(255,248,232,0.28),inset_0_0_70px_rgba(92,50,31,0.38)]">
+    <div className="relative aspect-[9/10] w-full max-w-[min(100%,78svh)] rounded-lg border-4 border-[#5c321f] bg-[#d8a85e] shadow-[inset_0_0_0_2px_rgba(255,248,232,0.28),inset_0_0_70px_rgba(92,50,31,0.38)]">
       <svg aria-hidden="true" className="absolute inset-[5%] size-[90%] overflow-visible" preserveAspectRatio="none" viewBox="0 0 8 9">
         {BOARD_RANKS.map(rank => <line key={`rank-${rank}`} stroke="#5c321f" strokeWidth="0.035" x1="0" x2="8" y1={rank} y2={rank} />)}
         {[0, 8].map(file => <line key={`edge-${file}`} stroke="#5c321f" strokeWidth="0.035" x1={file} x2={file} y1="0" y2="9" />)}

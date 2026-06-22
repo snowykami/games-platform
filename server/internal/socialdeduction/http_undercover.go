@@ -13,7 +13,7 @@ func (h *Handler) updateUndercoverConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.mutateRoom(w, r, func(roomID string, userID string) (PublicRoom, error) {
-		return h.manager.UpdateUndercoverConfig(roomID, userID, request.PresetID, request.IncludeBlank)
+		return h.manager.UpdateUndercoverConfig(roomID, userID, request.DomainIDs, request.IncludeBlank)
 	})
 }
 
