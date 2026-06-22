@@ -78,24 +78,26 @@ export function WerewolfActionPanel({
         <p className="text-sm leading-6 text-[#fff8e8]/76">{nightSubmitted ? t('werewolf.actionSubmitted') : canAct ? t('werewolf.chooseNightTarget') : t('werewolf.noNightAction')}</p>
         {nightSubmitted && <SubmittedNotice config={config} label={t('werewolf.actionSubmitted')} />}
         {you.role === 'werewolf' && (
-          <div className="grid gap-2 rounded-lg border border-white/12 bg-black/18 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-black text-[#fff8e8]">{t('werewolf.wolfChat')}</h3>
-              <span className="text-xs font-black text-[#fff8e8]/58">{t('werewolf.wolfChoices')}</span>
+          <div className="grid min-w-0 gap-2 overflow-hidden rounded-lg border border-white/12 bg-black/18 p-3">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+              <h3 className="min-w-0 truncate text-sm font-black text-[#fff8e8]">{t('werewolf.wolfChat')}</h3>
+              <span className="shrink-0 text-xs font-black text-[#fff8e8]/58">{t('werewolf.wolfChoices')}</span>
             </div>
-            <div className="grid gap-1.5">
+            <div className="grid min-w-0 gap-1.5">
               {room.players.filter(player => player.alive && player.role === 'werewolf').map(player => (
-                <div key={player.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-black/22 px-2 py-1.5 text-xs font-black text-[#fff8e8]/76">
-                  <PlayerRefLabel player={player} room={room} />
-                  <span>{werewolfChoiceLabel(room, room.werewolf.wolfNightActions?.[player.id], t('werewolf.skipWolfKill'), t('werewolf.wolfChoicePending'))}</span>
+                <div key={player.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-black/22 px-2 py-1.5 text-xs font-black text-[#fff8e8]/76">
+                  <span className="min-w-0 overflow-hidden">
+                    <PlayerRefLabel player={player} room={room} />
+                  </span>
+                  <span className="max-w-28 truncate text-right" title={werewolfChoiceLabel(room, room.werewolf.wolfNightActions?.[player.id], t('werewolf.skipWolfKill'), t('werewolf.wolfChoicePending'))}>{werewolfChoiceLabel(room, room.werewolf.wolfNightActions?.[player.id], t('werewolf.skipWolfKill'), t('werewolf.wolfChoicePending'))}</span>
                 </div>
               ))}
             </div>
-            <div className="grid max-h-32 gap-1.5 overflow-y-auto pr-1">
+            <div className="grid max-h-32 min-w-0 gap-1.5 overflow-y-auto overflow-x-hidden pr-1">
               {(room.werewolf.wolfSpeeches ?? []).map((speech) => {
                 const speaker = room.players.find(player => player.id === speech.playerId)
                 return (
-                  <p key={speech.id} className="rounded-md bg-black/24 px-2 py-1.5 text-xs font-bold leading-5 text-[#fff8e8]/76">
+                  <p key={speech.id} className="min-w-0 break-words rounded-md bg-black/24 px-2 py-1.5 text-xs font-bold leading-5 text-[#fff8e8]/76">
                     {speaker ? <PlayerRefLabel player={speaker} room={room} /> : speech.playerName}
                     <span className="mx-1 text-[#fff8e8]/45">:</span>
                     <span>{speech.text}</span>
@@ -103,9 +105,9 @@ export function WerewolfActionPanel({
                 )
               })}
             </div>
-            <div className="flex gap-2">
+            <div className="flex min-w-0 gap-2">
               <textarea
-                className="min-h-11 flex-1 resize-none rounded-lg border border-white/12 bg-black/22 px-3 py-2 text-sm font-bold text-[#fff8e8] outline-none placeholder:text-[#fff8e8]/35 focus:border-white/28"
+                className="min-h-11 min-w-0 flex-1 resize-none rounded-lg border border-white/12 bg-black/22 px-3 py-2 text-sm font-bold text-[#fff8e8] outline-none placeholder:text-[#fff8e8]/35 focus:border-white/28"
                 maxLength={120}
                 placeholder={t('werewolf.wolfChatPlaceholder')}
                 value={wolfMessage}
@@ -117,7 +119,7 @@ export function WerewolfActionPanel({
                   }
                 }}
               />
-              <button className={socialButton(config, true)} disabled={!wolfMessage.trim() || pending.isPending('wolf-speech')} type="button" onClick={submitWolfMessage}>
+              <button className={cn(socialButton(config, true), 'shrink-0 px-3')} disabled={!wolfMessage.trim() || pending.isPending('wolf-speech')} type="button" onClick={submitWolfMessage}>
                 <Send className="size-4" />
                 <span className="sr-only">{pending.isPending('wolf-speech') ? t('common.syncing') : t('common.send')}</span>
               </button>

@@ -25,7 +25,7 @@ export function ChoiceButton({
 }) {
   return (
     <button
-      className={cn(socialButton(config), selected && 'ring-2 ring-[#fff8e8] ring-offset-2 ring-offset-black/40')}
+      className={cn(socialButton(config), 'w-full min-w-0 flex-wrap justify-start overflow-hidden text-left', selected && 'ring-2 ring-[#fff8e8] ring-offset-2 ring-offset-black/40')}
       disabled={disabled}
       type="button"
       onClick={onClick}
@@ -54,8 +54,8 @@ export function ConfirmChoiceButton({
   const isSubmitting = pending.isPending('confirm')
 
   return (
-    <div className="mt-1 grid gap-2 rounded-lg border border-white/12 bg-black/18 p-2">
-      <p className="flex min-h-5 flex-wrap items-center gap-1.5 text-xs font-black text-[#fff8e8]/65">
+    <div className="mt-1 grid min-w-0 gap-2 overflow-hidden rounded-lg border border-white/12 bg-black/18 p-2">
+      <p className="flex min-h-5 min-w-0 flex-wrap items-center gap-1.5 text-xs font-black text-[#fff8e8]/65">
         {selectedLabel
           ? (
               <>
