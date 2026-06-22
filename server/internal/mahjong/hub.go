@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/snowykami/games-platform/server/internal/gameactor"
+	"github.com/snowykami/games-platform/server/internal/wsx"
 )
 
 type wsMessage struct {
@@ -21,7 +22,7 @@ const websocketWriteTimeout = 2 * time.Second
 type Subscriber struct {
 	roomID string
 	userID string
-	conn   *websocket.Conn
+	client *wsx.Client
 }
 
 type Hub struct {
@@ -40,23 +41,11 @@ func NewHub(manager *Manager) *Hub {
 		620*time.Millisecond,
 		900*time.Millisecond,
 		func(roomID string) (gameactor.AIActionResult, error) {
-			var room PublicRoom
-			shouldContinue := false
-			err := manager.RunRoomCommand(context.Background(), roomID, gameactor.EventAIIntentSubmitted, gameactor.LaneRule, func() error {
-				var err error
-				room, shouldContinue, err = manager.RunAIAction(roomID)
-				return err
-			})
+			room, shouldContinue, err := manager.RunAIAction(roomID)
 			return gameactor.AIActionResult{RoomID: room.ID, Continue: shouldContinue}, err
 		},
 		func(roomID string) (gameactor.AIOptionalSpeechResult, error) {
-			var room PublicRoom
-			changed := false
-			err := manager.RunRoomCommand(context.Background(), roomID, gameactor.EventPlayerSpeech, gameactor.LaneSpeech, func() error {
-				var err error
-				room, changed, err = manager.RunAIOptionalSpeech(roomID)
-				return err
-			})
+			room, changed, err := manager.RunAIOptionalSpeech(roomID)
 			return gameactor.AIOptionalSpeechResult{RoomID: room.ID, Changed: changed}, err
 		},
 		hub.Broadcast,
@@ -65,7 +54,8 @@ func NewHub(manager *Manager) *Hub {
 }
 
 func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, conn *websocket.Conn) {
-	sub := &Subscriber{roomID: roomID, userID: userID, conn: conn}
+	client := wsx.NewClient(ctx, conn, websocketWriteTimeout, 32)
+	sub := &Subscriber{roomID: roomID, userID: userID, client: client}
 
 	h.mu.Lock()
 	h.subscribers[sub] = struct{}{}
@@ -81,7 +71,7 @@ func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, conn 
 			return nil
 		})
 		h.Broadcast(roomID)
-		conn.Close(websocket.StatusNormalClosure, "bye")
+		sub.client.Close(websocket.StatusNormalClosure, "bye")
 	}()
 
 	for {
@@ -92,16 +82,16 @@ func (h *Hub) Subscribe(ctx context.Context, roomID string, userID string, conn 
 
 		var message wsMessage
 		if err := json.Unmarshal(data, &message); err != nil {
-			writeWSError(ctx, conn, "invalid message")
+			writeWSError(sub.client, "invalid message")
 			continue
 		}
 		if message.Type == "ping" {
-			writeWSPong(ctx, conn, message.Payload)
+			writeWSPong(sub.client, message.Payload)
 			continue
 		}
 
 		if err := h.handleMessage(message, roomID, userID); err != nil {
-			writeWSError(ctx, conn, err.Error())
+			writeWSError(sub.client, err.Error())
 			continue
 		}
 		h.Broadcast(roomID)
@@ -125,13 +115,10 @@ func (h *Hub) Broadcast(roomID string) {
 		if err != nil {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), websocketWriteTimeout)
-		err = sub.conn.Write(ctx, websocket.MessageText, mustMarshal(map[string]any{
+		if !sub.client.SendJSON(map[string]any{
 			"type": "room.state",
 			"room": room,
-		}))
-		cancel()
-		if err != nil {
+		}) {
 			h.dropSubscriber(sub)
 		}
 	}
@@ -141,7 +128,7 @@ func (h *Hub) dropSubscriber(sub *Subscriber) {
 	h.mu.Lock()
 	delete(h.subscribers, sub)
 	h.mu.Unlock()
-	_ = sub.conn.Close(websocket.StatusPolicyViolation, "write failed")
+	sub.client.Close(websocket.StatusPolicyViolation, "write failed")
 }
 
 func (h *Hub) CloseUser(roomID string, userID string) {
@@ -159,7 +146,7 @@ func (h *Hub) CloseUser(roomID string, userID string) {
 	h.mu.Unlock()
 
 	for _, sub := range subscribers {
-		_ = sub.conn.Close(websocket.StatusNormalClosure, "removed from room")
+		sub.client.Close(websocket.StatusNormalClosure, "removed from room")
 	}
 }
 
@@ -274,31 +261,10 @@ func (h *Hub) ScheduleAIOptionalSpeech(roomID string) {
 	h.aiScheduler.ScheduleSpeech(roomID)
 }
 
-func writeWSError(ctx context.Context, conn *websocket.Conn, message string) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	_ = conn.Write(ctx, websocket.MessageText, mustMarshal(map[string]string{
-		"type":  "error",
-		"error": message,
-	}))
+func writeWSError(client *wsx.Client, message string) {
+	client.SendError(message)
 }
 
-func writeWSPong(ctx context.Context, conn *websocket.Conn, payload json.RawMessage) {
-	if len(payload) == 0 {
-		payload = mustMarshal(map[string]any{})
-	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	_ = conn.Write(ctx, websocket.MessageText, mustMarshal(map[string]any{
-		"type":    "pong",
-		"payload": payload,
-	}))
-}
-
-func mustMarshal(value any) []byte {
-	data, err := json.Marshal(value)
-	if err != nil {
-		panic(err)
-	}
-	return data
+func writeWSPong(client *wsx.Client, payload json.RawMessage) {
+	client.SendPong(payload)
 }

@@ -611,6 +611,33 @@ func TestWerewolfOptionalSpeechStateIncludesNightResultAndDeaths(t *testing.T) {
 	}
 }
 
+func TestWerewolfAIStateIncludesRevealedIdiotPublicFact(t *testing.T) {
+	room := testWerewolfRoom("WWFIDIOTFACT", PhaseWerewolfNight, []*Player{
+		testPlayer("idiot", "u_idiot", "Idiot Player", RoleIdiot, AlignmentGood),
+		testAIPlayer("witch", "Witch Bot", RoleWitch, AlignmentGood),
+		testPlayer("wolf", "u_wolf", "Wolf", RoleWerewolf, AlignmentEvil),
+	})
+	room.Werewolf.RevealedIdiots = map[string]bool{"idiot": true}
+
+	state := werewolfAIState(room, room.Players[1])
+	facts, ok := state["publicFacts"].([]string)
+	if !ok {
+		t.Fatalf("expected publicFacts in werewolf ai state, got %+v", state["publicFacts"])
+	}
+	joinedFacts := strings.Join(facts, "\n")
+	if !strings.Contains(joinedFacts, "座位 1") || !strings.Contains(joinedFacts, "已公开翻牌为白痴") || !strings.Contains(joinedFacts, "不是自爆或伪装") {
+		t.Fatalf("expected public facts to explain revealed idiot rule, got %q", joinedFacts)
+	}
+
+	players, ok := state["players"].([]map[string]any)
+	if !ok || len(players) == 0 {
+		t.Fatalf("expected players in werewolf ai state, got %+v", state["players"])
+	}
+	if players[0]["role"] != RoleIdiot || players[0]["alignment"] != AlignmentGood {
+		t.Fatalf("expected revealed idiot role to be visible, got %+v", players[0])
+	}
+}
+
 func TestWerewolfLLMInputDoesNotExposeAIOrHumanIDPrefixes(t *testing.T) {
 	provider := &fakeDecisionProvider{
 		enabled: true,

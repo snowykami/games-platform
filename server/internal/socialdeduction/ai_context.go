@@ -34,6 +34,7 @@ func werewolfAIState(room *Room, actor *Player) map[string]any {
 		"players":         players,
 		"visibleAllies":   visibleAllies,
 		"lastNight":       aliasPlayerNamesInText(room, room.Werewolf.LastNight),
+		"publicFacts":     werewolfPublicFacts(room),
 		"votes":           aliasWerewolfVoteIntents(room, room.Werewolf.Votes),
 		"recentSpeech":    aiSpeechForWerewolf(room),
 		"revealedIdiots":  aliasBoolMap(room, room.Werewolf.RevealedIdiots),

@@ -93,6 +93,9 @@ func roleVisible(room *Room, viewer *Player, target *Player) bool {
 		return true
 	}
 	if room.Game == GameWerewolf {
+		if room.Werewolf.RevealedIdiots[target.ID] {
+			return true
+		}
 		return viewer.Role == RoleWerewolf && target.Role == RoleWerewolf
 	}
 	if room.Game == GameAvalon {
