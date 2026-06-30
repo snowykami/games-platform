@@ -23,7 +23,7 @@
   - Go 使用 `embed` 将前端静态资源打入后端二进制。
   - Docker 镜像只运行 Go 后端，默认端口 `8901`。
 
-## 技术栈
+## 项目技术栈
 
 - 前端：React 19、Vite、TypeScript、Tailwind CSS、shadcn 风格本地组件、TanStack Query、Zod、Antfu ESLint。
 - 后端：Go、chi、coder/websocket、go-oidc、oauth2、godotenv。
